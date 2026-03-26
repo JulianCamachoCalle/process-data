@@ -16,7 +16,54 @@ interface GapiClient {
       get: (params: {
         spreadsheetId: string
         includeGridData?: boolean
-      }) => Promise<{ result: { properties?: { title?: string } } }>
+        fields?: string
+      }) => Promise<{
+        result: {
+          properties?: { title?: string }
+          sheets?: Array<{ properties?: { title?: string; sheetId?: number } }>
+        }
+      }>
+      batchUpdate: (params: {
+        spreadsheetId: string
+        resource: {
+          requests: Array<{
+            deleteDimension?: {
+              range: {
+                sheetId: number
+                dimension: 'ROWS' | 'COLUMNS'
+                startIndex: number
+                endIndex: number
+              }
+            }
+          }>
+        }
+      }) => Promise<unknown>
+      values: {
+        get: (params: {
+          spreadsheetId: string
+          range: string
+          majorDimension?: 'ROWS' | 'COLUMNS'
+          valueRenderOption?: 'FORMATTED_VALUE' | 'UNFORMATTED_VALUE' | 'FORMULA'
+          dateTimeRenderOption?: 'SERIAL_NUMBER' | 'FORMATTED_STRING'
+        }) => Promise<{ result: { values?: string[][] } }>
+        append: (params: {
+          spreadsheetId: string
+          range: string
+          valueInputOption: 'RAW' | 'USER_ENTERED'
+          insertDataOption?: 'OVERWRITE' | 'INSERT_ROWS'
+          resource: {
+            values: string[][]
+          }
+        }) => Promise<unknown>
+        update: (params: {
+          spreadsheetId: string
+          range: string
+          valueInputOption: 'RAW' | 'USER_ENTERED'
+          resource: {
+            values: string[][]
+          }
+        }) => Promise<unknown>
+      }
     }
   }
 }

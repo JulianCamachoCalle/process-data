@@ -1,5 +1,5 @@
 import { useApp } from '../../context/AppContext'
-import { ArrowRight, LockKeyhole, Sheet, ShieldCheck } from 'lucide-react'
+import { ArrowRight, Sheet, ShieldCheck } from 'lucide-react'
 
 export default function LoginPage() {
   const { signIn, isLoading, isAuthenticating, error } = useApp()
