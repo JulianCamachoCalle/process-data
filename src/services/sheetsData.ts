@@ -56,6 +56,30 @@ function normalizeRowValues(values: string[] | undefined): string[] {
   return values.map((value) => String(value ?? '').trim())
 }
 
+function findHeaderRowIndex(values: string[][]): number {
+  if (values.length === 0) return 0
+
+  const probeLimit = Math.min(values.length, 20)
+  let bestIndex = 0
+  let bestScore = -1
+
+  for (let index = 0; index < probeLimit; index += 1) {
+    const row = normalizeRowValues(values[index])
+    const nonEmptyCount = row.filter((cell) => cell.length > 0).length
+    if (nonEmptyCount === 0) continue
+
+    // Prefer rows that look like tabular headers (many filled cells).
+    const score = nonEmptyCount
+
+    if (score > bestScore) {
+      bestScore = score
+      bestIndex = index
+    }
+  }
+
+  return bestScore > 0 ? bestIndex : 0
+}
+
 function ensureSheetsClient(): void {
   if (!window.gapi?.client?.sheets?.spreadsheets) {
     throw new Error('Google Sheets API no esta disponible en gapi.client.')
@@ -173,16 +197,17 @@ export async function getSheetData(
     return emptyData
   }
 
-  const [headerRow, ...dataRows] = values
-  const headers = normalizeRowValues(headerRow)
+  const normalizedValues = values.map((row) => normalizeRowValues(row))
+  const headerRowIndex = findHeaderRowIndex(normalizedValues)
+  const headers = normalizedValues[headerRowIndex] || []
+  const dataRows = normalizedValues.slice(headerRowIndex + 1)
   const rows: string[][] = []
   const rowNumbers: number[] = []
 
   dataRows.forEach((row, index) => {
-    const normalized = normalizeRowValues(row)
-    if (normalized.some((cell) => cell.length > 0)) {
-      rows.push(normalized)
-      rowNumbers.push(index + 2)
+    if (row.some((cell) => cell.length > 0)) {
+      rows.push(row)
+      rowNumbers.push(headerRowIndex + index + 2)
     }
   })
 

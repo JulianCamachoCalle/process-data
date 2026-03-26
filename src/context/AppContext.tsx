@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react'
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import { GOOGLE_CONFIG } from '../config/google'
 import {
@@ -46,6 +46,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [isAuthenticating, setIsAuthenticating] = useState(false)
   const [spreadsheetTitle, setSpreadsheetTitle] = useState('')
   const [error, setError] = useState<string | null>(null)
+  const silentAuthAttemptRef = useRef(false)
 
   useEffect(() => {
     let cancelled = false
@@ -67,9 +68,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
         initTokenClient(
           async (tokenResponse) => {
+            const wasSilentAttempt = silentAuthAttemptRef.current
+            silentAuthAttemptRef.current = false
+
             if (tokenResponse.error) {
-              setError('No fue posible autenticar con Google.')
+              if (!wasSilentAttempt) {
+                setError('No fue posible autenticar con Google.')
+              }
               setIsAuthenticating(false)
+              setIsLoading(false)
               return
             }
 
@@ -99,8 +106,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
           },
           (tokenError) => {
             console.error('Token client error:', tokenError)
+            const wasSilentAttempt = silentAuthAttemptRef.current
+            silentAuthAttemptRef.current = false
+
             if (!cancelled) {
-              setError('Autenticacion cancelada o fallida.')
+              if (!wasSilentAttempt) {
+                setError('Autenticacion cancelada o fallida.')
+              }
               setIsAuthenticating(false)
               setIsLoading(false)
             }
@@ -108,7 +120,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
         )
 
         if (!cancelled) {
-          setIsLoading(false)
+          setIsAuthenticating(true)
+          silentAuthAttemptRef.current = true
+          try {
+            requestAccessToken('')
+          } catch {
+            silentAuthAttemptRef.current = false
+            setIsAuthenticating(false)
+            setIsLoading(false)
+          }
         }
       } catch (setupError) {
         console.error('Bootstrap auth error:', setupError)
@@ -130,6 +150,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const signIn = useCallback(() => {
     setError(null)
     setIsAuthenticating(true)
+    silentAuthAttemptRef.current = false
 
     try {
       requestAccessToken('consent')
@@ -141,6 +162,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const signOut = useCallback(() => {
+    silentAuthAttemptRef.current = false
     revokeToken()
     setUser(null)
     setIsSignedIn(false)
