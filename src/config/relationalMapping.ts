@@ -16,18 +16,35 @@ function normalizeKey(value: string): string {
 
 const TABLE_RELATION_MAP: Record<string, FieldRelationRule[]> = {
     [normalizeKey('LEADS GANADOS')]: [
-        {sourceHeaders: ['IdFullFilment'], targetTable: 'FULLFILLMENT', targetValueHeaders: ['IdFullFilment', 'Opcion']},
+        { sourceHeaders: ['IdFullFilment', 'Fulfillment', 'Fullfilment'], targetTable: 'FULLFILMENT', targetValueHeaders: ['IdFullFilment', 'Opcion', '¿Es FullFilment?'] },
     ],
     [normalizeKey('ENVIOS')]: [
         { sourceHeaders: ['IdTienda'], targetTable: 'TIENDAS', targetValueHeaders: ['IdTienda', 'Nombre'] },
+            {
+                sourceHeaders: ['IdVendedor', 'Vendedor ID', 'Vendedor'],
+                targetTable: 'VENDEDORES',
+                targetValueHeaders: ['Nombre vendedor', 'Nombre', 'Vendedor'],
+                targetIdHeaders: ['IdVendedor'],
+            },
         { sourceHeaders: ['IdDestino'], targetTable: 'DESTINOS', targetValueHeaders: ['IdDestino', 'Destinos'] },
         { sourceHeaders: ['IdResultado'], targetTable: 'RESULTADOS', targetValueHeaders: ['IdResultado', 'Resultado'] },
         { sourceHeaders: ['IdTipoPunto'], targetTable: 'TIPO DE PUNTO', targetValueHeaders: ['IdTipoPunto', 'Tipo Punto'] },
+        { sourceHeaders: ['¿Es tienda Fulfillment?', 'Tienda fullfilment', 'Es tienda fulfillment', 'Es tienda fullfilment', 'IdFullFilment'], targetTable: 'FULLFILMENT', targetValueHeaders: ['IdFullFilment', 'Opcion', '¿Es FullFilment?'] },
     ],
     [normalizeKey('RECOJOS')]: [
         { sourceHeaders: ['IdTienda'], targetTable: 'TIENDAS', targetValueHeaders: ['IdTienda', 'Nombre'] },
-        { sourceHeaders: ['IdTipoRecojo'], targetTable: 'TIPO RECOJO', targetValueHeaders: ['IdTipoRecojo', 'Descripcion'] },
-        { sourceHeaders: ['IdVendedor'], targetTable: 'VENDEDORES', targetValueHeaders: ['IdVendedor', 'Nombre'] },
+        {
+            sourceHeaders: ['IdTipoRecojo'],    
+            targetTable: 'TIPO RECOJO',
+            targetValueHeaders: ['Tipo de Recojo'],
+            targetIdHeaders: ['IdTipoRecojo'],
+        },
+        {
+            sourceHeaders: ['IdVendedor'],
+            targetTable: 'VENDEDORES',
+            targetValueHeaders: ['Nombre'],
+            targetIdHeaders: ['IdVendedor'],
+        },
     ],
     [normalizeKey('TARIFAS')]: [
         { sourceHeaders: ['IdDestino'], targetTable: 'DESTINOS', targetValueHeaders: ['IdDestino', 'Destinos'] },

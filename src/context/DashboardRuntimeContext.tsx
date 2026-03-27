@@ -27,6 +27,11 @@ const PRESET_DAYS: Record<GlobalRangePreset, number> = {
   '90d': 90,
 }
 
+function normalizeMutationRowValues(rowValues: string[], columnCount: number): string[] {
+  const safeCount = Math.max(1, Math.floor(columnCount))
+  return Array.from({ length: safeCount }, (_, index) => String(rowValues[index] ?? '').trim())
+}
+
 export function DashboardRuntimeProvider({ children }: { children: ReactNode }) {
   const [availableSheetNames, setAvailableSheetNames] = useState<string[]>([])
   const [sheetCache, setSheetCache] = useState<Record<string, RawSheetData>>({})
@@ -59,6 +64,34 @@ export function DashboardRuntimeProvider({ children }: { children: ReactNode }) 
       return sheetCache[key] || null
     },
     [sheetCache],
+  )
+
+  const replaceSheetInCache = useCallback((sheetName: string, updater: (current: RawSheetData) => RawSheetData) => {
+    setSheetCache((prev) => {
+      const key = normalizeKey(sheetName)
+      const current = prev[key]
+
+      if (!current) return prev
+
+      return {
+        ...prev,
+        [key]: updater(current),
+      }
+    })
+  }, [])
+
+  const refreshSheetInBackground = useCallback(
+    (sheetName: string) => {
+      void (async () => {
+        try {
+          const refreshed = await getSheetData(sheetName, { force: true })
+          mergeSheets([refreshed])
+        } catch (refreshError) {
+          console.warn('Dashboard sheet refresh after CRUD mutation failed:', refreshError)
+        }
+      })()
+    },
+    [mergeSheets],
   )
 
   useEffect(() => {
@@ -149,6 +182,9 @@ export function DashboardRuntimeProvider({ children }: { children: ReactNode }) 
       } catch (mutationError) {
         console.error('Dashboard CRUD mutation error:', mutationError)
         setError('No se pudo completar la operacion CRUD en Google Sheets.')
+        throw mutationError instanceof Error
+          ? mutationError
+          : new Error('No se pudo completar la operacion CRUD en Google Sheets.')
       } finally {
         setBusyMutation(false)
       }
@@ -160,33 +196,88 @@ export function DashboardRuntimeProvider({ children }: { children: ReactNode }) 
     async (sheetName: string, rowValues: string[], columnCount: number) => {
       await executeMutation(async () => {
         await appendSheetRow(sheetName, rowValues, columnCount)
-        const refreshed = await getSheetData(sheetName, { force: true })
-        mergeSheets([refreshed])
+
+        replaceSheetInCache(sheetName, (current) => {
+          const safeColumnCount = Math.max(current.headers.length, columnCount, rowValues.length)
+          const normalizedValues = normalizeMutationRowValues(rowValues, safeColumnCount)
+          const maxExistingRowNumber = current.rowNumbers.reduce((max, rowNumber) => Math.max(max, rowNumber), 1)
+
+          return {
+            ...current,
+            rows: [...current.rows, normalizedValues],
+            rowNumbers: [...current.rowNumbers, maxExistingRowNumber + 1],
+            fetchedAt: Date.now(),
+          }
+        })
+
+        refreshSheetInBackground(sheetName)
       })
     },
-    [executeMutation, mergeSheets],
+    [executeMutation, replaceSheetInCache, refreshSheetInBackground],
   )
 
   const updateRow = useCallback(
     async (sheetName: string, rowNumber: number, rowValues: string[], columnCount: number) => {
       await executeMutation(async () => {
         await updateSheetRow(sheetName, rowNumber, rowValues, columnCount)
-        const refreshed = await getSheetData(sheetName, { force: true })
-        mergeSheets([refreshed])
+
+        replaceSheetInCache(sheetName, (current) => {
+          const safeColumnCount = Math.max(current.headers.length, columnCount, rowValues.length)
+          const normalizedValues = normalizeMutationRowValues(rowValues, safeColumnCount)
+          const targetIndex = current.rowNumbers.findIndex((candidate) => candidate === rowNumber)
+
+          if (targetIndex < 0) {
+            return {
+              ...current,
+              fetchedAt: Date.now(),
+            }
+          }
+
+          const nextRows = [...current.rows]
+          nextRows[targetIndex] = normalizedValues
+
+          return {
+            ...current,
+            rows: nextRows,
+            fetchedAt: Date.now(),
+          }
+        })
+
+        refreshSheetInBackground(sheetName)
       })
     },
-    [executeMutation, mergeSheets],
+    [executeMutation, replaceSheetInCache, refreshSheetInBackground],
   )
 
   const deleteRow = useCallback(
     async (sheetName: string, rowNumber: number) => {
       await executeMutation(async () => {
         await deleteSheetRow(sheetName, rowNumber)
-        const refreshed = await getSheetData(sheetName, { force: true })
-        mergeSheets([refreshed])
+
+        replaceSheetInCache(sheetName, (current) => {
+          const targetIndex = current.rowNumbers.findIndex((candidate) => candidate === rowNumber)
+
+          const nextRows =
+            targetIndex >= 0
+              ? current.rows.filter((_, index) => index !== targetIndex)
+              : [...current.rows]
+
+          const nextRowNumbers = current.rowNumbers
+            .filter((candidate) => candidate !== rowNumber)
+            .map((candidate) => (candidate > rowNumber ? candidate - 1 : candidate))
+
+          return {
+            ...current,
+            rows: nextRows,
+            rowNumbers: nextRowNumbers,
+            fetchedAt: Date.now(),
+          }
+        })
+
+        refreshSheetInBackground(sheetName)
       })
     },
-    [executeMutation, mergeSheets],
+    [executeMutation, replaceSheetInCache, refreshSheetInBackground],
   )
 
   const detectedGlobalBounds = useMemo(() => {

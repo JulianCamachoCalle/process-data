@@ -44,6 +44,7 @@ const sheetDataCache = new Map<string, SheetCacheEntry>()
 export interface SpreadsheetSheetMeta {
   sheetId: number
   title: string
+  columnCount: number
 }
 
 export interface RawSheetData {
@@ -220,7 +221,9 @@ async function copyFormulaCellsBetweenRows(
     throw new Error(`No se encontro metadata para la hoja: ${sheetName}`)
   }
 
-  const safeColumnLimit = Math.max(1, Math.floor(columnCount))
+  const safeRequestedColumnLimit = Math.max(1, Math.floor(columnCount))
+  const safeSheetColumnLimit = Math.max(1, Math.floor(sheetMeta.columnCount || 0))
+  const safeColumnLimit = Math.max(safeRequestedColumnLimit, safeSheetColumnLimit)
   const uniqueFormulaColumns = [...new Set(formulaCells.map((cell) => cell.columnIndex))]
     .filter((columnIndex) => columnIndex >= 0 && columnIndex < safeColumnLimit)
 
@@ -253,6 +256,61 @@ async function copyFormulaCellsBetweenRows(
   })
 }
 
+async function copyRowFormattingBetweenRows(
+  sheetName: string,
+  sourceRowNumber: number,
+  targetRowNumber: number,
+  columnCount: number,
+): Promise<void> {
+  if (sourceRowNumber <= 1 || targetRowNumber <= 1) {
+    return
+  }
+
+  ensureSheetsClient()
+
+  if (!window.gapi?.client?.sheets?.spreadsheets?.batchUpdate) {
+    throw new Error('Google Sheets batchUpdate no esta disponible en gapi.client.')
+  }
+
+  const metadata = await getSpreadsheetSheetsMetadata()
+  const key = normalizeSheetNameKey(sheetName)
+  const sheetMeta = metadata.find((item) => normalizeSheetNameKey(item.title) === key)
+
+  if (!sheetMeta) {
+    throw new Error(`No se encontro metadata para la hoja: ${sheetName}`)
+  }
+
+  const safeColumnLimit = Math.max(1, Math.floor(columnCount))
+
+  await window.gapi.client.sheets.spreadsheets.batchUpdate({
+    spreadsheetId: GOOGLE_CONFIG.SPREADSHEET_ID,
+    resource: {
+      requests: [
+        {
+          copyPaste: {
+            source: {
+              sheetId: sheetMeta.sheetId,
+              startRowIndex: sourceRowNumber - 1,
+              endRowIndex: sourceRowNumber,
+              startColumnIndex: 0,
+              endColumnIndex: safeColumnLimit,
+            },
+            destination: {
+              sheetId: sheetMeta.sheetId,
+              startRowIndex: targetRowNumber - 1,
+              endRowIndex: targetRowNumber,
+              startColumnIndex: 0,
+              endColumnIndex: safeColumnLimit,
+            },
+            pasteType: 'PASTE_FORMAT',
+            pasteOrientation: 'NORMAL',
+          },
+        },
+      ],
+    },
+  })
+}
+
 export function clearSheetCache(sheetName?: string): void {
   if (!sheetName) {
     sheetDataCache.clear()
@@ -279,15 +337,24 @@ export async function getSpreadsheetSheetsMetadata(force = false): Promise<Sprea
 
   const response = await gapi.client.sheets.spreadsheets.get({
     spreadsheetId: GOOGLE_CONFIG.SPREADSHEET_ID,
-    fields: 'sheets.properties.sheetId,sheets.properties.title',
+    fields: 'sheets.properties.sheetId,sheets.properties.title,sheets.properties.gridProperties.columnCount',
     includeGridData: false,
   }) 
 
   const metadata = (response.result?.sheets ?? [])
-    .map((sheet) => ({
-      sheetId: sheet.properties?.sheetId ?? -1,
-      title: sheet.properties?.title || '',
-    }))
+    .map((sheet) => {
+      const properties = sheet.properties as {
+        sheetId?: number
+        title?: string
+        gridProperties?: { columnCount?: number }
+      } | undefined
+
+      return {
+        sheetId: properties?.sheetId ?? -1,
+        title: properties?.title || '',
+        columnCount: properties?.gridProperties?.columnCount ?? 0,
+      }
+    })
     .filter((item) => item.sheetId >= 0 && item.title.length > 0)
 
   if (metadata.length === 0) {
@@ -452,6 +519,16 @@ export async function appendSheetRow(
   const updatedRange = appendResponse.result?.updates?.updatedRange
   const createdRowNumber = parseRowNumberFromUpdatedRange(updatedRange)
   const preserveSheetFormulas = shouldPreserveSheetFormulas(sheetName)
+
+  if (createdRowNumber && createdRowNumber > 2) {
+    const sourceRowNumber = createdRowNumber - 1
+    await copyRowFormattingBetweenRows(
+      sheetName,
+      sourceRowNumber,
+      createdRowNumber,
+      columnCount,
+    )
+  }
 
   if (preserveSheetFormulas && createdRowNumber && createdRowNumber > 2) {
     const sourceRowNumber = createdRowNumber - 1
