@@ -1,15 +1,21 @@
 import LoginPage from './components/auth/LoginPage'
-import DashboardPage from './components/pages/DashboardPage'
-import { AppProvider, useApp } from './context/AppContext'
+import SessionLoader from './components/common/SessionLoader'
+import DashboardRouter from './components/pages/DashboardRouter'
+import { AppProvider } from './context/AppContext'
+import { useApp } from './context/useApp'
 
 function AppContent() {
-  const { isSignedIn } = useApp()
+  const { isSignedIn, isLoading } = useApp()
+
+  if (isLoading) {
+    return <SessionLoader />
+  }
 
   if (!isSignedIn) {
     return <LoginPage />
   }
 
-  return <DashboardPage />
+  return <DashboardRouter />
 }
 
 export default function App() {
