@@ -15,6 +15,7 @@ import {
   findColumnIndex,
   normalizeKey,
   parseNumeric,
+  STATUS_KEYS,
   STORE_KEYS,
   toRowRecords,
   truncateLabel,
@@ -57,7 +58,39 @@ function resolveLookupValue(rawValue: string, lookup: Map<string, string>): stri
   return mapped || trimmed
 }
 
-function isDeliveredStatusValue(rawStatus: string): boolean {
+function buildDeliveredStatusAliases(resultadosSheet: RawSheetData | null): Set<string> {
+  const aliases = new Set<string>(['1'])
+  if (!resultadosSheet || resultadosSheet.headers.length === 0 || resultadosSheet.rows.length === 0) {
+    return aliases
+  }
+
+  const idIndex = findColumnIndex(resultadosSheet.headers, ID_RESULTADO_HEADER_HINTS)
+  const statusIndex = findColumnIndex(resultadosSheet.headers, STATUS_KEYS)
+  if (idIndex < 0) return aliases
+
+  resultadosSheet.rows.forEach((row) => {
+    const rawId = (row[idIndex] || '').trim()
+    if (!rawId) return
+
+    const numericId = parseNumeric(rawId)
+    const isDeliveredId = numericId !== null
+      ? Math.round(numericId) === 1
+      : normalizeKey(rawId) === '1'
+    if (!isDeliveredId) return
+
+    aliases.add(normalizeKey(rawId))
+    if (statusIndex >= 0) {
+      const statusValue = (row[statusIndex] || '').trim()
+      if (statusValue) {
+        aliases.add(normalizeKey(statusValue))
+      }
+    }
+  })
+
+  return aliases
+}
+
+function isDeliveredStatusValue(rawStatus: string, deliveredAliases: Set<string>): boolean {
   const trimmed = (rawStatus || '').trim()
   if (!trimmed) return false
 
@@ -66,19 +99,21 @@ function isDeliveredStatusValue(rawStatus: string): boolean {
     return Math.round(numericStatus) === 1
   }
 
-  return normalizeKey(trimmed) === '1'
+  return deliveredAliases.has(normalizeKey(trimmed))
 }
 
 export default function RankingSection({
   enviosSheet,
   tiendasSheet,
   vendedoresSheet,
+  resultadosSheet,
   startDate,
   endDate,
 }: {
   enviosSheet: RawSheetData | null
   tiendasSheet: RawSheetData | null
   vendedoresSheet: RawSheetData | null
+  resultadosSheet: RawSheetData | null
   startDate: Date | null
   endDate: Date | null
 }) {
@@ -88,6 +123,7 @@ export default function RankingSection({
     }
 
     const vendedoresLookup = buildLookupById(vendedoresSheet, ID_VENDEDOR_HEADER_HINTS, VENDOR_KEYS)
+    const deliveredStatusAliases = buildDeliveredStatusAliases(resultadosSheet)
 
     const tiendasHeaders = tiendasSheet.headers
     const tiendaNombreColTiendas = findColumnIndex(tiendasHeaders, STORE_KEYS)
@@ -156,7 +192,7 @@ export default function RankingSection({
 
     enviosRecords.forEach((record) => {
       const statusRaw = (record.row[statusColEnvios] || '').trim()
-      if (!isDeliveredStatusValue(statusRaw)) return
+      if (!isDeliveredStatusValue(statusRaw, deliveredStatusAliases)) return
 
       const tiendaNombreRaw = tiendaNombreColEnvios >= 0
         ? (record.row[tiendaNombreColEnvios] || '').trim()
@@ -176,7 +212,7 @@ export default function RankingSection({
 
     return [...rankingCounter.values()]
       .sort((a, b) => b.entregados - a.entregados || a.tienda.localeCompare(b.tienda, 'es', { sensitivity: 'base' }))
-  }, [enviosSheet, tiendasSheet, vendedoresSheet, startDate, endDate])
+  }, [enviosSheet, tiendasSheet, vendedoresSheet, resultadosSheet, startDate, endDate])
 
   const filtered = useMemo(() => rankingData.slice(0, 10), [rankingData])
   const totalEntregados = useMemo(
@@ -195,7 +231,7 @@ export default function RankingSection({
     <div className="space-y-5">
       <section className="rounded-2xl border border-slate-200/80 bg-white/90 p-5 shadow-[0_14px_32px_-22px_rgba(15,23,42,0.7)] backdrop-blur">
         <h3 className="text-lg font-bold text-slate-900">Ranking x tiendas</h3>
-        <p className="mt-1 text-sm text-slate-600">Base: todas las tiendas y vendedores de TIENDAS. Conteo: ENVIOS entregados por nombre de tienda con IdResultado = 1.</p>
+        <p className="mt-1 text-sm text-slate-600">Base: todas las tiendas y vendedores de TIENDAS. Conteo: ENVIOS entregados por nombre de tienda cuando IdResultado = 1 (referenciado con RESULTADOS).</p>
 
         <div className="mt-4 grid gap-3 sm:grid-cols-3">
           <article className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2"><p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">Envios entregados</p><p className="mt-1 text-xl font-bold text-slate-900">{formatInt(totalEntregados)}</p></article>

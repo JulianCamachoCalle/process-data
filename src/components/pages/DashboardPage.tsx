@@ -409,6 +409,7 @@ export default function DashboardPage() {
         enviosSheet={getCachedSheet('ENVIOS') || getCachedSheet('DATA ENVIOS')}
         tiendasSheet={getCachedSheet('TIENDAS') || getCachedSheet('Tiendas')}
         vendedoresSheet={getCachedSheet('VENDEDORES')}
+        resultadosSheet={getCachedSheet('RESULTADOS')}
         startDate={globalRangeStart}
         endDate={globalRangeEnd}
       />
