@@ -1,43 +1,22 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
+import { AppContext } from './appContextStore'
+import type { UserProfile } from './appContextStore'
 import { GOOGLE_CONFIG } from '../config/google'
 import {
+  clearPersistedSession,
   fetchUserProfile,
   getMissingEnvVariables,
   initGapiClient,
   initTokenClient,
+  readSessionFromCookie,
   requestAccessToken,
   revokeToken,
+  saveSessionToCookie,
+  setActiveAccessToken,
   validateSpreadsheetAccess,
   waitForGoogleSdk,
 } from '../services/googleAuth'
-
-interface UserProfile {
-  name: string
-  email: string
-  imageUrl: string
-}
-
-interface AppContextType {
-  user: UserProfile | null
-  isSignedIn: boolean
-  isLoading: boolean
-  isAuthenticating: boolean
-  spreadsheetId: string
-  spreadsheetTitle: string
-  signIn: () => void
-  signOut: () => void
-  error: string | null
-  clearError: () => void
-}
-
-const AppContext = createContext<AppContextType | null>(null)
-
-export function useApp(): AppContextType {
-  const ctx = useContext(AppContext)
-  if (!ctx) throw new Error('useApp debe usarse dentro de AppProvider')
-  return ctx
-}
 
 export function AppProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<UserProfile | null>(null)
@@ -66,6 +45,57 @@ export function AppProvider({ children }: { children: ReactNode }) {
         await initGapiClient()
         if (cancelled) return
 
+        const restorePersistedSession = async (): Promise<boolean> => {
+          const persisted = readSessionFromCookie()
+          if (!persisted) {
+            return false
+          }
+
+          // Si hay una sesion persistida, intentamos validar antes de mostrar login.
+          setIsAuthenticating(true)
+          setError(null)
+
+          try {
+            setActiveAccessToken(persisted.accessToken)
+
+            const spreadsheet = await validateSpreadsheetAccess()
+            let profile = persisted.user
+
+            try {
+              profile = await fetchUserProfile()
+            } catch (profileError) {
+              console.warn('No se pudo refrescar el perfil de usuario desde Google.', profileError)
+            }
+
+            if (cancelled) return true
+
+            const safeTitle = spreadsheet.title || persisted.spreadsheetTitle
+
+            setUser(profile)
+            setSpreadsheetTitle(safeTitle)
+            setIsSignedIn(true)
+
+            saveSessionToCookie({
+              tokenResponse: {
+                access_token: persisted.accessToken,
+                expires_in: Math.max(60, Math.floor((persisted.expiresAt - Date.now()) / 1000)),
+              },
+              user: profile,
+              spreadsheetTitle: safeTitle,
+            })
+
+            return true
+          } catch (restoreError) {
+            console.error('Restore session error:', restoreError)
+            clearPersistedSession()
+            return false
+          } finally {
+            if (!cancelled) {
+              setIsAuthenticating(false)
+            }
+          }
+        }
+
         initTokenClient(
           async (tokenResponse) => {
             const wasSilentAttempt = silentAuthAttemptRef.current
@@ -92,10 +122,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
               setUser(profile)
               setSpreadsheetTitle(spreadsheet.title)
               setIsSignedIn(true)
+              saveSessionToCookie({
+                tokenResponse,
+                user: profile,
+                spreadsheetTitle: spreadsheet.title,
+              })
             } catch (authError) {
               console.error('Auth flow error:', authError)
               if (!cancelled) {
                 setError('Login correcto, pero no se pudo validar acceso al Google Sheet.')
+                clearPersistedSession()
               }
             } finally {
               if (!cancelled) {
@@ -118,6 +154,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
             }
           },
         )
+
+        const restored = await restorePersistedSession()
+        if (restored) {
+          if (!cancelled) {
+            setIsLoading(false)
+          }
+          return
+        }
 
         if (!cancelled) {
           setIsAuthenticating(true)
