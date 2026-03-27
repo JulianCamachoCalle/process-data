@@ -33,7 +33,8 @@ export const SPECIAL_SHEETS = {
   commissionsLeads: 'COMISIONES Y LEADS',
 } as const
 
-export const MONTH_DATE_KEYS = ['fecha', 'date', 'dia', 'created', 'registro', 'mes']
+// Prioriza columnas de fecha reales del Excel (Mes, Fecha, Periodo).
+export const MONTH_DATE_KEYS = ['fecha', 'date', 'mes', 'periodo', 'month', 'created']
 export const VENDOR_KEYS = ['Vendedor']
 export const STORE_KEYS = ['Nombre tienda']
 export const STATUS_KEYS = ['estado', 'status', 'resultado', 'situacion']
@@ -95,7 +96,7 @@ export function parseDateValue(value: string): Date | null {
   const trimmed = value.trim()
   const normalizedNumeric = trimmed.replace(',', '.')
 
-  if (/^\d{5}(?:[\.,]\d+)?$/.test(trimmed)) {
+  if (/^\d{5}(?:[.,]\d+)?$/.test(trimmed)) {
     const serial = Number(normalizedNumeric)
     if (!Number.isNaN(serial)) {
       const days = Math.floor(serial)
@@ -113,6 +114,56 @@ export function parseDateValue(value: string): Date | null {
     const yearRaw = Number(slash[3])
     const year = yearRaw < 100 ? 2000 + yearRaw : yearRaw
     const date = new Date(year, month, day)
+    if (!Number.isNaN(date.getTime())) return date
+  }
+
+  const monthYearNumeric = trimmed.match(/^(\d{1,2})[/-](\d{2,4})$/)
+  if (monthYearNumeric) {
+    const month = Number(monthYearNumeric[1]) - 1
+    const yearRaw = Number(monthYearNumeric[2])
+    const year = yearRaw < 100 ? 2000 + yearRaw : yearRaw
+    const date = new Date(year, month, 1)
+    if (!Number.isNaN(date.getTime())) return date
+  }
+
+  const normalized = normalizeKey(trimmed)
+  const monthYearByName = normalized.match(
+    /^(enero|ene|febrero|feb|marzo|mar|abril|abr|mayo|may|junio|jun|julio|jul|agosto|ago|septiembre|setiembre|sep|set|octubre|oct|noviembre|nov|diciembre|dic)\s+(\d{2,4})$/,
+  )
+  if (monthYearByName) {
+    const monthMap: Record<string, number> = {
+      enero: 0,
+      ene: 0,
+      febrero: 1,
+      feb: 1,
+      marzo: 2,
+      mar: 2,
+      abril: 3,
+      abr: 3,
+      mayo: 4,
+      may: 4,
+      junio: 5,
+      jun: 5,
+      julio: 6,
+      jul: 6,
+      agosto: 7,
+      ago: 7,
+      septiembre: 8,
+      setiembre: 8,
+      sep: 8,
+      set: 8,
+      octubre: 9,
+      oct: 9,
+      noviembre: 10,
+      nov: 10,
+      diciembre: 11,
+      dic: 11,
+    }
+
+    const month = monthMap[monthYearByName[1]]
+    const yearRaw = Number(monthYearByName[2])
+    const year = yearRaw < 100 ? 2000 + yearRaw : yearRaw
+    const date = new Date(year, month, 1)
     if (!Number.isNaN(date.getTime())) return date
   }
 

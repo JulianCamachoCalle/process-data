@@ -1,4 +1,4 @@
-import { useApp } from '../../context/AppContext'
+import { useApp } from '../../context/useApp'
 import { ArrowRight, Sheet, ShieldCheck } from 'lucide-react'
 
 export default function LoginPage() {

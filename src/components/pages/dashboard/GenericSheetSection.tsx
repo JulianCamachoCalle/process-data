@@ -5,6 +5,7 @@ import { filterRowRecordsByDateRange, toRowRecords } from './shared'
 
 export default function GenericSheetSection({
   sheet,
+  relatedSheets,
   startDate,
   endDate,
   onCreate,
@@ -13,10 +14,11 @@ export default function GenericSheetSection({
   busy,
 }: {
   sheet: RawSheetData
+  relatedSheets: Record<string, RawSheetData>
   startDate: Date | null
   endDate: Date | null
-  onCreate: (sheetName: string, rowValues: string[]) => Promise<void>
-  onUpdate: (sheetName: string, rowNumber: number, rowValues: string[]) => Promise<void>
+  onCreate: (sheetName: string, rowValues: string[], columnCount: number) => Promise<void>
+  onUpdate: (sheetName: string, rowNumber: number, rowValues: string[], columnCount: number) => Promise<void>
   onDelete: (sheetName: string, rowNumber: number) => Promise<void>
   busy: boolean
 }) {
@@ -28,7 +30,9 @@ export default function GenericSheetSection({
   return (
     <div className="min-w-0 space-y-5 overflow-hidden">
       <CrudSection
+        key={sheet.sheetName}
         sheet={sheet}
+        relatedSheets={relatedSheets}
         title={`CRUD - ${sheet.sheetName}`}
         description="Gestiona filas en esta hoja dentro del rango de fechas seleccionado."
         visibleRecords={visibleRecords}

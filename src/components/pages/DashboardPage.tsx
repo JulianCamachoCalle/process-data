@@ -1,7 +1,7 @@
 import { Suspense, lazy, useCallback, useEffect, useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
 import { CircleAlert, LayoutDashboard, Table2 } from 'lucide-react'
-import { useApp } from '../../context/AppContext'
+import { useApp } from '../../context/useApp'
 import {
   appendSheetRow,
   deleteSheetRow,
@@ -9,6 +9,7 @@ import {
   getSheetsData,
   getSpreadsheetSheetNames,
   PRIMARY_ANALYTICS_SHEETS,
+  RELATIONAL_CRUD_SHEETS,
   type RawSheetData,
   updateSheetRow,
 } from '../../services/sheetsData'
@@ -27,6 +28,14 @@ import type { NavItem, NavSection } from './dashboard/shared'
 const HomeSection = lazy(() => import('./dashboard/HomeSection'))
 const RankingSection = lazy(() => import('./dashboard/RankingSection'))
 const GenericSheetSection = lazy(() => import('./dashboard/GenericSheetSection'))
+
+type GlobalRangePreset = '7d' | '30d' | '90d'
+
+const PRESET_DAYS: Record<GlobalRangePreset, number> = {
+  '7d': 7,
+  '30d': 30,
+  '90d': 90,
+}
 
 export default function DashboardPage() {
   const { user, signOut } = useApp()
@@ -101,7 +110,7 @@ export default function DashboardPage() {
   )
 
   const primarySheetItems = useMemo<NavItem[]>(() => {
-    return PRIMARY_ANALYTICS_SHEETS
+    return RELATIONAL_CRUD_SHEETS
       .filter((sheetName) => availableSheetNames.includes(sheetName))
       .map((sheetName) => ({
         id: `sheet-primary:${sheetName}`,
@@ -112,10 +121,15 @@ export default function DashboardPage() {
       }))
   }, [availableSheetNames])
 
+  const relationalCrudSheetNames = useMemo(
+    () => RELATIONAL_CRUD_SHEETS.filter((sheetName) => availableSheetNames.includes(sheetName)),
+    [availableSheetNames],
+  )
+
   const navSections = useMemo<NavSection[]>(() => {
     return [
       { id: 'nav-principal', title: 'Principal', items: [homeItem, rankingItem] },
-      { id: 'nav-core', title: 'Hojas principales', items: primarySheetItems },
+      { id: 'nav-core', title: 'Hojas CRUD (Tablas)', items: primarySheetItems },
     ]
   }, [homeItem, rankingItem, primarySheetItems])
 
@@ -136,7 +150,11 @@ export default function DashboardPage() {
     if (!item) return []
 
     if (item.sectionType === 'sheet' && item.sheetName) {
-      return [item.sheetName]
+      const required: string[] = [...relationalCrudSheetNames]
+      if (!required.includes(item.sheetName)) {
+        required.push(item.sheetName)
+      }
+      return required
     }
 
     if (item.sectionType === 'home') {
@@ -148,7 +166,7 @@ export default function DashboardPage() {
     }
 
     return []
-  }, [])
+  }, [relationalCrudSheetNames])
 
   const ensureRequiredSheets = useCallback(
     async (item: NavItem | null) => {
@@ -158,11 +176,15 @@ export default function DashboardPage() {
       const missing = requiredSheetNames.filter((sheetName) => !getCachedSheet(sheetName))
       if (missing.length === 0) return
 
+      // Solo pide hojas faltantes para evitar llamadas redundantes.
       setSectionLoading(true)
       setStatusMessage('')
-      const loaded = await getSheetsData(missing)
-      mergeSheets(loaded)
-      setSectionLoading(false)
+      try {
+        const loaded = await getSheetsData(missing)
+        mergeSheets(loaded)
+      } finally {
+        setSectionLoading(false)
+      }
     },
     [getCachedSheet, getRequiredSheetNamesForSection, mergeSheets],
   )
@@ -206,9 +228,9 @@ export default function DashboardPage() {
   }, [])
 
   const handleCreate = useCallback(
-    async (sheetName: string, rowValues: string[]) => {
+    async (sheetName: string, rowValues: string[], columnCount: number) => {
       await executeMutation(async () => {
-        await appendSheetRow(sheetName, rowValues)
+        await appendSheetRow(sheetName, rowValues, columnCount)
         await loadSheet(sheetName, true)
       })
     },
@@ -216,9 +238,9 @@ export default function DashboardPage() {
   )
 
   const handleUpdate = useCallback(
-    async (sheetName: string, rowNumber: number, rowValues: string[]) => {
+    async (sheetName: string, rowNumber: number, rowValues: string[], columnCount: number) => {
       await executeMutation(async () => {
-        await updateSheetRow(sheetName, rowNumber, rowValues)
+        await updateSheetRow(sheetName, rowNumber, rowValues, columnCount)
         await loadSheet(sheetName, true)
       })
     },
@@ -242,9 +264,8 @@ export default function DashboardPage() {
     setStatusMessage('')
 
     const toForce = getRequiredSheetNamesForSection(activeItem)
-    for (const name of toForce) {
-      await loadSheet(name, true)
-    }
+    // Fuerza recarga paralela para refrescar mas rapido la seccion activa.
+    await Promise.all(toForce.map((name) => loadSheet(name, true)))
 
     setSectionLoading(false)
     setStatusMessage('Datos actualizados para la seccion actual.')
@@ -273,14 +294,14 @@ export default function DashboardPage() {
   }, [detectedGlobalBounds.min])
 
   const defaultGlobalEnd = useMemo(() => {
-    if (detectedGlobalBounds.max) return detectedGlobalBounds.max
     const now = new Date()
-    return new Date(now.getFullYear(), now.getMonth() + 1, 0)
-  }, [detectedGlobalBounds.max])
+    return new Date(now.getFullYear(), now.getMonth(), now.getDate())
+  }, [])
 
   const [globalStartInput, setGlobalStartInput] = useState('')
   const [globalEndInput, setGlobalEndInput] = useState('')
   const [hasUserSetGlobalRange, setHasUserSetGlobalRange] = useState(false)
+  const [selectedPreset, setSelectedPreset] = useState<GlobalRangePreset | null>(null)
 
   useEffect(() => {
     if (hasUserSetGlobalRange) return
@@ -291,11 +312,34 @@ export default function DashboardPage() {
   const parsedGlobalStart = useMemo(() => parseDateInputValue(globalStartInput), [globalStartInput])
   const parsedGlobalEnd = useMemo(() => parseDateInputValue(globalEndInput, true), [globalEndInput])
 
+  const applyPresetRange = useCallback(
+    (preset: GlobalRangePreset) => {
+      const days = PRESET_DAYS[preset]
+      const baseEnd = parsedGlobalEnd || defaultGlobalEnd
+
+      const nextEnd = new Date(baseEnd)
+      nextEnd.setHours(23, 59, 59, 999)
+
+      const nextStart = new Date(nextEnd)
+      nextStart.setHours(0, 0, 0, 0)
+      nextStart.setDate(nextStart.getDate() - (days - 1))
+
+      setHasUserSetGlobalRange(true)
+      setGlobalStartInput(formatDateInputValue(nextStart))
+      setGlobalEndInput(formatDateInputValue(nextEnd))
+      setSelectedPreset(preset)
+    },
+    [parsedGlobalEnd, defaultGlobalEnd],
+  )
+
   const { globalRangeStart, globalRangeEnd } = useMemo(() => {
     const start = parsedGlobalStart || defaultGlobalStart
-    const end = parsedGlobalEnd || parseDateInputValue(formatDateInputValue(defaultGlobalEnd), true) || defaultGlobalEnd
+    const end = parsedGlobalEnd || defaultGlobalEnd
 
-    if (start <= end) return { globalRangeStart: start, globalRangeEnd: end }
+    if (start <= end) {
+      return { globalRangeStart: start, globalRangeEnd: end }
+    }
+
     return { globalRangeStart: end, globalRangeEnd: start }
   }, [parsedGlobalStart, parsedGlobalEnd, defaultGlobalStart, defaultGlobalEnd])
 
@@ -349,6 +393,7 @@ export default function DashboardPage() {
     activeSectionContent = (
       <GenericSheetSection
         sheet={activeSheet}
+        relatedSheets={sheetCache}
         startDate={globalRangeStart}
         endDate={globalRangeEnd}
         onCreate={handleCreate}
@@ -392,13 +437,19 @@ export default function DashboardPage() {
       loadedSheetsCount={loadedSheetsCount}
       globalStartInput={globalStartInput}
       globalEndInput={globalEndInput}
+      selectedPreset={selectedPreset}
       onChangeStart={(value) => {
         setHasUserSetGlobalRange(true)
         setGlobalStartInput(value)
+        setSelectedPreset(null)
       }}
       onChangeEnd={(value) => {
         setHasUserSetGlobalRange(true)
         setGlobalEndInput(value)
+        setSelectedPreset(null)
+      }}
+      onSelectPreset={(preset) => {
+        applyPresetRange(preset)
       }}
       onRefresh={() => void refreshCurrentSection()}
       onSignOut={signOut}

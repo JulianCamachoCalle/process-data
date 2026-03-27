@@ -54,6 +54,20 @@ type HomeMetrics = {
   topDistritosLeads: DataPoint[]
 }
 
+type MetricCardItem = {
+  label: string
+  value: string
+}
+
+function MetricCard({ label, value }: MetricCardItem) {
+  return (
+    <article className="rounded-2xl border border-slate-200/80 bg-white/90 p-4 shadow-[0_14px_32px_-22px_rgba(15,23,42,0.7)] backdrop-blur sm:p-5">
+      <p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">{label}</p>
+      <p className="mt-2 break-words text-xl font-bold text-slate-900 sm:text-2xl">{value}</p>
+    </article>
+  )
+}
+
 function buildHomeMetrics({
   tiendasSheet,
   enviosSheet,
@@ -72,7 +86,8 @@ function buildHomeMetrics({
   const tiendasRows = getRowsForDateRange(tiendasSheet, startDate, endDate)
   const enviosRows = getRowsForDateRange(enviosSheet, startDate, endDate)
   const recojosRows = getRowsForDateRange(recojosSheet, startDate, endDate)
-  const comisionesRows = getRowsForDateRange(comisionesSheet, startDate, endDate)
+  // Esta hoja no tiene una fecha operativa consistente; se usa completa para evitar falsos ceros.
+  const comisionesRows = getRowsForDateRange(comisionesSheet, startDate, endDate, [])
 
   const tiendaIndex = findColumnIndex(tiendasSheet?.headers || [], STORE_KEYS)
   const tiendasRegistradas =
@@ -82,8 +97,8 @@ function buildHomeMetrics({
 
   const leadsGanados = tiendasRows.length
   const leadWeightByRow = tiendasRows.map(() => 1)
-
   const enviosTotales = enviosRows.length
+
   const ingresoEnviosIndex = findMetricColumnIndex(
     enviosSheet?.headers || [],
     INGRESO_ENVIOS_KEYS,
@@ -122,8 +137,7 @@ function buildHomeMetrics({
     comisionesSheet?.headers || [],
     COMISIONES_TOTALES_KEYS,
     [
-      ['comision', 'total'],
-      ['comisiones', 'totales'],
+      ['Comisión total (S/)'],
     ],
   )
   const distritoIndex = findMetricColumnIndex(tiendasSheet?.headers || [], DISTRITO_KEYS, [['distrito']])
@@ -142,27 +156,28 @@ function buildHomeMetrics({
   const enviosConIngresoPositivo = enviosRows.filter((row) => (parseNumeric(row[ingresoEnviosIndex]) || 0) > 0).length
   const ticketPromedioMes = enviosConIngresoPositivo > 0 ? ingresoTotalEnvios / enviosConIngresoPositivo : 0
   const promedioEnviosPorTienda = tiendasRegistradas > 0 ? enviosTotales / tiendasRegistradas : 0
-
   const costoOperativoPorLeadGanado = leadsGanados > 0 ? costoTotalOperativo / leadsGanados : 0
   const ingresoPorLeadGanado = leadsGanados > 0 ? ingresoTotalOperativo / leadsGanados : 0
 
   const recojoCobradoKey = normalizeKey('1 pedido (cobra S/8)')
   const recojoGratisKey = normalizeKey('2+ entregados (gratis)')
 
-  const recojoTypeTotals = tipoRecojoIndex >= 0 && recojoVecesIndex >= 0
-    ? recojosRows.reduce(
-        (accumulator, row) => {
-          const recojoTypeValue = normalizeKey(row[tipoRecojoIndex] || '')
-          const veces = parseNumeric(row[recojoVecesIndex] || '') || 0
+  // Reagrupa los tipos de recojo para separar cobrados y gratis.
+  const recojoTypeTotals =
+    tipoRecojoIndex >= 0 && recojoVecesIndex >= 0
+      ? recojosRows.reduce(
+          (accumulator, row) => {
+            const recojoTypeValue = normalizeKey(row[tipoRecojoIndex] || '')
+            const veces = parseNumeric(row[recojoVecesIndex] || '') || 0
 
-          if (veces <= 0) return accumulator
-          if (recojoTypeValue.includes(recojoCobradoKey)) accumulator.cobrados += veces
-          if (recojoTypeValue.includes(recojoGratisKey)) accumulator.gratis += veces
-          return accumulator
-        },
-        { cobrados: 0, gratis: 0 },
-      )
-    : { cobrados: 0, gratis: 0 }
+            if (veces <= 0) return accumulator
+            if (recojoTypeValue.includes(recojoCobradoKey)) accumulator.cobrados += veces
+            if (recojoTypeValue.includes(recojoGratisKey)) accumulator.gratis += veces
+            return accumulator
+          },
+          { cobrados: 0, gratis: 0 },
+        )
+      : { cobrados: 0, gratis: 0 }
 
   const comisionTotalVendedores = sumFromColumn(comisionesRows, comisionesTotalesIndex)
   const costoTotalMasComision = costoTotalOperativo + comisionTotalVendedores
@@ -229,34 +244,62 @@ export default function HomeSection({
     [tiendasSheet, enviosSheet, recojosSheet, comisionesSheet, startDate, endDate],
   )
 
+  // Secciones de tarjetas para evitar markup duplicado y facilitar mantenimiento.
+  const coreCards = useMemo<MetricCardItem[]>(
+    () => [
+      { label: 'Tiendas registradas', value: formatInt(metrics.tiendasRegistradas) },
+      { label: 'Leads ganados', value: formatInt(metrics.leadsGanados) },
+      { label: 'Envios totales', value: formatInt(metrics.enviosTotales) },
+      { label: 'Promedio envios por tienda', value: metrics.promedioEnviosPorTienda.toFixed(0) },
+      { label: 'Ingreso total operativo', value: formatCurrency(metrics.ingresoTotalOperativo) },
+      { label: 'Costo total operativo', value: formatCurrency(metrics.costoTotalOperativo) },
+      { label: 'Margen', value: formatCurrency(metrics.margen) },
+      { label: 'Ticket promedio mes', value: formatCurrency(metrics.ticketPromedioMes) },
+      { label: 'Costo operativo por lead ganado', value: formatCurrency(metrics.costoOperativoPorLeadGanado) },
+      { label: 'Ingreso por lead ganado', value: formatCurrency(metrics.ingresoPorLeadGanado) },
+      { label: 'Ingreso total anulados filment', value: formatCurrency(metrics.ingresoTotalAnuladosFilment) },
+    ],
+    [metrics],
+  )
+
+  const recojoCards = useMemo<MetricCardItem[]>(
+    () => [
+      { label: 'Recojos cobrados', value: formatInt(metrics.recojosCobrados) },
+      { label: 'Recojos gratis', value: formatInt(metrics.recojosGratis) },
+      { label: 'Pago total motorizado por recojos', value: formatCurrency(metrics.pagoTotalMotorizadoRecojos) },
+    ],
+    [metrics],
+  )
+
+  const comisionCards = useMemo<MetricCardItem[]>(
+    () => [
+      { label: 'Comision total vendedores', value: formatCurrency(metrics.comisionTotalVendedores) },
+      { label: 'Costo total + comision', value: formatCurrency(metrics.costoTotalMasComision) },
+      { label: 'Margen - comision', value: formatCurrency(metrics.margenMenosComision) },
+      { label: 'Costo por lead ganado + comision', value: formatCurrency(metrics.costoPorLeadGanadoMasComision) },
+      { label: 'Distrito lead mas frecuente', value: metrics.distritoLeadMasFrecuente },
+    ],
+    [metrics],
+  )
+
   return (
     <div className="space-y-5">
-      <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <article className="rounded-2xl border border-slate-200/80 bg-white/90 p-5 shadow-[0_14px_32px_-22px_rgba(15,23,42,0.7)] backdrop-blur"><p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">Tiendas registradas</p><p className="mt-2 text-2xl font-bold text-slate-900">{formatInt(metrics.tiendasRegistradas)}</p></article>
-        <article className="rounded-2xl border border-slate-200/80 bg-white/90 p-5 shadow-[0_14px_32px_-22px_rgba(15,23,42,0.7)] backdrop-blur"><p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">Leads ganados</p><p className="mt-2 text-2xl font-bold text-slate-900">{formatInt(metrics.leadsGanados)}</p></article>
-        <article className="rounded-2xl border border-slate-200/80 bg-white/90 p-5 shadow-[0_14px_32px_-22px_rgba(15,23,42,0.7)] backdrop-blur"><p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">Envios totales</p><p className="mt-2 text-2xl font-bold text-slate-900">{formatInt(metrics.enviosTotales)}</p></article>
-        <article className="rounded-2xl border border-slate-200/80 bg-white/90 p-5 shadow-[0_14px_32px_-22px_rgba(15,23,42,0.7)] backdrop-blur"><p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">Promedio envios por tienda</p><p className="mt-2 text-2xl font-bold text-slate-900">{metrics.promedioEnviosPorTienda.toFixed(0)}</p></article>
-        <article className="rounded-2xl border border-slate-200/80 bg-white/90 p-5 shadow-[0_14px_32px_-22px_rgba(15,23,42,0.7)] backdrop-blur"><p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">Ingreso total operativo</p><p className="mt-2 text-2xl font-bold text-slate-900">{formatCurrency(metrics.ingresoTotalOperativo)}</p></article>
-        <article className="rounded-2xl border border-slate-200/80 bg-white/90 p-5 shadow-[0_14px_32px_-22px_rgba(15,23,42,0.7)] backdrop-blur"><p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">Costo total operativo</p><p className="mt-2 text-2xl font-bold text-slate-900">{formatCurrency(metrics.costoTotalOperativo)}</p></article>
-        <article className="rounded-2xl border border-slate-200/80 bg-white/90 p-5 shadow-[0_14px_32px_-22px_rgba(15,23,42,0.7)] backdrop-blur"><p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">Margen</p><p className="mt-2 text-2xl font-bold text-slate-900">{formatCurrency(metrics.margen)}</p></article>
-        <article className="rounded-2xl border border-slate-200/80 bg-white/90 p-5 shadow-[0_14px_32px_-22px_rgba(15,23,42,0.7)] backdrop-blur"><p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">Ticket promedio mes</p><p className="mt-2 text-2xl font-bold text-slate-900">{formatCurrency(metrics.ticketPromedioMes)}</p></article>
-        <article className="rounded-2xl border border-slate-200/80 bg-white/90 p-5 shadow-[0_14px_32px_-22px_rgba(15,23,42,0.7)] backdrop-blur"><p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">Costo operativo por lead ganado</p><p className="mt-2 text-2xl font-bold text-slate-900">{formatCurrency(metrics.costoOperativoPorLeadGanado)}</p></article>
-        <article className="rounded-2xl border border-slate-200/80 bg-white/90 p-5 shadow-[0_14px_32px_-22px_rgba(15,23,42,0.7)] backdrop-blur"><p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">Ingreso por lead ganado</p><p className="mt-2 text-2xl font-bold text-slate-900">{formatCurrency(metrics.ingresoPorLeadGanado)}</p></article>
-        <article className="rounded-2xl border border-slate-200/80 bg-white/90 p-5 shadow-[0_14px_32px_-22px_rgba(15,23,42,0.7)] backdrop-blur"><p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">Ingreso total anulados filment</p><p className="mt-2 text-2xl font-bold text-slate-900">{formatCurrency(metrics.ingresoTotalAnuladosFilment)}</p></article>
+      <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        {coreCards.map((card) => (
+          <MetricCard key={card.label} label={card.label} value={card.value} />
+        ))}
       </section>
 
-      <section className="grid gap-4 md:grid-cols-3">
-        <article className="rounded-2xl border border-slate-200/80 bg-white/90 p-5 shadow-[0_14px_32px_-22px_rgba(15,23,42,0.7)] backdrop-blur"><p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">Recojos cobrados</p><p className="mt-2 text-2xl font-bold text-slate-900">{formatInt(metrics.recojosCobrados)}</p></article>
-        <article className="rounded-2xl border border-slate-200/80 bg-white/90 p-5 shadow-[0_14px_32px_-22px_rgba(15,23,42,0.7)] backdrop-blur"><p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">Recojos gratis</p><p className="mt-2 text-2xl font-bold text-slate-900">{formatInt(metrics.recojosGratis)}</p></article>
-        <article className="rounded-2xl border border-slate-200/80 bg-white/90 p-5 shadow-[0_14px_32px_-22px_rgba(15,23,42,0.7)] backdrop-blur"><p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">Pago total motorizado por recojos</p><p className="mt-2 text-2xl font-bold text-slate-900">{formatCurrency(metrics.pagoTotalMotorizadoRecojos)}</p></article>
+      <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+        {recojoCards.map((card) => (
+          <MetricCard key={card.label} label={card.label} value={card.value} />
+        ))}
       </section>
 
-      <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
-        <article className="rounded-2xl border border-slate-200/80 bg-white/90 p-5 shadow-[0_14px_32px_-22px_rgba(15,23,42,0.7)] backdrop-blur"><p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">Comision total vendedores</p><p className="mt-2 text-2xl font-bold text-slate-900">{formatCurrency(metrics.comisionTotalVendedores)}</p></article>
-        <article className="rounded-2xl border border-slate-200/80 bg-white/90 p-5 shadow-[0_14px_32px_-22px_rgba(15,23,42,0.7)] backdrop-blur"><p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">Costo total + comision</p><p className="mt-2 text-2xl font-bold text-slate-900">{formatCurrency(metrics.costoTotalMasComision)}</p></article>
-        <article className="rounded-2xl border border-slate-200/80 bg-white/90 p-5 shadow-[0_14px_32px_-22px_rgba(15,23,42,0.7)] backdrop-blur"><p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">Margen - comision</p><p className="mt-2 text-2xl font-bold text-slate-900">{formatCurrency(metrics.margenMenosComision)}</p></article>
-        <article className="rounded-2xl border border-slate-200/80 bg-white/90 p-5 shadow-[0_14px_32px_-22px_rgba(15,23,42,0.7)] backdrop-blur"><p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">Costo por lead ganado + comision</p><p className="mt-2 text-2xl font-bold text-slate-900">{formatCurrency(metrics.costoPorLeadGanadoMasComision)}</p></article>
-        <article className="rounded-2xl border border-slate-200/80 bg-white/90 p-5 shadow-[0_14px_32px_-22px_rgba(15,23,42,0.7)] backdrop-blur"><p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">Distrito lead mas frecuente</p><p className="mt-2 text-xl font-bold text-slate-900">{metrics.distritoLeadMasFrecuente}</p></article>
+      <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
+        {comisionCards.map((card) => (
+          <MetricCard key={card.label} label={card.label} value={card.value} />
+        ))}
       </section>
 
       <section className="rounded-2xl border border-slate-200/80 bg-white/90 p-5 shadow-[0_14px_32px_-22px_rgba(15,23,42,0.7)] backdrop-blur">

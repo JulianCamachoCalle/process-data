@@ -2,6 +2,8 @@ import { LogOut, RefreshCcw } from 'lucide-react'
 import type { ReactNode } from 'react'
 import type { NavSection } from './shared'
 
+type GlobalRangePreset = '7d' | '30d' | '90d'
+
 export default function DashboardLayout({
   userName,
   navSections,
@@ -13,8 +15,10 @@ export default function DashboardLayout({
   loadedSheetsCount,
   globalStartInput,
   globalEndInput,
+  selectedPreset,
   onChangeStart,
   onChangeEnd,
+  onSelectPreset,
   onRefresh,
   onSignOut,
   sectionLoading,
@@ -33,8 +37,10 @@ export default function DashboardLayout({
   loadedSheetsCount: number
   globalStartInput: string
   globalEndInput: string
+  selectedPreset: GlobalRangePreset | null
   onChangeStart: (value: string) => void
   onChangeEnd: (value: string) => void
+  onSelectPreset: (preset: GlobalRangePreset) => void
   onRefresh: () => void
   onSignOut: () => void
   sectionLoading: boolean
@@ -44,10 +50,10 @@ export default function DashboardLayout({
   children: ReactNode
 }) {
   return (
-    <main className="min-h-screen p-4 md:p-6">
-      <div className="mx-auto w-full max-w-[1540px] rounded-2xl border border-slate-300/80 bg-white p-3 shadow-[0_26px_56px_-34px_rgba(15,23,42,0.75)] md:p-4">
+    <main className="min-h-screen p-2 sm:p-4 md:p-6">
+      <div className="mx-auto w-full max-w-[1540px] rounded-2xl border border-slate-300/80 bg-white p-2 shadow-[0_26px_56px_-34px_rgba(15,23,42,0.75)] sm:p-3 md:p-4">
         <div className="grid min-w-0 gap-4 xl:grid-cols-[310px_minmax(0,1fr)]">
-          <aside className="rounded-2xl border border-red-200/80 bg-white p-4 shadow-[0_18px_36px_-26px_rgba(15,23,42,0.75)] md:sticky md:top-4 md:h-[calc(100vh-5rem)] md:overflow-auto">
+          <aside className="rounded-2xl border border-red-200/80 bg-white p-4 shadow-[0_18px_36px_-26px_rgba(15,23,42,0.75)] xl:sticky xl:top-4 xl:h-[calc(100vh-5rem)] xl:overflow-auto">
             <div className="mb-4 rounded-2xl bg-gradient-to-br from-red-900 via-red-800 to-red-700 px-4 py-4 text-white">
               <p className="text-[11px] uppercase tracking-[0.16em] text-red-200">Panel Administracion</p>
               <h1 className="mt-1 text-xl font-extrabold tracking-tight">Clientes Nuevos</h1>
@@ -67,11 +73,10 @@ export default function DashboardLayout({
                           <button
                             key={item.id}
                             onClick={() => onSelectSection(item.id)}
-                            className={`flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm font-medium transition ${
-                              active
+                            className={`flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm font-medium transition ${active
                                 ? 'bg-white text-red-700 ring-1 ring-red-200 shadow-[0_10px_18px_-12px_rgba(185,28,28,0.65)]'
                                 : 'text-slate-600 hover:bg-white hover:text-slate-900'
-                            }`}
+                              }`}
                           >
                             {item.icon}
                             <span className="truncate">{item.label}</span>
@@ -103,7 +108,30 @@ export default function DashboardLayout({
 
                   <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50/70 p-3">
                     <p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">Filtro global de fecha</p>
-                    <div className="mt-2 grid gap-2 sm:grid-cols-2 lg:max-w-lg">
+                    <div className="mt-2 space-y-3 lg:max-w-lg">
+                      <div className="flex flex-wrap gap-2">
+                        {[
+                          { id: '7d' as const, label: 'Ultima semana' },
+                          { id: '30d' as const, label: 'Ultimos 30 dias' },
+                          { id: '90d' as const, label: 'Ultimos 90 dias' },
+                        ].map((option) => {
+                          const active = selectedPreset === option.id
+                          return (
+                            <button
+                              key={option.id}
+                              onClick={() => onSelectPreset(option.id)}
+                              className={`rounded-full border px-3 py-1 text-xs font-semibold transition ${active
+                                  ? 'border-red-300 bg-red-50 text-red-700'
+                                  : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-100'
+                                }`}
+                            >
+                              {option.label}
+                            </button>
+                          )
+                        })}
+                      </div>
+
+                      <div className="grid gap-2 sm:grid-cols-2">
                       <label className="text-xs text-slate-600">
                         Desde
                         <input
@@ -113,6 +141,7 @@ export default function DashboardLayout({
                           className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-sm text-slate-800"
                         />
                       </label>
+
                       <label className="text-xs text-slate-600">
                         Hasta
                         <input
@@ -122,26 +151,30 @@ export default function DashboardLayout({
                           className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-sm text-slate-800"
                         />
                       </label>
+                      </div>
                     </div>
                   </div>
                 </div>
 
-                <div className="mt-4 flex flex-wrap gap-2 max-h-14 lg:justify-end">
-                  <button
-                    onClick={onRefresh}
-                    disabled={sectionLoading || busyMutation}
-                    className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-red-900 to-red-700 px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
-                  >
-                    <RefreshCcw size={15} />
-                    Actualizar seccion
-                  </button>
-                  <button
-                    onClick={onSignOut}
-                    className="inline-flex items-center gap-2 rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100"
-                  >
-                    <LogOut size={15} />
-                    Cerrar sesion
-                  </button>
+                <div className="grid grid-cols-1 items-start justify-end gap-4 sm:grid-cols-2 lg:grid-cols-1">
+                  <div className="mt-2 flex flex-wrap gap-2 lg:mt-0 lg:justify-end">
+                    <button
+                      onClick={onRefresh}
+                      disabled={sectionLoading || busyMutation}
+                      className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-red-900 to-red-700 px-4 py-2 text-sm font-semibold text-white disabled:opacity-60 sm:w-auto"
+                    >
+                      <RefreshCcw size={15} />
+                      Actualizar seccion
+                    </button>
+                    <button
+                      onClick={onSignOut}
+                      className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100 sm:w-auto"
+                    >
+                      <LogOut size={15} />
+                      Cerrar sesion
+                    </button>
+                  </div>
+                  <div className=""></div>
                 </div>
               </div>
 
