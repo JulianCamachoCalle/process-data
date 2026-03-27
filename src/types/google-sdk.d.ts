@@ -35,6 +35,24 @@ interface GapiClient {
                 endIndex: number
               }
             }
+            copyPaste?: {
+              source: {
+                sheetId: number
+                startRowIndex?: number
+                endRowIndex?: number
+                startColumnIndex?: number
+                endColumnIndex?: number
+              }
+              destination: {
+                sheetId: number
+                startRowIndex?: number
+                endRowIndex?: number
+                startColumnIndex?: number
+                endColumnIndex?: number
+              }
+              pasteType?: 'PASTE_NORMAL' | 'PASTE_VALUES' | 'PASTE_FORMAT' | 'PASTE_NO_BORDERS' | 'PASTE_FORMULA' | 'PASTE_DATA_VALIDATION' | 'PASTE_CONDITIONAL_FORMATTING'
+              pasteOrientation?: 'NORMAL' | 'TRANSPOSE'
+            }
           }>
         }
       }) => Promise<unknown>

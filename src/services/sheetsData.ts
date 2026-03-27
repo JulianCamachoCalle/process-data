@@ -9,20 +9,32 @@ export const PRIMARY_ANALYTICS_SHEETS = [
   'DATA DE TARIFA',
 ] as const
 
-export const HIDDEN_NAV_SHEETS = [
-  'INFO VENDEDOR',
-  'COMISIONES Y LEADS',
-  'RESUMEN MENSUAL',
-  'CONFIG',
-  'CICLO VIDA',
-  'INFO TIENDA',
-  'Listas',
-  'HELPER VENDEDOR',
+// Hojas tipo tabla (tabs azules) usadas para CRUD relacional.
+export const RELATIONAL_CRUD_SHEETS = [
+  'LEADS GANADOS',
+  'DATA ENVIOS',
+  'TARIFAS',
+  'RECOJOS',
+  'TIPO RECOJO',
+  'APLICATIVOS',
+  'COURIER',
+  'TIENDAS',
+  'FULLFILMENT',
+  'ORIGEN',
+  'TIPO DE PUNTO',
+  'VENDEDORES',
+  'RESULTADOS',
+  'DESTINOS',
 ] as const
 
 interface SheetCacheEntry {
   data: RawSheetData
   fetchedAt: number
+}
+
+type FormulaCell = {
+  columnIndex: number
+  formula: string
 }
 
 let metadataCache: SpreadsheetSheetMeta[] | null = null
@@ -46,6 +58,24 @@ export interface RawSheetData {
 function quoteSheetName(sheetName: string): string {
   const escaped = sheetName.replace(/'/g, "''")
   return `'${escaped}'`
+}
+
+function toColumnLetter(columnNumber: number): string {
+  let num = Math.max(1, Math.floor(columnNumber))
+  let result = ''
+
+  while (num > 0) {
+    const remainder = (num - 1) % 26
+    result = String.fromCharCode(65 + remainder) + result
+    num = Math.floor((num - 1) / 26)
+  }
+
+  return result
+}
+
+function normalizeWriteValues(rowValues: string[], columnCount: number): string[] {
+  const safeCount = Math.max(1, Math.floor(columnCount))
+  return Array.from({ length: safeCount }, (_, index) => String(rowValues[index] ?? '').trim())
 }
 
 function normalizeRowValues(values: string[] | undefined): string[] {
@@ -96,6 +126,131 @@ function isFresh(timestamp: number): boolean {
 
 function normalizeSheetNameKey(name: string): string {
   return name.trim().toLowerCase()
+}
+
+const FRONTEND_COMPUTED_SHEETS = new Set([normalizeSheetNameKey('ENVIOS')])
+
+function shouldPreserveSheetFormulas(sheetName: string): boolean {
+  return !FRONTEND_COMPUTED_SHEETS.has(normalizeSheetNameKey(sheetName))
+}
+
+function parseRowNumberFromUpdatedRange(updatedRange: string | undefined): number | null {
+  if (!updatedRange) return null
+
+  const match = updatedRange.match(/![A-Z]+(\d+):[A-Z]+(\d+)/i)
+  if (!match) return null
+
+  const startRow = Number(match[1])
+  const endRow = Number(match[2])
+
+  if (!Number.isFinite(startRow) || startRow <= 0) return null
+  if (!Number.isFinite(endRow) || endRow <= 0) return null
+
+  return Math.min(startRow, endRow)
+}
+
+function mergeFormulaCellsIntoValues(rowValues: string[], formulaCells: FormulaCell[]): string[] {
+  if (formulaCells.length === 0) return rowValues
+
+  const next = [...rowValues]
+  formulaCells.forEach((cell) => {
+    if (cell.columnIndex < 0 || cell.columnIndex >= next.length) return
+    next[cell.columnIndex] = cell.formula
+  })
+
+  return next
+}
+
+async function getFormulaCellsForRow(
+  sheetName: string,
+  rowNumber: number,
+  columnCount: number,
+): Promise<FormulaCell[]> {
+  if (rowNumber <= 1) return []
+  ensureSheetsClient()
+
+  const valuesClient = window.gapi?.client?.sheets?.spreadsheets?.values
+  if (!valuesClient?.get) {
+    throw new Error('Google Sheets values.get no esta disponible en gapi.client.')
+  }
+
+  const endColumn = toColumnLetter(columnCount)
+  const response = await valuesClient.get({
+    spreadsheetId: GOOGLE_CONFIG.SPREADSHEET_ID,
+    range: `${quoteSheetName(sheetName)}!A${rowNumber}:${endColumn}${rowNumber}`,
+    majorDimension: 'ROWS',
+    valueRenderOption: 'FORMULA',
+  })
+
+  const row = response.result?.values?.[0] || []
+  const formulaCells: FormulaCell[] = []
+
+  row.forEach((value, columnIndex) => {
+    const normalized = String(value ?? '').trim()
+    if (!normalized.startsWith('=')) return
+
+    formulaCells.push({ columnIndex, formula: normalized })
+  })
+
+  return formulaCells
+}
+
+async function copyFormulaCellsBetweenRows(
+  sheetName: string,
+  sourceRowNumber: number,
+  targetRowNumber: number,
+  formulaCells: FormulaCell[],
+  columnCount: number,
+): Promise<void> {
+  if (sourceRowNumber <= 1 || targetRowNumber <= 1 || formulaCells.length === 0) {
+    return
+  }
+
+  ensureSheetsClient()
+
+  if (!window.gapi?.client?.sheets?.spreadsheets?.batchUpdate) {
+    throw new Error('Google Sheets batchUpdate no esta disponible en gapi.client.')
+  }
+
+  const metadata = await getSpreadsheetSheetsMetadata()
+  const key = normalizeSheetNameKey(sheetName)
+  const sheetMeta = metadata.find((item) => normalizeSheetNameKey(item.title) === key)
+
+  if (!sheetMeta) {
+    throw new Error(`No se encontro metadata para la hoja: ${sheetName}`)
+  }
+
+  const safeColumnLimit = Math.max(1, Math.floor(columnCount))
+  const uniqueFormulaColumns = [...new Set(formulaCells.map((cell) => cell.columnIndex))]
+    .filter((columnIndex) => columnIndex >= 0 && columnIndex < safeColumnLimit)
+
+  if (uniqueFormulaColumns.length === 0) return
+
+  await window.gapi.client.sheets.spreadsheets.batchUpdate({
+    spreadsheetId: GOOGLE_CONFIG.SPREADSHEET_ID,
+    resource: {
+      requests: uniqueFormulaColumns.map((columnIndex) => ({
+        copyPaste: {
+          source: {
+            sheetId: sheetMeta.sheetId,
+            startRowIndex: sourceRowNumber - 1,
+            endRowIndex: sourceRowNumber,
+            startColumnIndex: columnIndex,
+            endColumnIndex: columnIndex + 1,
+          },
+          destination: {
+            sheetId: sheetMeta.sheetId,
+            startRowIndex: targetRowNumber - 1,
+            endRowIndex: targetRowNumber,
+            startColumnIndex: columnIndex,
+            endColumnIndex: columnIndex + 1,
+          },
+          pasteType: 'PASTE_FORMULA',
+          pasteOrientation: 'NORMAL',
+        },
+      })),
+    },
+  })
 }
 
 export function clearSheetCache(sheetName?: string): void {
@@ -270,22 +425,48 @@ function prioritizeSheetNames(names: string[]): string[] {
   return [...core, ...others]
 }
 
-export async function appendSheetRow(sheetName: string, rowValues: string[]): Promise<void> {
+export async function appendSheetRow(
+  sheetName: string,
+  rowValues: string[],
+  columnCount: number,
+): Promise<void> {
   ensureSheetsClient()
 
   if (!window.gapi?.client?.sheets?.spreadsheets?.values?.append) {
     throw new Error('Google Sheets append no esta disponible en gapi.client.')
   }
 
-  await window.gapi.client.sheets.spreadsheets.values.append({
+  const normalizedValues = normalizeWriteValues(rowValues, columnCount)
+  const endColumn = toColumnLetter(columnCount)
+
+  const appendResponse = await window.gapi.client.sheets.spreadsheets.values.append({
     spreadsheetId: GOOGLE_CONFIG.SPREADSHEET_ID,
-    range: `${quoteSheetName(sheetName)}!A:ZZ`,
+    range: `${quoteSheetName(sheetName)}!A:${endColumn}`,
     valueInputOption: 'USER_ENTERED',
     insertDataOption: 'INSERT_ROWS',
     resource: {
-      values: [rowValues],
+      values: [normalizedValues],
     },
-  })
+  }) as { result?: { updates?: { updatedRange?: string } } }
+
+  const updatedRange = appendResponse.result?.updates?.updatedRange
+  const createdRowNumber = parseRowNumberFromUpdatedRange(updatedRange)
+  const preserveSheetFormulas = shouldPreserveSheetFormulas(sheetName)
+
+  if (preserveSheetFormulas && createdRowNumber && createdRowNumber > 2) {
+    const sourceRowNumber = createdRowNumber - 1
+    const templateFormulaCells = await getFormulaCellsForRow(sheetName, sourceRowNumber, columnCount)
+
+    if (templateFormulaCells.length > 0) {
+      await copyFormulaCellsBetweenRows(
+        sheetName,
+        sourceRowNumber,
+        createdRowNumber,
+        templateFormulaCells,
+        columnCount,
+      )
+    }
+  }
 
   clearSheetCache(sheetName)
 }
@@ -294,6 +475,7 @@ export async function updateSheetRow(
   sheetName: string,
   rowNumber: number,
   rowValues: string[],
+  columnCount: number,
 ): Promise<void> {
   ensureSheetsClient()
 
@@ -305,14 +487,40 @@ export async function updateSheetRow(
     throw new Error('No se puede actualizar la fila de encabezado.')
   }
 
+  const normalizedValues = normalizeWriteValues(rowValues, columnCount)
+  const preserveSheetFormulas = shouldPreserveSheetFormulas(sheetName)
+  const existingRowFormulaCells = preserveSheetFormulas
+    ? await getFormulaCellsForRow(sheetName, rowNumber, columnCount)
+    : []
+  const valuesForUpdate = preserveSheetFormulas
+    ? mergeFormulaCellsIntoValues(normalizedValues, existingRowFormulaCells)
+    : normalizedValues
+  const endColumn = toColumnLetter(columnCount)
+
   await window.gapi.client.sheets.spreadsheets.values.update({
     spreadsheetId: GOOGLE_CONFIG.SPREADSHEET_ID,
-    range: `${quoteSheetName(sheetName)}!A${rowNumber}:ZZ${rowNumber}`,
+    range: `${quoteSheetName(sheetName)}!A${rowNumber}:${endColumn}${rowNumber}`,
     valueInputOption: 'USER_ENTERED',
     resource: {
-      values: [rowValues],
+      values: [valuesForUpdate],
     },
   })
+
+  // Si la fila no tenia formulas (por ediciones historicas), intenta restaurarlas usando la fila anterior.
+  if (preserveSheetFormulas && existingRowFormulaCells.length === 0 && rowNumber > 2) {
+    const sourceRowNumber = rowNumber - 1
+    const fallbackFormulaCells = await getFormulaCellsForRow(sheetName, sourceRowNumber, columnCount)
+
+    if (fallbackFormulaCells.length > 0) {
+      await copyFormulaCellsBetweenRows(
+        sheetName,
+        sourceRowNumber,
+        rowNumber,
+        fallbackFormulaCells,
+        columnCount,
+      )
+    }
+  }
 
   clearSheetCache(sheetName)
 }
