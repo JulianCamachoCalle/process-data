@@ -25,6 +25,10 @@ export default function SheetSectionRoute({ sheetName }: { sheetName: string }) 
         required.push('TARIFAS', 'LEADS GANADOS', 'FULLFILMENT', 'TIENDAS')
       }
 
+      if (sheetName.toUpperCase() === 'RECOJOS') {
+        required.push('LEADS GANADOS')
+      }
+
       return [...new Set(required)]
     },
     [sheetName],

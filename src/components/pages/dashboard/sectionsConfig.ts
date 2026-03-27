@@ -72,11 +72,20 @@ export function getRequiredSheetsForSection(section: DashboardSectionDefinition 
   if (!section) return []
 
   if (section.kind === 'home') {
-    return [...new Set([...PRIMARY_ANALYTICS_SHEETS, 'TIENDAS', SPECIAL_SHEETS.commissionsLeads])]
+    return [
+      ...new Set([
+        ...PRIMARY_ANALYTICS_SHEETS,
+        'ENVIOS',
+        'RECOJOS',
+        'LEADS GANADOS',
+        'TIENDAS',
+        SPECIAL_SHEETS.commissionsLeads,
+      ]),
+    ]
   }
 
   if (section.kind === 'ranking') {
-    return ['ENVIOS', 'TIENDAS']
+    return ['ENVIOS', 'TIENDAS', 'VENDEDORES', 'RESULTADOS']
   }
 
   if (section.kind === 'sheet' && section.sheetName) {
@@ -87,6 +96,10 @@ export function getRequiredSheetsForSection(section: DashboardSectionDefinition 
       if (!required.includes('LEADS GANADOS')) required.push('LEADS GANADOS')
       if (!required.includes('FULLFILMENT')) required.push('FULLFILMENT')
       if (!required.includes('TIENDAS')) required.push('TIENDAS')
+    }
+
+    if (section.sheetName.toUpperCase() === 'RECOJOS') {
+      if (!required.includes('LEADS GANADOS')) required.push('LEADS GANADOS')
     }
 
     return required

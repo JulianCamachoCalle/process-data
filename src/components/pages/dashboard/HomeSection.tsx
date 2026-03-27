@@ -59,6 +59,24 @@ type MetricCardItem = {
   value: string
 }
 
+const COBRO_TIENDA_RECOJO_KEYS = ['cobro a tienda por recojo', 'cobro recojo']
+
+function countRecojosByCobro(rows: string[][], vecesIndex: number, cobroIndex: number): { cobrados: number; gratis: number } {
+  return rows.reduce(
+    (accumulator, row) => {
+      const veces = parseNumeric(row[vecesIndex] || '') || 0
+      const cobro = parseNumeric(row[cobroIndex] || '')
+
+      if (veces <= 0 || cobro === null) return accumulator
+      if (cobro > 0) accumulator.cobrados += veces
+      else accumulator.gratis += veces
+
+      return accumulator
+    },
+    { cobrados: 0, gratis: 0 },
+  )
+}
+
 function MetricCard({ label, value }: MetricCardItem) {
   return (
     <article className="rounded-2xl border border-slate-200/80 bg-white/90 p-4 shadow-[0_14px_32px_-22px_rgba(15,23,42,0.7)] backdrop-blur sm:p-5">
@@ -72,6 +90,7 @@ function buildHomeMetrics({
   tiendasSheet,
   enviosSheet,
   recojosSheet,
+  leadsGanadosSheet,
   comisionesSheet,
   startDate,
   endDate,
@@ -79,6 +98,7 @@ function buildHomeMetrics({
   tiendasSheet?: RawSheetData
   enviosSheet?: RawSheetData
   recojosSheet?: RawSheetData
+  leadsGanadosSheet?: RawSheetData
   comisionesSheet?: RawSheetData
   startDate: Date | null
   endDate: Date | null
@@ -86,6 +106,7 @@ function buildHomeMetrics({
   const tiendasRows = getRowsForDateRange(tiendasSheet, startDate, endDate)
   const enviosRows = getRowsForDateRange(enviosSheet, startDate, endDate)
   const recojosRows = getRowsForDateRange(recojosSheet, startDate, endDate)
+  const leadsRows = getRowsForDateRange(leadsGanadosSheet, startDate, endDate)
   // Esta hoja no tiene una fecha operativa consistente; se usa completa para evitar falsos ceros.
   const comisionesRows = getRowsForDateRange(comisionesSheet, startDate, endDate, [])
 
@@ -95,8 +116,7 @@ function buildHomeMetrics({
       ? new Set(tiendasRows.map((row) => (row[tiendaIndex] || '').trim()).filter((value) => value.length > 0)).size
       : tiendasRows.length
 
-  const leadsGanados = tiendasRows.length
-  const leadWeightByRow = tiendasRows.map(() => 1)
+  const leadsGanados = leadsRows.length
   const enviosTotales = enviosRows.length
 
   const ingresoEnviosIndex = findMetricColumnIndex(
@@ -122,7 +142,21 @@ function buildHomeMetrics({
     COSTO_RECOJO_TOTAL_KEYS,
     [['Costo recojo total (S/)']],
   )
-  const ingresosAnuladosIndex = findMetricColumnIndex(
+  const cobroTiendaRecojoIndex = findMetricColumnIndex(
+    recojosSheet?.headers || [],
+    COBRO_TIENDA_RECOJO_KEYS,
+    [['cobro', 'recojo']],
+  )
+  const ingresosAnuladosLeadsIndex = findMetricColumnIndex(
+    leadsGanadosSheet?.headers || [],
+    ANULADOS_FILMENT_KEYS,
+    [
+      ['ingreso', 'anulado'],
+      ['anulados', 'filment'],
+      ['anulado'],
+    ],
+  )
+  const ingresosAnuladosTiendasIndex = findMetricColumnIndex(
     tiendasSheet?.headers || [],
     ANULADOS_FILMENT_KEYS,
     [
@@ -140,14 +174,17 @@ function buildHomeMetrics({
       ['Comisión total (S/)'],
     ],
   )
-  const distritoIndex = findMetricColumnIndex(tiendasSheet?.headers || [], DISTRITO_KEYS, [['distrito']])
+  const distritoLeadsIndex = findMetricColumnIndex(leadsGanadosSheet?.headers || [], DISTRITO_KEYS, [['distrito']])
+  const distritoTiendasIndex = findMetricColumnIndex(tiendasSheet?.headers || [], DISTRITO_KEYS, [['distrito']])
 
   const ingresoTotalEnvios = sumFromColumn(enviosRows, ingresoEnviosIndex)
   const ingresoTotalRecojos = sumFromColumn(recojosRows, ingresoRecojoIndex)
   const costoTotalEnvios = sumFromColumn(enviosRows, costoEnviosIndex)
   const costoRecojoTotal = sumFromColumn(recojosRows, costoRecojoTotalIndex)
   const pagoTotalMotorizadoRecojos = sumFromColumn(recojosRows, costoRecojoTotalIndex)
-  const ingresoTotalAnuladosFilment = sumFromColumn(tiendasRows, ingresosAnuladosIndex)
+  const ingresoTotalAnuladosFilment = ingresosAnuladosLeadsIndex >= 0
+    ? sumFromColumn(leadsRows, ingresosAnuladosLeadsIndex)
+    : sumFromColumn(tiendasRows, ingresosAnuladosTiendasIndex)
 
   const ingresoTotalOperativo = ingresoTotalEnvios + ingresoTotalRecojos + ingresoTotalAnuladosFilment
   const costoTotalOperativo = costoTotalEnvios + costoRecojoTotal
@@ -164,20 +201,22 @@ function buildHomeMetrics({
 
   // Reagrupa los tipos de recojo para separar cobrados y gratis.
   const recojoTypeTotals =
-    tipoRecojoIndex >= 0 && recojoVecesIndex >= 0
-      ? recojosRows.reduce(
-          (accumulator, row) => {
-            const recojoTypeValue = normalizeKey(row[tipoRecojoIndex] || '')
-            const veces = parseNumeric(row[recojoVecesIndex] || '') || 0
+    recojoVecesIndex >= 0 && cobroTiendaRecojoIndex >= 0
+      ? countRecojosByCobro(recojosRows, recojoVecesIndex, cobroTiendaRecojoIndex)
+      : tipoRecojoIndex >= 0 && recojoVecesIndex >= 0
+        ? recojosRows.reduce(
+            (accumulator, row) => {
+              const recojoTypeValue = normalizeKey(row[tipoRecojoIndex] || '')
+              const veces = parseNumeric(row[recojoVecesIndex] || '') || 0
 
-            if (veces <= 0) return accumulator
-            if (recojoTypeValue.includes(recojoCobradoKey)) accumulator.cobrados += veces
-            if (recojoTypeValue.includes(recojoGratisKey)) accumulator.gratis += veces
-            return accumulator
-          },
-          { cobrados: 0, gratis: 0 },
-        )
-      : { cobrados: 0, gratis: 0 }
+              if (veces <= 0) return accumulator
+              if (recojoTypeValue.includes(recojoCobradoKey)) accumulator.cobrados += veces
+              if (recojoTypeValue.includes(recojoGratisKey)) accumulator.gratis += veces
+              return accumulator
+            },
+            { cobrados: 0, gratis: 0 },
+          )
+        : { cobrados: 0, gratis: 0 }
 
   const comisionTotalVendedores = sumFromColumn(comisionesRows, comisionesTotalesIndex)
   const costoTotalMasComision = costoTotalOperativo + comisionTotalVendedores
@@ -185,13 +224,17 @@ function buildHomeMetrics({
   const costoPorLeadGanadoMasComision = leadsGanados > 0 ? costoTotalMasComision / leadsGanados : 0
 
   const distritoCounter = new Map<string, number>()
-  if (distritoIndex >= 0) {
-    tiendasRows.forEach((row, index) => {
-      const distrito = (row[distritoIndex] || '').trim()
+  if (distritoLeadsIndex >= 0) {
+    leadsRows.forEach((row) => {
+      const distrito = (row[distritoLeadsIndex] || '').trim()
       if (!distrito) return
-      const weight = leadWeightByRow[index] || 0
-      if (weight <= 0) return
-      distritoCounter.set(distrito, (distritoCounter.get(distrito) || 0) + weight)
+      distritoCounter.set(distrito, (distritoCounter.get(distrito) || 0) + 1)
+    })
+  } else if (distritoTiendasIndex >= 0) {
+    tiendasRows.forEach((row) => {
+      const distrito = (row[distritoTiendasIndex] || '').trim()
+      if (!distrito) return
+      distritoCounter.set(distrito, (distritoCounter.get(distrito) || 0) + 1)
     })
   }
 
@@ -228,6 +271,7 @@ export default function HomeSection({
   tiendasSheet,
   enviosSheet,
   recojosSheet,
+  leadsGanadosSheet,
   comisionesSheet,
   startDate,
   endDate,
@@ -235,13 +279,14 @@ export default function HomeSection({
   tiendasSheet?: RawSheetData
   enviosSheet?: RawSheetData
   recojosSheet?: RawSheetData
+  leadsGanadosSheet?: RawSheetData
   comisionesSheet?: RawSheetData
   startDate: Date | null
   endDate: Date | null
 }) {
   const metrics = useMemo(
-    () => buildHomeMetrics({ tiendasSheet, enviosSheet, recojosSheet, comisionesSheet, startDate, endDate }),
-    [tiendasSheet, enviosSheet, recojosSheet, comisionesSheet, startDate, endDate],
+    () => buildHomeMetrics({ tiendasSheet, enviosSheet, recojosSheet, leadsGanadosSheet, comisionesSheet, startDate, endDate }),
+    [tiendasSheet, enviosSheet, recojosSheet, leadsGanadosSheet, comisionesSheet, startDate, endDate],
   )
 
   // Secciones de tarjetas para evitar markup duplicado y facilitar mantenimiento.

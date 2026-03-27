@@ -13,9 +13,10 @@ export default function HomeRouteSection() {
     void ensureSheets(requiredSheets)
   }, [ensureSheets, requiredSheets])
 
-  const tiendasSheet = getCachedSheet('Tiendas') || getCachedSheet('TIENDAS') || undefined
-  const enviosSheet = getCachedSheet('DATA ENVIOS') || undefined
-  const recojosSheet = getCachedSheet('DATA RECOJOS') || undefined
+  const tiendasSheet = getCachedSheet('TIENDAS') || getCachedSheet('Tiendas') || undefined
+  const enviosSheet = getCachedSheet('ENVIOS') || getCachedSheet('DATA ENVIOS') || undefined
+  const recojosSheet = getCachedSheet('RECOJOS') || getCachedSheet('DATA RECOJOS') || undefined
+  const leadsGanadosSheet = getCachedSheet('LEADS GANADOS') || undefined
   const comisionesSheet = getCachedSheet(SPECIAL_SHEETS.commissionsLeads) || undefined
 
   if (sectionLoading && !tiendasSheet && !enviosSheet && !recojosSheet) {
@@ -27,6 +28,7 @@ export default function HomeRouteSection() {
       tiendasSheet={tiendasSheet}
       enviosSheet={enviosSheet}
       recojosSheet={recojosSheet}
+      leadsGanadosSheet={leadsGanadosSheet}
       comisionesSheet={comisionesSheet}
       startDate={globalRangeStart}
       endDate={globalRangeEnd}

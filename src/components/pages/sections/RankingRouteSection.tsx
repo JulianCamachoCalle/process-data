@@ -12,8 +12,10 @@ export default function RankingRouteSection() {
     void ensureSheets(requiredSheets)
   }, [ensureSheets, requiredSheets])
 
-  const enviosSheet = getCachedSheet('DATA ENVIOS')
-  const tiendasSheet = getCachedSheet('Tiendas') || getCachedSheet('TIENDAS')
+  const enviosSheet = getCachedSheet('ENVIOS') || getCachedSheet('DATA ENVIOS')
+  const tiendasSheet = getCachedSheet('TIENDAS') || getCachedSheet('Tiendas')
+  const vendedoresSheet = getCachedSheet('VENDEDORES')
+  const resultadosSheet = getCachedSheet('RESULTADOS')
 
   if (sectionLoading && (!enviosSheet || !tiendasSheet)) {
     return <p className="text-sm text-slate-500">Cargando ranking...</p>
@@ -23,6 +25,8 @@ export default function RankingRouteSection() {
     <RankingSection
       enviosSheet={enviosSheet}
       tiendasSheet={tiendasSheet}
+      vendedoresSheet={vendedoresSheet}
+      resultadosSheet={resultadosSheet}
       startDate={globalRangeStart}
       endDate={globalRangeEnd}
     />

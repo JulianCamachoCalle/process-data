@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { PencilLine, Trash2 } from 'lucide-react'
+import Swal from 'sweetalert2'
 import type { RawSheetData } from '../../../services/sheetsData'
 import { findRelationRuleForField } from '../../../config/relationalMapping'
 import type { RowRecord } from './shared'
@@ -7,7 +8,7 @@ import { findColumnIndex, formatDateInputValue, formatInt, normalizeKey, parseDa
 
 type CrudModalMode = 'create' | 'edit' | null
 
-type ColumnInputType = 'text' | 'multiline' | 'date' | 'integer' | 'decimal'
+type ColumnInputType = 'text' | 'multiline' | 'month' | 'date' | 'integer' | 'decimal'
 
 type ColumnSpec = {
   header: string
@@ -21,8 +22,10 @@ type RelatedSheetMap = Record<string, RawSheetData>
 type DisplayRecord = RowRecord & { displayRow: string[] }
 type RelationOption = { idValue: string; displayValue: string }
 
-const DATE_HEADER_HINTS = ['fecha', 'mes', 'periodo', 'date']
+const MONTH_HEADER_HINTS = ['mes', 'periodo']
+const DATE_HEADER_HINTS = ['fecha', 'date']
 const DECIMAL_HEADER_HINTS = ['costo', 'ingreso', 'pago', 'cobro', 'comision', 'tarifa', 'margen', 'extra', 'monto']
+const MONEY_HEADER_HINTS = ['costo', 'ingreso', 'pago', 'cobro', 'comision', 'tarifa', 'margen', 'extra', 'monto']
 const INTEGER_HEADER_HINTS = ['cantidad', 'veces', 'dias', 'envios', 'leads', 'rank', 'id']
 const MULTILINE_HEADER_HINTS = ['nota', 'observacion', 'comentario', 'detalle']
 
@@ -35,20 +38,33 @@ const COSTO_TOTAL_FILA_HEADER_HINTS = ['Costo total fila']
 const EXTRA_PUNTO_EMPRESA_HEADER_HINTS = ['Extra punto empresa']
 const EXTRA_PUNTO_MOTO_HEADER_HINTS = ['Extra punto moto']
 const EXCEDENTE_PAGADO_MOTO_HEADER_HINTS = ['Excedente pagado moto']
-const TIENDA_FULLFILMENT_HEADER_HINTS = ['¿Es tienda Fulfillment?', 'Tienda fullfilment', 'Es tienda fulfillment', 'Es tienda fullfilment']
-const ID_TIENDA_HEADER_HINTS = ['IdTienda', 'IdTiendas', 'Tienda_ID', 'Tienda ID']
-const NOMBRE_TIENDA_HEADER_HINTS = ['Nombre tienda']
+const TIENDA_FULLFILMENT_HEADER_HINTS = ['IdFullFilment', 'Id FullFilment', 'IdFullfillment', '¿Es tienda Fulfillment?', 'Tienda fullfilment', 'Es tienda fulfillment', 'Es tienda fullfilment']
+const ID_TIENDA_HEADER_HINTS = ['IdTienda']
+const ENVIO_ID_VENDEDOR_HEADER_HINTS = ['IdVendedor', 'Vendedor ID', 'Vendedor_ID', 'VendedorID', 'Vendedor']
+const ENVIO_ID_TIPO_PUNTO_HEADER_HINTS = ['IdTipoPunto', 'Id tipo punto', 'Tipo punto', 'Tipo de punto']
 const ID_DESTINO_HEADER_HINTS = ['IdDestino']
 const TARIFA_DESTINO_LOOKUP_HINTS = ['IdDestino']
 const TARIFA_COBRO_ENTREGA_HINTS = ['Cobro entrega']
 const TARIFA_PAGO_MOTO_HINTS = ['Pago moto']
-const LEADS_TIENDA_HEADER_HINTS = ['Nombre tienda', 'Tienda', 'IdTienda', 'Tienda_ID']
-const LEADS_ID_FULLFILMENT_HEADER_HINTS = ['IdFullFilment', 'IdFullfillment', 'Id FullFilment', 'Id Fullfillment']
-const LEADS_FULLFILMENT_FLAG_HEADER_HINTS = ['Fulfillment', 'Fullfilment']
-const FULLFILMENT_ID_HEADER_HINTS = ['IdFullFilment', 'IdFullfillment', 'Id FullFilment', 'Id Fullfillment']
+const LEADS_ID_FULLFILMENT_HEADER_HINTS = ['IdFullFilment']
+const RECOJO_TIPO_HEADER_HINTS = ['IdTipoRecojo']
+const RECOJO_VECES_HEADER_HINTS = ['Veces']
+const COBRO_TIENDA_RECOJO_HEADER_HINTS = ['Cobro a tienda por recojo']
+const PAGO_MOTO_RECOJO_HEADER_HINTS = ['Pago moto por recojo']
+const INGRESO_RECOJO_TOTAL_HEADER_HINTS = ['Ingreso recojo total']
+const COSTO_RECOJO_TOTAL_HEADER_HINTS = ['Costo recojo total']
+const RECOJO_ID_TIENDA_HEADER_HINTS = ['IdTienda']
+const RECOJO_ID_VENDEDOR_HEADER_HINTS = ['IdVendedor']
+const LEADS_ID_TIENDA_HEADER_HINTS = ['IdTienda']
+const LEADS_ID_VENDEDOR_HEADER_HINTS = ['IdVendedor']
+const LEADS_VENDEDOR_NOMBRE_HEADER_HINTS = ['Nombre']
+const VENDEDORES_ID_HEADER_HINTS = ['IdVendedor']
+const VENDEDORES_NOMBRE_HEADER_HINTS = ['Nombre']
 const IGV_DIVISOR = 1.18
+const SWAL_CONFIRM_BUTTON_COLOR = '#0f172a'
+const SWAL_CANCEL_BUTTON_COLOR = '#64748b'
 
-function includesAny(value: string, hints: string[]): boolean {
+function includesAny(value: string, hints: string[]): boolean { 
   return hints.some((hint) => value.includes(hint))
 }
 
@@ -124,6 +140,10 @@ function inferColumnInputType(header: string, sampleValues: string[]): ColumnInp
 
   if (includesAny(normalizedHeader, MULTILINE_HEADER_HINTS)) {
     return 'multiline'
+  }
+
+  if (includesAny(normalizedHeader, MONTH_HEADER_HINTS)) {
+    return 'month'
   }
 
   if (includesAny(normalizedHeader, DATE_HEADER_HINTS)) {
@@ -413,12 +433,90 @@ function coerceValueForInput(rawValue: string, spec: ColumnSpec): string {
   const trimmed = (rawValue || '').trim()
   if (!trimmed) return ''
 
+  if (spec.inputType === 'month') {
+    const parsedMonth = parseMonthInputValue(trimmed)
+    return parsedMonth || ''
+  }
+
   if (spec.inputType === 'date') {
     const parsedDate = parseDateValue(trimmed)
     return parsedDate ? formatDateInputValue(parsedDate) : ''
   }
 
   return trimmed
+}
+
+function parseMonthInputValue(rawValue: string): string | null {
+  const trimmed = (rawValue || '').trim()
+  if (!trimmed) return null
+
+  const directMonth = trimmed.match(/^(\d{4})-(\d{2})$/)
+  if (directMonth) {
+    const year = Number(directMonth[1])
+    const month = Number(directMonth[2])
+    if (Number.isFinite(year) && Number.isFinite(month) && month >= 1 && month <= 12) {
+      return `${year}-${String(month).padStart(2, '0')}`
+    }
+  }
+
+  const monthYear = trimmed.match(/^(\d{1,2})[/-](\d{2,4})$/)
+  if (monthYear) {
+    const month = Number(monthYear[1])
+    const yearRaw = Number(monthYear[2])
+    const year = yearRaw < 100 ? 2000 + yearRaw : yearRaw
+    if (month >= 1 && month <= 12) {
+      return `${year}-${String(month).padStart(2, '0')}`
+    }
+  }
+
+  const normalized = normalizeKey(trimmed)
+  const monthNameMap: Record<string, number> = {
+    enero: 1,
+    ene: 1,
+    febrero: 2,
+    feb: 2,
+    marzo: 3,
+    mar: 3,
+    abril: 4,
+    abr: 4,
+    mayo: 5,
+    may: 5,
+    junio: 6,
+    jun: 6,
+    julio: 7,
+    jul: 7,
+    agosto: 8,
+    ago: 8,
+    septiembre: 9,
+    setiembre: 9,
+    sep: 9,
+    set: 9,
+    octubre: 10,
+    oct: 10,
+    noviembre: 11,
+    nov: 11,
+    diciembre: 12,
+    dic: 12,
+  }
+
+  const monthNameWithYear = normalized.match(/^(enero|ene|febrero|feb|marzo|mar|abril|abr|mayo|may|junio|jun|julio|jul|agosto|ago|septiembre|setiembre|sep|set|octubre|oct|noviembre|nov|diciembre|dic)\s+(\d{2,4})$/)
+  if (monthNameWithYear) {
+    const month = monthNameMap[monthNameWithYear[1]]
+    const yearRaw = Number(monthNameWithYear[2])
+    const year = yearRaw < 100 ? 2000 + yearRaw : yearRaw
+    return `${year}-${String(month).padStart(2, '0')}`
+  }
+
+  if (monthNameMap[normalized]) {
+    const year = new Date().getFullYear()
+    const month = monthNameMap[normalized]
+    return `${year}-${String(month).padStart(2, '0')}`
+  }
+
+  const parsedDate = parseDateValue(trimmed)
+  if (!parsedDate) return null
+
+  return `${parsedDate.getFullYear()}-${String(parsedDate.getMonth() + 1).padStart(2, '0')}`
 }
 
 function areValuesEquivalent(leftValue: string, rightValue: string): boolean {
@@ -439,61 +537,95 @@ function roundToTwoDecimals(value: number): number {
   return Math.round(value * 100) / 100
 }
 
+function formatMoneyValue(value: number): string {
+  return roundToTwoDecimals(value).toFixed(2).replace('.', ',')
+}
+
+function isMoneyLikeHeader(header: string): boolean {
+  return includesAny(normalizeKey(header), MONEY_HEADER_HINTS)
+}
+
 function getEnviosComputedColumnIndexes(headers: string[]): Set<number> {
   const indexes = [
     findColumnIndex(headers, COBRO_ENTREGA_HEADER_HINTS),
     findColumnIndex(headers, PAGO_MOTO_HEADER_HINTS),
+    findColumnIndex(headers, EXTRA_PUNTO_EMPRESA_HEADER_HINTS),
+    findColumnIndex(headers, EXTRA_PUNTO_MOTO_HEADER_HINTS),
     findColumnIndex(headers, INGRESO_TOTAL_FILA_HEADER_HINTS),
     findColumnIndex(headers, COSTO_TOTAL_FILA_HEADER_HINTS),
     findColumnIndex(headers, TIENDA_FULLFILMENT_HEADER_HINTS),
+    findColumnIndex(headers, ENVIO_ID_VENDEDOR_HEADER_HINTS),
   ].filter((index) => index >= 0)
 
   return new Set(indexes)
 }
 
-function resolveTiendaNombre(args: {
-  rowValues: string[]
-  headers: string[]
+function resolveRecojoCobroPorTipo(tipoRecojoValue: string): number | null {
+  const trimmed = (tipoRecojoValue || '').trim()
+  if (!trimmed) return null
+
+  const parsedTipo = parseNumeric(trimmed)
+  if (parsedTipo !== null) {
+    const rounded = Math.round(parsedTipo)
+    if (rounded === 1) return 8
+    if (rounded === 2) return 0
+  }
+
+  const normalizedTipo = normalizeKey(trimmed)
+  if (normalizedTipo.includes('1 pedido') || normalizedTipo.includes('cobra s/8') || normalizedTipo.includes('cobro')) {
+    return 8
+  }
+  if (normalizedTipo.includes('2+ entregados') || normalizedTipo.includes('gratis')) {
+    return 0
+  }
+
+  return null
+}
+
+function getRecojosComputedColumnIndexes(headers: string[]): Set<number> {
+  const indexes = [
+    findColumnIndex(headers, COBRO_TIENDA_RECOJO_HEADER_HINTS),
+    findColumnIndex(headers, PAGO_MOTO_RECOJO_HEADER_HINTS),
+    findColumnIndex(headers, INGRESO_RECOJO_TOTAL_HEADER_HINTS),
+    findColumnIndex(headers, COSTO_RECOJO_TOTAL_HEADER_HINTS),
+    findColumnIndex(headers, RECOJO_ID_VENDEDOR_HEADER_HINTS),
+  ].filter((index) => index >= 0)
+
+  return new Set(indexes)
+}
+
+function resolveVendedorIdValue(args: {
+  rawValue: string
   relatedSheets: RelatedSheetMap
-}): { tiendaNombre: string; tiendaId: string } {
-  const tiendaNombreIndex = findColumnIndex(args.headers, NOMBRE_TIENDA_HEADER_HINTS)
-  const tiendaIdIndex = findColumnIndex(args.headers, ID_TIENDA_HEADER_HINTS)
+}): string {
+  const trimmed = (args.rawValue || '').trim()
+  if (!trimmed) return ''
 
-  const tiendaNombreDirecto = tiendaNombreIndex >= 0 ? (args.rowValues[tiendaNombreIndex] || '').trim() : ''
-  const tiendaId = tiendaIdIndex >= 0 ? (args.rowValues[tiendaIdIndex] || '').trim() : ''
-
-  if (tiendaNombreDirecto) {
-    return { tiendaNombre: tiendaNombreDirecto, tiendaId }
+  const numericCandidate = parseNumeric(trimmed)
+  if (numericCandidate !== null) {
+    return String(Math.round(numericCandidate))
   }
 
-  if (!tiendaId) {
-    return { tiendaNombre: '', tiendaId: '' }
+  const vendedoresSheet = args.relatedSheets[normalizeKey('VENDEDORES')]
+  if (!vendedoresSheet || vendedoresSheet.headers.length === 0 || vendedoresSheet.rows.length === 0) {
+    return ''
   }
 
-  const tiendasSheet = args.relatedSheets[normalizeKey('TIENDAS')]
-  if (!tiendasSheet || tiendasSheet.headers.length === 0 || tiendasSheet.rows.length === 0) {
-    return { tiendaNombre: '', tiendaId }
+  const vendedorIdIndex = findColumnIndex(vendedoresSheet.headers, VENDEDORES_ID_HEADER_HINTS)
+  const vendedorNombreIndex = findColumnIndex(vendedoresSheet.headers, VENDEDORES_NOMBRE_HEADER_HINTS)
+
+  if (vendedorIdIndex < 0 || vendedorNombreIndex < 0) {
+    return ''
   }
 
-  const tiendasIdIndex = findColumnIndex(tiendasSheet.headers, ID_TIENDA_HEADER_HINTS)
-  const tiendasNombreIndex = findColumnIndex(tiendasSheet.headers, ['Nombre tienda', 'Nombre'])
-
-  const safeTiendasIdIndex = tiendasIdIndex >= 0 ? tiendasIdIndex : 0
-  const safeTiendasNombreIndex = tiendasNombreIndex >= 0 ? tiendasNombreIndex : safeTiendasIdIndex
-
-  const tiendaRow = tiendasSheet.rows.find((row) => {
-    const candidateId = (row[safeTiendasIdIndex] || '').trim()
-    return areValuesEquivalent(candidateId, tiendaId)
+  const matchingVendedorRow = vendedoresSheet.rows.find((row) => {
+    const candidateNombre = (row[vendedorNombreIndex] || '').trim()
+    if (!candidateNombre) return false
+    return areValuesEquivalent(candidateNombre, trimmed)
   })
 
-  if (!tiendaRow) {
-    return { tiendaNombre: '', tiendaId }
-  }
-
-  return {
-    tiendaNombre: (tiendaRow[safeTiendasNombreIndex] || '').trim(),
-    tiendaId,
-  }
+  if (!matchingVendedorRow) return ''
+  return (matchingVendedorRow[vendedorIdIndex] || '').trim()
 }
 
 function applyEnviosCobroEntregaFormula(args: {
@@ -520,6 +652,9 @@ function applyEnviosDerivedValues(args: {
   const nextRowValues = [...args.rowValues]
 
   const destinoIndex = findColumnIndex(args.headers, ID_DESTINO_HEADER_HINTS)
+  const idTiendaIndex = findColumnIndex(args.headers, ID_TIENDA_HEADER_HINTS)
+  const envioVendedorIndex = findColumnIndex(args.headers, ENVIO_ID_VENDEDOR_HEADER_HINTS)
+  const tipoPuntoIndex = findColumnIndex(args.headers, ENVIO_ID_TIPO_PUNTO_HEADER_HINTS)
   const cobroEntregaIndex = findColumnIndex(args.headers, COBRO_ENTREGA_HEADER_HINTS)
   const pagoMotoIndex = findColumnIndex(args.headers, PAGO_MOTO_HEADER_HINTS)
   const ingresoTotalFilaIndex = findColumnIndex(args.headers, INGRESO_TOTAL_FILA_HEADER_HINTS)
@@ -586,18 +721,43 @@ function applyEnviosDerivedValues(args: {
   }
 
   if (cobroEntregaIndex >= 0) {
-    nextRowValues[cobroEntregaIndex] = cobroEntrega === null ? '' : String(roundToTwoDecimals(cobroEntrega))
+    nextRowValues[cobroEntregaIndex] = cobroEntrega === null ? '' : formatMoneyValue(cobroEntrega)
   }
 
   if (pagoMotoIndex >= 0) {
-    nextRowValues[pagoMotoIndex] = pagoMoto === null ? '' : String(roundToTwoDecimals(pagoMoto))
+    nextRowValues[pagoMotoIndex] = pagoMoto === null ? '' : formatMoneyValue(pagoMoto)
+  }
+
+  const tipoPuntoValue = tipoPuntoIndex >= 0 ? (nextRowValues[tipoPuntoIndex] || '').trim() : ''
+  const tipoPuntoNumeric = parseNumeric(tipoPuntoValue)
+  const isTipoPuntoNormal = tipoPuntoNumeric !== null
+    ? Math.round(tipoPuntoNumeric) === 1
+    : normalizeKey(tipoPuntoValue).includes('normal')
+  const shouldForceExtrasForNonNormalPoint = Boolean(tipoPuntoValue) && !isTipoPuntoNormal
+
+  if (shouldForceExtrasForNonNormalPoint) {
+    if (extraPuntoMotoIndex >= 0) {
+      nextRowValues[extraPuntoMotoIndex] = pagoMoto === null ? '' : formatMoneyValue(pagoMoto)
+    }
+
+    if (extraPuntoEmpresaIndex >= 0) {
+      nextRowValues[extraPuntoEmpresaIndex] = formatMoneyValue(8)
+    }
+  } else {
+    if (extraPuntoMotoIndex >= 0) {
+      nextRowValues[extraPuntoMotoIndex] = ''
+    }
+
+    if (extraPuntoEmpresaIndex >= 0) {
+      nextRowValues[extraPuntoEmpresaIndex] = ''
+    }
   }
 
   if (ingresoTotalFilaIndex >= 0) {
     const extraPuntoEmpresa = extraPuntoEmpresaIndex >= 0 ? parseNumeric(nextRowValues[extraPuntoEmpresaIndex] || '') : null
     const hasAnyValue = cobroEntrega !== null || extraPuntoEmpresa !== null
     const ingresoTotalFila = (cobroEntrega || 0) + (extraPuntoEmpresa || 0)
-    nextRowValues[ingresoTotalFilaIndex] = hasAnyValue ? String(roundToTwoDecimals(ingresoTotalFila)) : ''
+    nextRowValues[ingresoTotalFilaIndex] = hasAnyValue ? formatMoneyValue(ingresoTotalFila) : ''
   }
 
   if (costoTotalFilaIndex >= 0) {
@@ -605,113 +765,105 @@ function applyEnviosDerivedValues(args: {
     const excedentePagadoMoto = excedentePagadoMotoIndex >= 0 ? parseNumeric(nextRowValues[excedentePagadoMotoIndex] || '') : null
     const hasAnyValue = pagoMoto !== null || extraPuntoMoto !== null || excedentePagadoMoto !== null
     const costoTotalFila = (pagoMoto || 0) + (extraPuntoMoto || 0) + (excedentePagadoMoto || 0)
-    nextRowValues[costoTotalFilaIndex] = hasAnyValue ? String(roundToTwoDecimals(costoTotalFila)) : ''
+    nextRowValues[costoTotalFilaIndex] = hasAnyValue ? formatMoneyValue(costoTotalFila) : ''
   }
 
-  if (tiendaFullfilmentIndex >= 0) {
-    const { tiendaNombre, tiendaId } = resolveTiendaNombre({
-      rowValues: nextRowValues,
-      headers: args.headers,
-      relatedSheets: args.relatedSheets,
-    })
+  if (tiendaFullfilmentIndex >= 0 || envioVendedorIndex >= 0) {
+    const envioIdTienda = idTiendaIndex >= 0 ? (nextRowValues[idTiendaIndex] || '').trim() : ''
 
-    if (!tiendaNombre && !tiendaId) {
-      nextRowValues[tiendaFullfilmentIndex] = ''
+    if (!envioIdTienda) {
+      if (tiendaFullfilmentIndex >= 0) nextRowValues[tiendaFullfilmentIndex] = ''
+      if (envioVendedorIndex >= 0) nextRowValues[envioVendedorIndex] = ''
       return { rowValues: nextRowValues, error: null }
     }
 
     const leadsSheet = args.relatedSheets[normalizeKey('LEADS GANADOS')]
-    const fullfilmentSheet = args.relatedSheets[normalizeKey('FULLFILMENT')]
-
     if (!leadsSheet || leadsSheet.headers.length === 0 || leadsSheet.rows.length === 0) {
       if (args.strict) {
         return {
           rowValues: [],
-          error: 'No se pudo validar tienda fullfilment porque la hoja LEADS GANADOS no esta disponible.',
+          error: 'No se pudo autocompletar ENVIOS porque la hoja LEADS GANADOS no esta disponible.',
         }
       }
 
-      nextRowValues[tiendaFullfilmentIndex] = ''
+      if (tiendaFullfilmentIndex >= 0) nextRowValues[tiendaFullfilmentIndex] = ''
+      if (envioVendedorIndex >= 0) nextRowValues[envioVendedorIndex] = ''
       return { rowValues: nextRowValues, error: null }
     }
 
-    if (!fullfilmentSheet || fullfilmentSheet.headers.length === 0 || fullfilmentSheet.rows.length === 0) {
-      if (args.strict) {
-        return {
-          rowValues: [],
-          error: 'No se pudo validar tienda fullfilment porque la hoja FULLFILMENT no esta disponible.',
-        }
-      }
-
-      nextRowValues[tiendaFullfilmentIndex] = ''
-      return { rowValues: nextRowValues, error: null }
-    }
-
-    const leadsTiendaIndex = findColumnIndex(leadsSheet.headers, LEADS_TIENDA_HEADER_HINTS)
+    const leadsIdTiendaIndex = findColumnIndex(leadsSheet.headers, LEADS_ID_TIENDA_HEADER_HINTS)
     const leadsIdFullfilmentIndex = findColumnIndex(leadsSheet.headers, LEADS_ID_FULLFILMENT_HEADER_HINTS)
-    const leadsFullfilmentFlagIndex = findColumnIndex(leadsSheet.headers, LEADS_FULLFILMENT_FLAG_HEADER_HINTS)
+    const leadsIdVendedorIndex = findColumnIndex(leadsSheet.headers, LEADS_ID_VENDEDOR_HEADER_HINTS)
+    const leadsVendedorNombreIndex = findColumnIndex(leadsSheet.headers, LEADS_VENDEDOR_NOMBRE_HEADER_HINTS)
 
-    if (leadsTiendaIndex < 0 || (leadsIdFullfilmentIndex < 0 && leadsFullfilmentFlagIndex < 0)) {
+    if (leadsIdTiendaIndex < 0) {
       if (args.strict) {
         return {
           rowValues: [],
-          error: 'No se encontraron columnas de tienda/fullfilment en LEADS GANADOS para validar la tienda.',
+          error: 'No se encontro la columna IdTienda en LEADS GANADOS para autocompletar ENVIOS.',
         }
       }
 
-      nextRowValues[tiendaFullfilmentIndex] = ''
+      if (tiendaFullfilmentIndex >= 0) nextRowValues[tiendaFullfilmentIndex] = ''
+      if (envioVendedorIndex >= 0) nextRowValues[envioVendedorIndex] = ''
       return { rowValues: nextRowValues, error: null }
     }
 
-    const matchingLeadRows = leadsSheet.rows.filter((row) => {
-      const candidateStore = (row[leadsTiendaIndex] || '').trim()
-      if (!candidateStore) return false
-
-      if (tiendaNombre && areValuesEquivalent(candidateStore, tiendaNombre)) {
-        return true
-      }
-
-      if (tiendaId && areValuesEquivalent(candidateStore, tiendaId)) {
-        return true
-      }
-
-      return false
+    const matchingLead = leadsSheet.rows.find((row) => {
+      const candidateIdTienda = (row[leadsIdTiendaIndex] || '').trim()
+      if (!candidateIdTienda) return false
+      return areValuesEquivalent(candidateIdTienda, envioIdTienda)
     })
 
-    if (matchingLeadRows.length === 0) {
-      nextRowValues[tiendaFullfilmentIndex] = 'No'
+    if (!matchingLead) {
+      if (args.strict) {
+        return {
+          rowValues: [],
+          error: `No se encontro IdTienda "${envioIdTienda}" en LEADS GANADOS para autocompletar ENVIOS.`,
+        }
+      }
+
+      if (tiendaFullfilmentIndex >= 0) nextRowValues[tiendaFullfilmentIndex] = ''
+      if (envioVendedorIndex >= 0) nextRowValues[envioVendedorIndex] = ''
       return { rowValues: nextRowValues, error: null }
     }
 
-    const leadWithIdFullfilment =
-      leadsIdFullfilmentIndex >= 0
-        ? matchingLeadRows.find((row) => (row[leadsIdFullfilmentIndex] || '').trim().length > 0) || matchingLeadRows[0]
-        : matchingLeadRows[0]
+    if (tiendaFullfilmentIndex >= 0) {
+      if (leadsIdFullfilmentIndex < 0) {
+        if (args.strict) {
+          return {
+            rowValues: [],
+            error: 'No se encontro la columna IdFullFilment en LEADS GANADOS para autocompletar ENVIOS.',
+          }
+        }
 
-    const leadIdFullfilment =
-      leadsIdFullfilmentIndex >= 0 ? (leadWithIdFullfilment[leadsIdFullfilmentIndex] || '').trim() : ''
-
-    if (leadIdFullfilment) {
-      const fullfilmentIdIndex = findColumnIndex(fullfilmentSheet.headers, FULLFILMENT_ID_HEADER_HINTS)
-      const safeFullfilmentIdIndex = fullfilmentIdIndex >= 0 ? fullfilmentIdIndex : 0
-
-      const idExists = fullfilmentSheet.rows.some((row) => {
-        const candidateId = (row[safeFullfilmentIdIndex] || '').trim()
-        return areValuesEquivalent(candidateId, leadIdFullfilment)
-      })
-
-      nextRowValues[tiendaFullfilmentIndex] = idExists ? 'Si' : 'No'
-      return { rowValues: nextRowValues, error: null }
+        nextRowValues[tiendaFullfilmentIndex] = ''
+      } else {
+        nextRowValues[tiendaFullfilmentIndex] = (matchingLead[leadsIdFullfilmentIndex] || '').trim()
+      }
     }
 
-    if (leadsFullfilmentFlagIndex >= 0) {
-      const fullfilmentFlag = normalizeKey((leadWithIdFullfilment[leadsFullfilmentFlagIndex] || '').trim())
-      const enabledFlags = new Set(['si', 'sí', 'yes', 'true', '1', 'habilitado'])
-      nextRowValues[tiendaFullfilmentIndex] = enabledFlags.has(fullfilmentFlag) ? 'Si' : 'No'
-      return { rowValues: nextRowValues, error: null }
-    }
+    if (envioVendedorIndex >= 0) {
+      const rawVendedorValue = leadsIdVendedorIndex >= 0
+        ? (matchingLead[leadsIdVendedorIndex] || '').trim()
+        : leadsVendedorNombreIndex >= 0
+          ? (matchingLead[leadsVendedorNombreIndex] || '').trim()
+          : ''
 
-    nextRowValues[tiendaFullfilmentIndex] = 'No'
+      const resolvedVendedorValue = resolveVendedorIdValue({
+        rawValue: rawVendedorValue,
+        relatedSheets: args.relatedSheets,
+      }) || rawVendedorValue
+
+      if (!resolvedVendedorValue && args.strict) {
+        return {
+          rowValues: [],
+          error: `No se pudo autocompletar vendedor para IdTienda "${envioIdTienda}" en ENVIOS.`,
+        }
+      }
+
+      nextRowValues[envioVendedorIndex] = resolvedVendedorValue
+    }
   }
 
   return { rowValues: nextRowValues, error: null }
@@ -723,6 +875,137 @@ function applyEnviosCobroEntregaPreview(args: {
   relatedSheets: RelatedSheetMap
 }): string[] {
   const result = applyEnviosDerivedValues({
+    rowValues: args.draft,
+    headers: args.headers,
+    relatedSheets: args.relatedSheets,
+    strict: false,
+  })
+
+  return result.rowValues
+}
+
+function applyRecojosDerivedValues(args: {
+  rowValues: string[]
+  headers: string[]
+  relatedSheets: RelatedSheetMap
+  strict: boolean
+}): { rowValues: string[]; error: string | null } {
+  const nextRowValues = [...args.rowValues]
+
+  const tipoRecojoIndex = findColumnIndex(args.headers, RECOJO_TIPO_HEADER_HINTS)
+  const vecesIndex = findColumnIndex(args.headers, RECOJO_VECES_HEADER_HINTS)
+  const cobroTiendaIndex = findColumnIndex(args.headers, COBRO_TIENDA_RECOJO_HEADER_HINTS)
+  const pagoMotoIndex = findColumnIndex(args.headers, PAGO_MOTO_RECOJO_HEADER_HINTS)
+  const ingresoRecojoTotalIndex = findColumnIndex(args.headers, INGRESO_RECOJO_TOTAL_HEADER_HINTS)
+  const costoRecojoTotalIndex = findColumnIndex(args.headers, COSTO_RECOJO_TOTAL_HEADER_HINTS)
+  const recojoIdTiendaIndex = findColumnIndex(args.headers, RECOJO_ID_TIENDA_HEADER_HINTS)
+  const recojoIdVendedorIndex = findColumnIndex(args.headers, RECOJO_ID_VENDEDOR_HEADER_HINTS)
+
+  const tipoRecojoValue = tipoRecojoIndex >= 0 ? (nextRowValues[tipoRecojoIndex] || '').trim() : ''
+  const vecesValue = vecesIndex >= 0 ? parseNumeric(nextRowValues[vecesIndex] || '') : null
+
+  const cobroTienda = resolveRecojoCobroPorTipo(tipoRecojoValue)
+  const pagoMoto = 4
+
+  if (tipoRecojoValue && cobroTienda === null && args.strict) {
+    return {
+      rowValues: [],
+      error: 'No se pudo calcular Cobro a tienda por recojo. Verifica que Tipo recojo sea 1 o 2.',
+    }
+  }
+
+  if (cobroTiendaIndex >= 0) {
+    nextRowValues[cobroTiendaIndex] = cobroTienda === null ? '' : formatMoneyValue(cobroTienda)
+  }
+
+  if (pagoMotoIndex >= 0) {
+    nextRowValues[pagoMotoIndex] = formatMoneyValue(pagoMoto)
+  }
+
+  if (ingresoRecojoTotalIndex >= 0) {
+    if (vecesValue === null || cobroTienda === null) {
+      nextRowValues[ingresoRecojoTotalIndex] = ''
+    } else {
+      nextRowValues[ingresoRecojoTotalIndex] = formatMoneyValue(vecesValue * cobroTienda)
+    }
+  }
+
+  if (costoRecojoTotalIndex >= 0) {
+    if (vecesValue === null) {
+      nextRowValues[costoRecojoTotalIndex] = ''
+    } else {
+      nextRowValues[costoRecojoTotalIndex] = formatMoneyValue(vecesValue * pagoMoto)
+    }
+  }
+
+  if (recojoIdVendedorIndex >= 0) {
+    const recojoIdTienda = recojoIdTiendaIndex >= 0 ? (nextRowValues[recojoIdTiendaIndex] || '').trim() : ''
+
+    if (!recojoIdTienda) {
+      nextRowValues[recojoIdVendedorIndex] = ''
+    } else {
+      const leadsSheet = args.relatedSheets[normalizeKey('LEADS GANADOS')]
+      if (!leadsSheet || leadsSheet.headers.length === 0 || leadsSheet.rows.length === 0) {
+        if (args.strict) {
+          return {
+            rowValues: [],
+            error: 'No se pudo calcular IdVendedor en RECOJOS porque la hoja LEADS GANADOS no esta disponible.',
+          }
+        }
+        nextRowValues[recojoIdVendedorIndex] = ''
+      } else {
+        const leadsIdTiendaIndex = findColumnIndex(leadsSheet.headers, LEADS_ID_TIENDA_HEADER_HINTS)
+        const leadsIdVendedorIndex = findColumnIndex(leadsSheet.headers, LEADS_ID_VENDEDOR_HEADER_HINTS)
+        const leadsVendedorNombreIndex = findColumnIndex(leadsSheet.headers, LEADS_VENDEDOR_NOMBRE_HEADER_HINTS)
+
+        if (leadsIdTiendaIndex < 0 || (leadsIdVendedorIndex < 0 && leadsVendedorNombreIndex < 0)) {
+          if (args.strict) {
+            return {
+              rowValues: [],
+              error: 'No se encontraron columnas IdTienda/IdVendedor en LEADS GANADOS para completar RECOJOS.',
+            }
+          }
+          nextRowValues[recojoIdVendedorIndex] = ''
+        } else {
+          const matchingLead = leadsSheet.rows.find((row) => {
+            const candidateStore = (row[leadsIdTiendaIndex] || '').trim()
+            if (!candidateStore) return false
+            return areValuesEquivalent(candidateStore, recojoIdTienda)
+          })
+
+          const rawVendedorValue = matchingLead
+            ? leadsIdVendedorIndex >= 0
+              ? (matchingLead[leadsIdVendedorIndex] || '').trim()
+              : (matchingLead[leadsVendedorNombreIndex] || '').trim()
+            : ''
+
+          const idVendedor = resolveVendedorIdValue({
+            rawValue: rawVendedorValue,
+            relatedSheets: args.relatedSheets,
+          })
+
+          if (!idVendedor && args.strict) {
+            return {
+              rowValues: [],
+              error: `No se pudo resolver IdVendedor para la tienda ID "${recojoIdTienda}" en LEADS GANADOS.`,
+            }
+          }
+
+          nextRowValues[recojoIdVendedorIndex] = idVendedor
+        }
+      }
+    }
+  }
+
+  return { rowValues: nextRowValues, error: null }
+}
+
+function applyRecojosPreview(args: {
+  draft: string[]
+  headers: string[]
+  relatedSheets: RelatedSheetMap
+}): string[] {
+  const result = applyRecojosDerivedValues({
     rowValues: args.draft,
     headers: args.headers,
     relatedSheets: args.relatedSheets,
@@ -763,6 +1046,19 @@ function normalizeRowForSubmit(args: {
       continue
     }
 
+    if (spec.inputType === 'month') {
+      const parsedMonth = parseMonthInputValue(value)
+      if (!parsedMonth) {
+        return {
+          rowValues: [],
+          error: `La columna "${spec.header}" requiere un mes valido.`,
+        }
+      }
+
+      rowValues.push(parsedMonth)
+      continue
+    }
+
     if (spec.inputType === 'integer') {
       const parsedNumber = parseNumeric(value)
       if (parsedNumber === null) {
@@ -785,7 +1081,7 @@ function normalizeRowForSubmit(args: {
         }
       }
 
-      rowValues.push(String(parsedNumber))
+      rowValues.push(isMoneyLikeHeader(spec.header) ? formatMoneyValue(parsedNumber) : String(parsedNumber))
       continue
     }
 
@@ -797,6 +1093,15 @@ function normalizeRowForSubmit(args: {
       rowValues,
       headers: args.headers,
       relatedSheets: args.relatedSheets,
+    })
+  }
+
+  if (normalizeKey(args.sheetName) === normalizeKey('RECOJOS')) {
+    return applyRecojosDerivedValues({
+      rowValues,
+      headers: args.headers,
+      relatedSheets: args.relatedSheets,
+      strict: true,
     })
   }
 
@@ -894,21 +1199,47 @@ export default function CrudSection({
     [sheet.sheetName],
   )
 
+  const isRecojosSheet = useMemo(
+    () => normalizeKey(sheet.sheetName) === normalizeKey('RECOJOS'),
+    [sheet.sheetName],
+  )
+
   const enviosComputedColumnIndexes = useMemo(
     () => getEnviosComputedColumnIndexes(headers),
     [headers],
   )
 
+  const recojosComputedColumnIndexes = useMemo(
+    () => getRecojosComputedColumnIndexes(headers),
+    [headers],
+  )
+
+  const enviosTiendaFullfilmentColumnIndex = useMemo(
+    () => findColumnIndex(headers, TIENDA_FULLFILMENT_HEADER_HINTS),
+    [headers],
+  )
+
   const applyEnviosFormulaToDraft = useCallback(
     (draft: string[]): string[] => {
-      if (!isEnviosSheet) return draft
-      return applyEnviosCobroEntregaPreview({
-        draft,
-        headers,
-        relatedSheets,
-      })
+      if (isEnviosSheet) {
+        return applyEnviosCobroEntregaPreview({
+          draft,
+          headers,
+          relatedSheets,
+        })
+      }
+
+      if (isRecojosSheet) {
+        return applyRecojosPreview({
+          draft,
+          headers,
+          relatedSheets,
+        })
+      }
+
+      return draft
     },
-    [isEnviosSheet, headers, relatedSheets],
+    [isEnviosSheet, isRecojosSheet, headers, relatedSheets],
   )
 
   useEffect(() => {
@@ -993,6 +1324,20 @@ export default function CrudSection({
       return
     }
 
+    const createConfirmation = await Swal.fire({
+      title: 'Confirmar creacion',
+      text: `Se creara un nuevo registro en ${sheet.sheetName}.`,
+      icon: 'question',
+      showCancelButton: true,
+      confirmButtonText: 'Crear',
+      cancelButtonText: 'Cancelar',
+      confirmButtonColor: SWAL_CONFIRM_BUTTON_COLOR,
+      cancelButtonColor: SWAL_CANCEL_BUTTON_COLOR,
+      reverseButtons: true,
+    })
+
+    if (!createConfirmation.isConfirmed) return
+
     await onCreate(sheet.sheetName, normalized.rowValues, headers.length)
     setCreateDraft(headers.map(() => ''))
     setFormError(null)
@@ -1014,6 +1359,20 @@ export default function CrudSection({
       return
     }
 
+    const updateConfirmation = await Swal.fire({
+      title: 'Confirmar cambios',
+      text: `Se actualizara la fila ${editRowNumber} en ${sheet.sheetName}.`,
+      icon: 'question',
+      showCancelButton: true,
+      confirmButtonText: 'Guardar',
+      cancelButtonText: 'Cancelar',
+      confirmButtonColor: SWAL_CONFIRM_BUTTON_COLOR,
+      cancelButtonColor: SWAL_CANCEL_BUTTON_COLOR,
+      reverseButtons: true,
+    })
+
+    if (!updateConfirmation.isConfirmed) return
+
     await onUpdate(sheet.sheetName, editRowNumber, normalized.rowValues, headers.length)
     setEditRowNumber(null)
     setEditDraft([])
@@ -1021,8 +1380,27 @@ export default function CrudSection({
     setCrudModalMode(null)
   }
 
+  const handleDeleteConfirm = async (record: RowRecord) => {
+    const deleteConfirmation = await Swal.fire({
+      title: 'Eliminar registro',
+      text: `Se eliminara la fila ${record.rowNumber} de ${sheet.sheetName}. Esta accion no se puede deshacer.`,
+      icon: 'warning',
+      showCancelButton: true,
+      confirmButtonText: 'Eliminar',
+      cancelButtonText: 'Cancelar',
+      confirmButtonColor: '#b91c1c',
+      cancelButtonColor: SWAL_CANCEL_BUTTON_COLOR,
+      reverseButtons: true,
+    })
+
+    if (!deleteConfirmation.isConfirmed) return
+    await onDelete(sheet.sheetName, record.rowNumber)
+  }
+
   const setDraftFieldValue = (index: number, nextValue: string, options?: { allowProtectedId?: boolean }) => {
-    const isComputedField = isEnviosSheet && enviosComputedColumnIndexes.has(index)
+    const isComputedEnviosField = isEnviosSheet && enviosComputedColumnIndexes.has(index)
+    const isComputedRecojosField = isRecojosSheet && recojosComputedColumnIndexes.has(index)
+    const isComputedField = isComputedEnviosField || isComputedRecojosField
     const isProtectedId = index === primaryIdColumnIndex || relationalIdColumnIndexes.has(index)
     if ((isProtectedId && !options?.allowProtectedId) || isComputedField) {
       return
@@ -1043,7 +1421,7 @@ export default function CrudSection({
   }
 
   useEffect(() => {
-    if (!isEnviosSheet) return
+    if (!isEnviosSheet && !isRecojosSheet) return
 
     if (isCreateModal) {
       setCreateDraft((previous) => applyEnviosFormulaToDraft(previous))
@@ -1053,7 +1431,7 @@ export default function CrudSection({
     if (isEditModal) {
       setEditDraft((previous) => applyEnviosFormulaToDraft(previous))
     }
-  }, [isEnviosSheet, isCreateModal, isEditModal, applyEnviosFormulaToDraft])
+  }, [isEnviosSheet, isRecojosSheet, isCreateModal, isEditModal, applyEnviosFormulaToDraft])
 
   return (
     <section className="min-w-0 overflow-hidden rounded-2xl border border-slate-200/80 bg-white/90 p-5 shadow-[0_14px_32px_-22px_rgba(15,23,42,0.7)] backdrop-blur">
@@ -1190,8 +1568,7 @@ export default function CrudSection({
                             </button>
                             <button
                               onClick={() => {
-                                if (!window.confirm(`Eliminar fila ${record.rowNumber} de ${sheet.sheetName}?`)) return
-                                void onDelete(sheet.sheetName, record.rowNumber)
+                                void handleDeleteConfirm(record)
                               }}
                               className="rounded-md border border-rose-300 px-2 py-1 text-[11px] font-semibold text-rose-700"
                             >
@@ -1255,10 +1632,25 @@ export default function CrudSection({
                       const isPrimaryIdField = index === primaryIdColumnIndex
                       const isRelationalIdField = relationalIdColumnIndexes.has(index)
                       const isComputedEnviosField = isEnviosSheet && enviosComputedColumnIndexes.has(index)
+                      const isComputedRecojosField = isRecojosSheet && recojosComputedColumnIndexes.has(index)
+                      const isComputedField = isComputedEnviosField || isComputedRecojosField
+                      const isEnviosFullfilmentField = isEnviosSheet && index === enviosTiendaFullfilmentColumnIndex
+                      const isEnviosBooleanFullfilmentField =
+                        isEnviosFullfilmentField && !normalizeKey(header).includes('idfullfil')
                       const hasRelationOptions = spec.relationOptions.length > 0
                       const selectedRelationOption = hasRelationOptions
                         ? spec.relationOptions.find((option) => normalizeKey(option.idValue) === normalizeKey(value)) || null
                         : null
+                      const relatedDisplayValue = resolveDisplayCellValue(value, relationDisplayMapByColumn[index])
+                      const computedDisplayValue = isEnviosBooleanFullfilmentField
+                        ? value === '1'
+                          ? 'Si'
+                          : value === '2'
+                            ? 'No'
+                            : value
+                        : isRelationalIdField
+                          ? relatedDisplayValue
+                          : value
                       const commonClass = `mt-1 w-full rounded-lg border px-2 py-1.5 text-sm text-slate-800 ${
                         isCreateModal ? 'border-slate-300' : 'border-amber-300'
                       }`
@@ -1270,11 +1662,11 @@ export default function CrudSection({
                         >
                           {displayLabel}
 
-                          {isComputedEnviosField ? (
+                          {isComputedField ? (
                             <>
                               <input
                                 type="text"
-                                value={value}
+                                value={computedDisplayValue}
                                 readOnly
                                 className={`${commonClass} cursor-not-allowed bg-slate-100 text-slate-500`}
                               />
@@ -1386,6 +1778,9 @@ export default function CrudSection({
 
                               <input
                                 type={
+                                  spec.inputType === 'month'
+                                    ? 'month'
+                                    :
                                   spec.inputType === 'date'
                                     ? 'date'
                                     : spec.inputType === 'integer' || spec.inputType === 'decimal'

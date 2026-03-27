@@ -21,49 +21,87 @@ import {
   VENDOR_KEYS,
 } from './shared'
 
+const ID_TIENDA_HEADER_HINTS = ['IdTienda', 'IdTiendas', 'Tienda_ID', 'Tienda ID']
+const ID_VENDEDOR_HEADER_HINTS = ['IdVendedor', 'Vendedor ID']
+const ID_RESULTADO_HEADER_HINTS = ['IdResultado', 'Resultado ID']
+
+function buildLookupById(
+  sheet: RawSheetData | null,
+  idHints: string[],
+  valueHints: string[],
+): Map<string, string> {
+  const lookup = new Map<string, string>()
+  if (!sheet || sheet.headers.length === 0 || sheet.rows.length === 0) return lookup
+
+  const idIndex = findColumnIndex(sheet.headers, idHints)
+  const valueIndex = findColumnIndex(sheet.headers, valueHints)
+
+  const safeIdIndex = idIndex >= 0 ? idIndex : 0
+  const safeValueIndex = valueIndex >= 0 ? valueIndex : safeIdIndex
+
+  sheet.rows.forEach((row) => {
+    const idValue = (row[safeIdIndex] || '').trim()
+    const displayValue = (row[safeValueIndex] || '').trim()
+    if (!idValue || !displayValue) return
+    lookup.set(normalizeKey(idValue), displayValue)
+  })
+
+  return lookup
+}
+
+function resolveLookupValue(rawValue: string, lookup: Map<string, string>): string {
+  const trimmed = (rawValue || '').trim()
+  if (!trimmed) return ''
+
+  const mapped = lookup.get(normalizeKey(trimmed))
+  return mapped || trimmed
+}
+
+function isDeliveredStatusValue(rawStatus: string, resultadoLookup: Map<string, string>): boolean {
+  const trimmed = (rawStatus || '').trim()
+  if (!trimmed) return false
+
+  const normalizedRaw = normalizeKey(trimmed)
+  if (normalizedRaw.includes('entregado')) return true
+
+  const mappedStatus = resultadoLookup.get(normalizedRaw)
+  if (mappedStatus && normalizeKey(mappedStatus).includes('entregado')) return true
+
+  return false
+}
+
 export default function RankingSection({
   enviosSheet,
   tiendasSheet,
+  vendedoresSheet,
+  resultadosSheet,
   startDate,
   endDate,
 }: {
   enviosSheet: RawSheetData | null
   tiendasSheet: RawSheetData | null
+  vendedoresSheet: RawSheetData | null
+  resultadosSheet: RawSheetData | null
   startDate: Date | null
   endDate: Date | null
 }) {
   const rankingData = useMemo(() => {
-    if (!tiendasSheet || !enviosSheet) return [] as Array<{ vendedor: string; tienda: string; entregados: number; key: string }>
+    if (!enviosSheet) return [] as Array<{ vendedor: string; tienda: string; entregados: number; key: string }>
 
-    const tiendasHeaders = tiendasSheet.headers
-    const tiendaColTiendas = findColumnIndex(tiendasHeaders, STORE_KEYS)
-    const vendedorColTiendas = findColumnIndex(tiendasHeaders, VENDOR_KEYS)
-
-    if (tiendaColTiendas < 0 || vendedorColTiendas < 0) return []
-
-    const basePairs = new Map<string, { vendedor: string; tienda: string }>()
-    toRowRecords(tiendasSheet).forEach((record) => {
-      const tienda = (record.row[tiendaColTiendas] || '').trim()
-      const vendedor = (record.row[vendedorColTiendas] || '').trim()
-      if (!tienda || !vendedor) return
-
-      const normalizedPair = `${normalizeKey(vendedor)}::${normalizeKey(tienda)}`
-      if (!basePairs.has(normalizedPair)) {
-        basePairs.set(normalizedPair, { vendedor, tienda })
-      }
-    })
-
-    if (basePairs.size === 0) return []
+    const tiendasLookup = buildLookupById(tiendasSheet, ID_TIENDA_HEADER_HINTS, STORE_KEYS)
+    const vendedoresLookup = buildLookupById(vendedoresSheet, ID_VENDEDOR_HEADER_HINTS, VENDOR_KEYS)
+    const resultadosLookup = buildLookupById(resultadosSheet, ID_RESULTADO_HEADER_HINTS, STATUS_KEYS)
 
     const enviosHeaders = enviosSheet.headers
-    const tiendaColEnvios = findColumnIndex(enviosHeaders, STORE_KEYS)
-    const vendedorColEnvios = findColumnIndex(enviosHeaders, VENDOR_KEYS)
-    const statusColEnvios = findColumnIndex(enviosHeaders, STATUS_KEYS)
+    const tiendaColEnvios = findColumnIndex(enviosHeaders, [...ID_TIENDA_HEADER_HINTS, ...STORE_KEYS])
+    const vendedorColEnvios = findColumnIndex(enviosHeaders, [...ID_VENDEDOR_HEADER_HINTS, ...VENDOR_KEYS])
+    const statusColEnvios = findColumnIndex(enviosHeaders, [...ID_RESULTADO_HEADER_HINTS, ...STATUS_KEYS])
 
-    if (tiendaColEnvios < 0 || vendedorColEnvios < 0 || statusColEnvios < 0) return []
+    if (tiendaColEnvios < 0 || vendedorColEnvios < 0 || statusColEnvios < 0) {
+      return []
+    }
 
-    const deliveredKey = normalizeKey('Entregado')
-    const deliveredCounter = new Map<string, number>()
+    const rankingCounter = new Map<string, { vendedor: string; tienda: string; entregados: number; key: string }>()
 
     const enviosRecords = filterRowRecordsByDateRange(
       toRowRecords(enviosSheet),
@@ -73,29 +111,36 @@ export default function RankingSection({
     )
 
     enviosRecords.forEach((record) => {
-      const status = normalizeKey(record.row[statusColEnvios] || '')
-      if (status !== deliveredKey) return
+      const statusRaw = (record.row[statusColEnvios] || '').trim()
+      if (!isDeliveredStatusValue(statusRaw, resultadosLookup)) return
 
-      const tienda = normalizeKey(record.row[tiendaColEnvios] || '')
-      const vendedor = normalizeKey(record.row[vendedorColEnvios] || '')
-      if (!tienda || !vendedor) return
+      const tiendaRaw = (record.row[tiendaColEnvios] || '').trim()
+      const vendedorRaw = (record.row[vendedorColEnvios] || '').trim()
+      if (!tiendaRaw || !vendedorRaw) return
 
-      const normalizedPair = `${vendedor}::${tienda}`
-      if (!basePairs.has(normalizedPair)) return
+      const tiendaDisplay = resolveLookupValue(tiendaRaw, tiendasLookup)
+      const vendedorDisplay = resolveLookupValue(vendedorRaw, vendedoresLookup)
+      if (!tiendaDisplay || !vendedorDisplay) return
 
-      deliveredCounter.set(normalizedPair, (deliveredCounter.get(normalizedPair) || 0) + 1)
+      const normalizedPair = `${normalizeKey(vendedorDisplay)}::${normalizeKey(tiendaDisplay)}`
+      const current = rankingCounter.get(normalizedPair)
+
+      if (!current) {
+        rankingCounter.set(normalizedPair, {
+          vendedor: vendedorDisplay,
+          tienda: tiendaDisplay,
+          entregados: 1,
+          key: normalizedPair,
+        })
+        return
+      }
+
+      current.entregados += 1
     })
 
-    return [...basePairs.entries()]
-      .map(([normalizedPair, base]) => ({
-        vendedor: base.vendedor,
-        tienda: base.tienda,
-        entregados: deliveredCounter.get(normalizedPair) || 0,
-        key: normalizedPair,
-      }))
-      .filter((item) => item.entregados > 0)
+    return [...rankingCounter.values()]
       .sort((a, b) => b.entregados - a.entregados)
-  }, [tiendasSheet, enviosSheet, startDate, endDate])
+  }, [enviosSheet, tiendasSheet, vendedoresSheet, resultadosSheet, startDate, endDate])
 
   const filtered = useMemo(() => rankingData.slice(0, 10), [rankingData])
   const totalEntregados = useMemo(
@@ -114,7 +159,7 @@ export default function RankingSection({
     <div className="space-y-5">
       <section className="rounded-2xl border border-slate-200/80 bg-white/90 p-5 shadow-[0_14px_32px_-22px_rgba(15,23,42,0.7)] backdrop-blur">
         <h3 className="text-lg font-bold text-slate-900">Ranking x tiendas</h3>
-        <p className="mt-1 text-sm text-slate-600">Base: cruza tienda y vendedor desde hoja Tiendas y cuenta en DATA ENVIOS solo filas con resultado Entregado.</p>
+        <p className="mt-1 text-sm text-slate-600">Base: usa ENVIOS, filtra resultado Entregado y resuelve IDs de tienda/vendedor/resultado con tablas maestras.</p>
 
         <div className="mt-4 grid gap-3 sm:grid-cols-3">
           <article className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2"><p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">Envios entregados</p><p className="mt-1 text-xl font-bold text-slate-900">{formatInt(totalEntregados)}</p></article>

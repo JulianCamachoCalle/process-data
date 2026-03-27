@@ -1,4 +1,4 @@
-import { Suspense, useMemo } from 'react'
+import { Suspense, useCallback, useEffect, useMemo } from 'react'
 import { LayoutDashboard, Table2 } from 'lucide-react'
 import { Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useApp } from '../../../context/useApp'
@@ -7,6 +7,7 @@ import { useDashboardRuntime } from '../../../context/useDashboardRuntime'
 import DashboardLayout from './DashboardLayout'
 import SectionContentLayout from './SectionContentLayout'
 import { getRequiredSheetsForSection, getSectionById, getSectionByPath, DASHBOARD_SECTIONS } from './sectionsConfig'
+import { normalizeKey } from './shared'
 import type { NavSection } from './shared'
 
 function DashboardShellContent() {
@@ -77,6 +78,40 @@ function DashboardShellContent() {
   const globalRangeLabel = `${globalRangeStart.toLocaleDateString('es-PE')} - ${globalRangeEnd.toLocaleDateString('es-PE')}`
   const loadedSheetsCount = Object.keys(sheetCache).length
 
+  const refreshActiveSection = useCallback(() => {
+    if (!activeSection) return
+    void refreshSheets(getRequiredSheetsForSection(activeSection))
+  }, [activeSection, refreshSheets])
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null
+      if (target) {
+        const tagName = target.tagName
+        const isEditable =
+          target.isContentEditable ||
+          tagName === 'INPUT' ||
+          tagName === 'TEXTAREA' ||
+          tagName === 'SELECT'
+
+        if (isEditable) return
+      }
+
+      const isAltRefresh = event.altKey && !event.ctrlKey && !event.metaKey && normalizeKey(event.key) === 'r'
+      const isCtrlShiftRefresh = event.ctrlKey && event.shiftKey && !event.metaKey && normalizeKey(event.key) === 'r'
+
+      if (!isAltRefresh && !isCtrlShiftRefresh) return
+
+      event.preventDefault()
+      if (!sectionLoading && !busyMutation) {
+        refreshActiveSection()
+      }
+    }
+
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [refreshActiveSection, sectionLoading, busyMutation])
+
   if (initialLoading) {
     return (
       <main className="min-h-screen bg-slate-100 p-4 md:p-6">
@@ -123,7 +158,7 @@ function DashboardShellContent() {
       onChangeStart={onChangeStart}
       onChangeEnd={onChangeEnd}
       onSelectPreset={onSelectPreset}
-      onRefresh={() => void refreshSheets(getRequiredSheetsForSection(activeSection))}
+      onRefresh={refreshActiveSection}
       onSignOut={signOut}
       sectionLoading={sectionLoading}
       busyMutation={busyMutation}

@@ -381,9 +381,10 @@ export default function DashboardPage() {
   if (activeItem?.sectionType === 'home') {
     activeSectionContent = (
       <HomeSection
-        tiendasSheet={getCachedSheet('Tiendas') || undefined}
-        enviosSheet={getCachedSheet('DATA ENVIOS') || undefined}
-        recojosSheet={getCachedSheet('DATA RECOJOS') || undefined}
+        tiendasSheet={getCachedSheet('TIENDAS') || getCachedSheet('Tiendas') || undefined}
+        enviosSheet={getCachedSheet('ENVIOS') || getCachedSheet('DATA ENVIOS') || undefined}
+        recojosSheet={getCachedSheet('RECOJOS') || getCachedSheet('DATA RECOJOS') || undefined}
+        leadsGanadosSheet={getCachedSheet('LEADS GANADOS') || undefined}
         comisionesSheet={getCachedSheet(SPECIAL_SHEETS.commissionsLeads) || undefined}
         startDate={globalRangeStart}
         endDate={globalRangeEnd}
@@ -405,8 +406,10 @@ export default function DashboardPage() {
   } else if (activeItem?.sectionType === 'ranking') {
     activeSectionContent = (
       <RankingSection
-        enviosSheet={getCachedSheet('DATA ENVIOS')}
-        tiendasSheet={getCachedSheet('Tiendas')}
+        enviosSheet={getCachedSheet('ENVIOS') || getCachedSheet('DATA ENVIOS')}
+        tiendasSheet={getCachedSheet('TIENDAS') || getCachedSheet('Tiendas')}
+        vendedoresSheet={getCachedSheet('VENDEDORES')}
+        resultadosSheet={getCachedSheet('RESULTADOS')}
         startDate={globalRangeStart}
         endDate={globalRangeEnd}
       />
