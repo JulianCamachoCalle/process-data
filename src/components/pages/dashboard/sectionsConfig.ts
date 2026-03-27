@@ -85,7 +85,7 @@ export function getRequiredSheetsForSection(section: DashboardSectionDefinition 
   }
 
   if (section.kind === 'ranking') {
-    return ['ENVIOS', 'TIENDAS', 'VENDEDORES', 'RESULTADOS']
+    return ['ENVIOS', 'TIENDAS', 'VENDEDORES']
   }
 
   if (section.kind === 'sheet' && section.sheetName) {

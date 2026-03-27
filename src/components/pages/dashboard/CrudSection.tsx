@@ -63,6 +63,20 @@ const VENDEDORES_NOMBRE_HEADER_HINTS = ['Nombre']
 const IGV_DIVISOR = 1.18
 const SWAL_CONFIRM_BUTTON_COLOR = '#0f172a'
 const SWAL_CANCEL_BUTTON_COLOR = '#64748b'
+const SWAL_ERROR_BUTTON_COLOR = '#b91c1c'
+const PRIMARY_DELETE_CONFIRM_TEXT = 'ELIMINAR'
+const PRIMARY_MASTER_SHEET_KEYS = new Set([
+  normalizeKey('TIENDAS'),
+  normalizeKey('VENDEDORES'),
+  normalizeKey('COURIER'),
+  normalizeKey('ORIGEN'),
+  normalizeKey('DESTINOS'),
+  normalizeKey('TIPO DE PUNTO'),
+  normalizeKey('TIPO RECOJO'),
+  normalizeKey('RESULTADOS'),
+  normalizeKey('FULLFILMENT'),
+  normalizeKey('FULL FILMENT'),
+])
 
 function includesAny(value: string, hints: string[]): boolean { 
   return hints.some((hint) => value.includes(hint))
@@ -745,11 +759,18 @@ function applyEnviosDerivedValues(args: {
     }
   } else {
     if (extraPuntoMotoIndex >= 0) {
-      nextRowValues[extraPuntoMotoIndex] = ''
+      nextRowValues[extraPuntoMotoIndex] = '0'
     }
 
     if (extraPuntoEmpresaIndex >= 0) {
-      nextRowValues[extraPuntoEmpresaIndex] = ''
+      nextRowValues[extraPuntoEmpresaIndex] = '0'
+    }
+  }
+
+  if (excedentePagadoMotoIndex >= 0) {
+    const excedenteActual = (nextRowValues[excedentePagadoMotoIndex] || '').trim()
+    if (!excedenteActual) {
+      nextRowValues[excedentePagadoMotoIndex] = '0'
     }
   }
 
@@ -1055,7 +1076,8 @@ function normalizeRowForSubmit(args: {
         }
       }
 
-      rowValues.push(parsedMonth)
+      // Apostrophe forces plain text in Sheets when using USER_ENTERED.
+      rowValues.push(`'${parsedMonth}`)
       continue
     }
 
@@ -1204,6 +1226,11 @@ export default function CrudSection({
     [sheet.sheetName],
   )
 
+  const isPrimaryMasterSheet = useMemo(
+    () => PRIMARY_MASTER_SHEET_KEYS.has(normalizeKey(sheet.sheetName)),
+    [sheet.sheetName],
+  )
+
   const enviosComputedColumnIndexes = useMemo(
     () => getEnviosComputedColumnIndexes(headers),
     [headers],
@@ -1321,6 +1348,13 @@ export default function CrudSection({
     })
     if (normalized.error) {
       setFormError(normalized.error)
+      await Swal.fire({
+        title: 'Error al crear',
+        text: normalized.error,
+        icon: 'error',
+        confirmButtonText: 'Entendido',
+        confirmButtonColor: SWAL_ERROR_BUTTON_COLOR,
+      })
       return
     }
 
@@ -1336,12 +1370,43 @@ export default function CrudSection({
       reverseButtons: true,
     })
 
-    if (!createConfirmation.isConfirmed) return
+    if (!createConfirmation.isConfirmed) {
+      await Swal.fire({
+        title: 'Creacion cancelada',
+        text: 'No se realizaron cambios.',
+        icon: 'info',
+        confirmButtonText: 'OK',
+        confirmButtonColor: SWAL_CANCEL_BUTTON_COLOR,
+      })
+      return
+    }
 
-    await onCreate(sheet.sheetName, normalized.rowValues, headers.length)
-    setCreateDraft(headers.map(() => ''))
-    setFormError(null)
-    setCrudModalMode(null)
+    try {
+      await onCreate(sheet.sheetName, normalized.rowValues, headers.length)
+      setCreateDraft(headers.map(() => ''))
+      setFormError(null)
+      setCrudModalMode(null)
+
+      await Swal.fire({
+        title: 'Registro creado',
+        text: `La fila se creo correctamente en ${sheet.sheetName}.`,
+        icon: 'success',
+        confirmButtonText: 'OK',
+        confirmButtonColor: SWAL_CONFIRM_BUTTON_COLOR,
+      })
+    } catch (error) {
+      const errorMessage = error instanceof Error
+        ? error.message
+        : 'No se pudo crear el registro en Google Sheets.'
+      setFormError(errorMessage)
+      await Swal.fire({
+        title: 'Error al crear',
+        text: errorMessage,
+        icon: 'error',
+        confirmButtonText: 'Entendido',
+        confirmButtonColor: SWAL_ERROR_BUTTON_COLOR,
+      })
+    }
   }
 
   const handleUpdate = async () => {
@@ -1356,6 +1421,13 @@ export default function CrudSection({
     })
     if (normalized.error) {
       setFormError(normalized.error)
+      await Swal.fire({
+        title: 'Error al actualizar',
+        text: normalized.error,
+        icon: 'error',
+        confirmButtonText: 'Entendido',
+        confirmButtonColor: SWAL_ERROR_BUTTON_COLOR,
+      })
       return
     }
 
@@ -1371,13 +1443,44 @@ export default function CrudSection({
       reverseButtons: true,
     })
 
-    if (!updateConfirmation.isConfirmed) return
+    if (!updateConfirmation.isConfirmed) {
+      await Swal.fire({
+        title: 'Edicion cancelada',
+        text: 'No se guardaron cambios en la fila.',
+        icon: 'info',
+        confirmButtonText: 'OK',
+        confirmButtonColor: SWAL_CANCEL_BUTTON_COLOR,
+      })
+      return
+    }
 
-    await onUpdate(sheet.sheetName, editRowNumber, normalized.rowValues, headers.length)
-    setEditRowNumber(null)
-    setEditDraft([])
-    setFormError(null)
-    setCrudModalMode(null)
+    try {
+      await onUpdate(sheet.sheetName, editRowNumber, normalized.rowValues, headers.length)
+      setEditRowNumber(null)
+      setEditDraft([])
+      setFormError(null)
+      setCrudModalMode(null)
+
+      await Swal.fire({
+        title: 'Registro actualizado',
+        text: `La fila ${editRowNumber} se actualizo correctamente en ${sheet.sheetName}.`,
+        icon: 'success',
+        confirmButtonText: 'OK',
+        confirmButtonColor: SWAL_CONFIRM_BUTTON_COLOR,
+      })
+    } catch (error) {
+      const errorMessage = error instanceof Error
+        ? error.message
+        : 'No se pudo actualizar el registro en Google Sheets.'
+      setFormError(errorMessage)
+      await Swal.fire({
+        title: 'Error al actualizar',
+        text: errorMessage,
+        icon: 'error',
+        confirmButtonText: 'Entendido',
+        confirmButtonColor: SWAL_ERROR_BUTTON_COLOR,
+      })
+    }
   }
 
   const handleDeleteConfirm = async (record: RowRecord) => {
@@ -1393,8 +1496,73 @@ export default function CrudSection({
       reverseButtons: true,
     })
 
-    if (!deleteConfirmation.isConfirmed) return
-    await onDelete(sheet.sheetName, record.rowNumber)
+    if (!deleteConfirmation.isConfirmed) {
+      await Swal.fire({
+        title: 'Eliminacion cancelada',
+        text: 'No se elimino ninguna fila.',
+        icon: 'info',
+        confirmButtonText: 'OK',
+        confirmButtonColor: SWAL_CANCEL_BUTTON_COLOR,
+      })
+      return
+    }
+
+    if (isPrimaryMasterSheet) {
+      const strictDeleteConfirmation = await Swal.fire({
+        title: 'Confirmacion reforzada',
+        text: `Esta hoja es un dato primario (${sheet.sheetName}). Escribe ${PRIMARY_DELETE_CONFIRM_TEXT} para eliminar la fila ${record.rowNumber}.`,
+        icon: 'warning',
+        input: 'text',
+        inputPlaceholder: PRIMARY_DELETE_CONFIRM_TEXT,
+        showCancelButton: true,
+        confirmButtonText: 'Eliminar definitivamente',
+        cancelButtonText: 'Cancelar',
+        confirmButtonColor: '#7f1d1d',
+        cancelButtonColor: SWAL_CANCEL_BUTTON_COLOR,
+        reverseButtons: true,
+        preConfirm: (value) => {
+          if (normalizeKey(value || '') !== normalizeKey(PRIMARY_DELETE_CONFIRM_TEXT)) {
+            Swal.showValidationMessage(`Debes escribir ${PRIMARY_DELETE_CONFIRM_TEXT} para continuar.`)
+            return false
+          }
+
+          return true
+        },
+      })
+
+      if (!strictDeleteConfirmation.isConfirmed) {
+        await Swal.fire({
+          title: 'Eliminacion cancelada',
+          text: 'No se elimino ninguna fila.',
+          icon: 'info',
+          confirmButtonText: 'OK',
+          confirmButtonColor: SWAL_CANCEL_BUTTON_COLOR,
+        })
+        return
+      }
+    }
+
+    try {
+      await onDelete(sheet.sheetName, record.rowNumber)
+      await Swal.fire({
+        title: 'Registro eliminado',
+        text: `La fila ${record.rowNumber} fue eliminada correctamente de ${sheet.sheetName}.`,
+        icon: 'success',
+        confirmButtonText: 'OK',
+        confirmButtonColor: SWAL_CONFIRM_BUTTON_COLOR,
+      })
+    } catch (error) {
+      const errorMessage = error instanceof Error
+        ? error.message
+        : 'No se pudo eliminar el registro en Google Sheets.'
+      await Swal.fire({
+        title: 'Error al eliminar',
+        text: errorMessage,
+        icon: 'error',
+        confirmButtonText: 'Entendido',
+        confirmButtonColor: SWAL_ERROR_BUTTON_COLOR,
+      })
+    }
   }
 
   const setDraftFieldValue = (index: number, nextValue: string, options?: { allowProtectedId?: boolean }) => {
@@ -1753,7 +1921,7 @@ export default function CrudSection({
                             </>
                           ) : (
                             <>
-                              {spec.inputType === 'text' && spec.suggestions.length > 0 && !hasRelationOptions && (
+                              {spec.inputType === 'text' && spec.suggestions.length > 0 && !hasRelationOptions && !isPrimaryMasterSheet && (
                                 <select
                                   value={value && spec.suggestions.includes(value) ? value : ''}
                                   onChange={(event) => {
