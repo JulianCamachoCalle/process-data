@@ -20,16 +20,16 @@ export function Login() {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({ password }),
+        credentials: 'include',
       });
 
-      const data: { token?: string; error?: string } = await response.json().catch(() => ({}));
+      const data: { success?: boolean; error?: string } = await response.json().catch(() => ({}));
 
-      if (!response.ok || !data.token) {
+      if (!response.ok || !data.success) {
         setError(data.error || 'No se pudo iniciar sesión');
         return;
       }
 
-      localStorage.setItem('auth_token', data.token);
       navigate('/');
     } catch {
       setError('No se pudo conectar con el servidor');
