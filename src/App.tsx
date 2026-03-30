@@ -6,6 +6,7 @@ import { SheetView } from './components/SheetView';
 import { DashboardOverview } from './features/dashboard/DashboardOverview';
 import { Login } from './features/auth/Login';
 import { prefetchSheetData } from './hooks/useSheetData';
+import { isSupabaseConfigured, supabase } from './lib/supabase';
 
 const SHEETS = [
   'DESTINOS',
@@ -76,6 +77,10 @@ function Layout() {
 
   const handleLogout = async () => {
     try {
+      if (isSupabaseConfigured() && supabase) {
+        await supabase.auth.signOut();
+      }
+
       await fetch('/api/auth', {
         method: 'DELETE',
         credentials: 'include',
