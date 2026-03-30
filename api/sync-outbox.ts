@@ -85,7 +85,7 @@ interface LeadGanadoEntityConfig {
   fullfilmentLabelField?: string;
   leadGanadoPeriodoField: string;
   notasField: string;
-  distritoField: string;
+  distritoField?: string;
   cantidadEnviosField: string;
   idOrigenField: string;
   origenLabelField?: string;
@@ -631,7 +631,9 @@ async function syncLeadGanadoEvent(event: OutboxEvent) {
   const idFullfilmentHeader = findRequired(LEAD_GANADO_ENTITY_CONFIG.idFullfilmentField);
   const leadGanadoPeriodoHeader = findRequired(LEAD_GANADO_ENTITY_CONFIG.leadGanadoPeriodoField);
   const notasHeader = findRequired(LEAD_GANADO_ENTITY_CONFIG.notasField);
-  const distritoHeader = findRequired(LEAD_GANADO_ENTITY_CONFIG.distritoField);
+  const distritoHeader = LEAD_GANADO_ENTITY_CONFIG.distritoField
+    ? findHeaderByNormalizedName(sheet.headerValues, LEAD_GANADO_ENTITY_CONFIG.distritoField)
+    : null;
   const cantidadEnviosHeader = findRequired(LEAD_GANADO_ENTITY_CONFIG.cantidadEnviosField);
   const idOrigenHeader = findRequired(LEAD_GANADO_ENTITY_CONFIG.idOrigenField);
   const anuladosHeader = findRequired(LEAD_GANADO_ENTITY_CONFIG.anuladosFullfilmentField);
@@ -690,7 +692,6 @@ async function syncLeadGanadoEvent(event: OutboxEvent) {
     [idFullfilmentHeader]: lead.idFullfilment,
     [leadGanadoPeriodoHeader]: lead.leadGanadoEnPeriodo || 'No',
     [notasHeader]: lead.notas,
-    [distritoHeader]: lead.distrito,
     [cantidadEnviosHeader]: Number.isFinite(lead.cantidadEnvios) ? Math.round(lead.cantidadEnvios) : 0,
     [idOrigenHeader]: lead.idOrigen,
     [anuladosHeader]: Number.isFinite(lead.anuladosFullfilment) ? lead.anuladosFullfilment : 0,
@@ -702,6 +703,7 @@ async function syncLeadGanadoEvent(event: OutboxEvent) {
   if (vendedorLabelHeader) rowPayload[vendedorLabelHeader] = vendedorMap.get(lead.idVendedor) ?? `#${lead.idVendedor}`;
   if (fullfilmentLabelHeader) rowPayload[fullfilmentLabelHeader] = fullfilmentMap.get(lead.idFullfilment) ?? `#${lead.idFullfilment}`;
   if (origenLabelHeader) rowPayload[origenLabelHeader] = origenMap.get(lead.idOrigen) ?? `#${lead.idOrigen}`;
+  if (distritoHeader) rowPayload[distritoHeader] = lead.distrito;
 
   if (existingRow) {
     existingRow.assign(rowPayload);
