@@ -91,9 +91,23 @@ export const SHEET_FORM_RULES: Record<string, SheetFormRule> = {
     },
   },
   RECOJOS: {
+    inputOverrides: {
+      Mes: 'month',
+      Veces: 'number',
+      Observaciones: 'textarea',
+      observaciones: 'textarea',
+    },
     readOnlyColumns: [
-      // Ejemplo futuro: 'Tiempo Estimado'
+      'Cobro a tienda por recojo',
+      'Pago moto por recojo',
+      'Ingreso recojo total',
+      'Costo recojo total',
+      'Vendedor',
     ],
+    defaultValues: {
+      Mes: '__CURRENT_MONTH__',
+      Veces: '1',
+    },
   },
   'LEADS GANADOS': {
     inputOverrides: {
