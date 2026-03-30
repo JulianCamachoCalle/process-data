@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import Swal from 'sweetalert2';
 import { useDeleteRow } from '../hooks/useSheetData';
 import {
@@ -22,12 +22,13 @@ import {
   parseDateValue,
   parseNumericValue,
 } from '../lib/tableHelpers';
+import type { SheetRow } from '../hooks/useSheetData';
 
 interface DynamicTableProps {
   sheetName: string;
   columns: string[];
-  rows: Record<string, unknown>[];
-  onEdit: (row: Record<string, unknown>) => void;
+  rows: SheetRow[];
+  onEdit: (row: SheetRow) => void;
 }
 
 export function DynamicTable({ sheetName, columns, rows, onEdit }: DynamicTableProps) {
@@ -39,16 +40,11 @@ export function DynamicTable({ sheetName, columns, rows, onEdit }: DynamicTableP
   const [pageSize, setPageSize] = useState(10);
   const [currentPage, setCurrentPage] = useState(1);
 
-  if (!columns.length) {
-    return <div className="p-4 text-gray-500">No hay datos disponibles en esta tabla.</div>;
-  }
-
   const dateColumn = useMemo(() => columns.find((column) => isDateColumn(column)) ?? null, [columns]);
   const typeColumn = useMemo(() => columns.find((column) => isTypeColumn(column)) ?? null, [columns]);
 
   const numericInsightColumn = useMemo(() => {
     const candidates = columns
-      .filter((column) => column !== '_rowIndex')
       .map((column) => {
         const numericCount = rows.reduce((acc, row) => {
           return parseNumericValue(row[column]) !== null ? acc + 1 : acc;
@@ -113,22 +109,13 @@ export function DynamicTable({ sheetName, columns, rows, onEdit }: DynamicTableP
     });
   }, [rows, columns, searchTerm, typeColumn, selectedType, dateColumn, dateFrom, dateTo]);
 
-  useEffect(() => {
-    setCurrentPage(1);
-  }, [searchTerm, selectedType, dateFrom, dateTo, pageSize]);
-
   const totalPages = Math.max(1, Math.ceil(filteredRows.length / pageSize));
-
-  useEffect(() => {
-    if (currentPage > totalPages) {
-      setCurrentPage(totalPages);
-    }
-  }, [currentPage, totalPages]);
+  const safeCurrentPage = Math.min(currentPage, totalPages);
 
   const paginatedRows = useMemo(() => {
-    const start = (currentPage - 1) * pageSize;
+    const start = (safeCurrentPage - 1) * pageSize;
     return filteredRows.slice(start, start + pageSize);
-  }, [filteredRows, currentPage, pageSize]);
+  }, [filteredRows, safeCurrentPage, pageSize]);
 
   const typeCoverage = useMemo(() => {
     if (!typeColumn || !typeOptions.length) return null;
@@ -180,7 +167,7 @@ export function DynamicTable({ sheetName, columns, rows, onEdit }: DynamicTableP
     };
   }, [filteredRows, numericInsightColumn]);
 
-  const handleDelete = (row: Record<string, unknown>) => {
+  const handleDelete = (row: SheetRow) => {
     Swal.fire({
       title: '¿Confirmás esta eliminación?',
       text: 'Esta acción no se puede deshacer.',
@@ -192,13 +179,13 @@ export function DynamicTable({ sheetName, columns, rows, onEdit }: DynamicTableP
       cancelButtonText: 'Cancelar',
     }).then((result) => {
       if (result.isConfirmed) {
-        const rowIndex = row._rowIndex;
-        if (typeof rowIndex !== 'number') {
-          Swal.fire('Error', 'No se encontró el índice del registro para eliminar.', 'error');
+        const rowId = row._id;
+        if (typeof rowId !== 'string' || !rowId.trim()) {
+          Swal.fire('Error', 'No se encontró el identificador del registro para eliminar.', 'error');
           return;
         }
 
-        deleteMutation.mutate(rowIndex, {
+        deleteMutation.mutate(rowId, {
           onSuccess: () => {
             Swal.fire('Eliminado', 'El registro fue eliminado correctamente.', 'success');
           },
@@ -219,6 +206,10 @@ export function DynamicTable({ sheetName, columns, rows, onEdit }: DynamicTableP
   };
 
   const hasActiveFilters = Boolean(searchTerm || dateFrom || dateTo || selectedType);
+
+  if (!columns.length) {
+    return <div className="p-4 text-gray-500">No hay datos disponibles en esta tabla.</div>;
+  }
 
   return (
     <div className="space-y-4">
@@ -270,8 +261,11 @@ export function DynamicTable({ sheetName, columns, rows, onEdit }: DynamicTableP
               <label className="rounded-xl border border-gray-200 bg-white px-3 py-2 inline-flex items-center gap-2 text-sm text-gray-600">
                 <Search size={15} className="text-gray-400" />
                 <input
-                  value={searchTerm}
-                  onChange={(event) => setSearchTerm(event.target.value)}
+                    value={searchTerm}
+                    onChange={(event) => {
+                      setSearchTerm(event.target.value);
+                      setCurrentPage(1);
+                    }}
                   placeholder="Buscar en todos los campos"
                   className="w-full bg-transparent outline-none"
                 />
@@ -283,7 +277,10 @@ export function DynamicTable({ sheetName, columns, rows, onEdit }: DynamicTableP
                   <input
                     type="date"
                     value={dateFrom}
-                    onChange={(event) => setDateFrom(event.target.value)}
+                    onChange={(event) => {
+                      setDateFrom(event.target.value);
+                      setCurrentPage(1);
+                    }}
                     className="w-full bg-transparent outline-none"
                     aria-label="Fecha desde"
                   />
@@ -301,7 +298,10 @@ export function DynamicTable({ sheetName, columns, rows, onEdit }: DynamicTableP
                   <input
                     type="date"
                     value={dateTo}
-                    onChange={(event) => setDateTo(event.target.value)}
+                    onChange={(event) => {
+                      setDateTo(event.target.value);
+                      setCurrentPage(1);
+                    }}
                     className="w-full bg-transparent outline-none"
                     aria-label="Fecha hasta"
                   />
@@ -318,7 +318,10 @@ export function DynamicTable({ sheetName, columns, rows, onEdit }: DynamicTableP
                   <Tags size={15} className="text-gray-400" />
                   <select
                     value={selectedType}
-                    onChange={(event) => setSelectedType(event.target.value)}
+                    onChange={(event) => {
+                      setSelectedType(event.target.value);
+                      setCurrentPage(1);
+                    }}
                     className="w-full bg-transparent outline-none"
                     aria-label="Filtrar por tipo o categoría"
                   >
@@ -382,8 +385,8 @@ export function DynamicTable({ sheetName, columns, rows, onEdit }: DynamicTableP
                   </td>
                 </tr>
               ) : (
-                paginatedRows.map((row, rowIndex) => {
-                  const key = typeof row._rowIndex === 'number' ? row._rowIndex : rowIndex;
+                paginatedRows.map((row) => {
+                  const key = row._id;
 
                   return (
                     <tr key={key} className="hover:bg-red-50/40 transition-colors">
@@ -423,7 +426,10 @@ export function DynamicTable({ sheetName, columns, rows, onEdit }: DynamicTableP
             <span>Filas por página:</span>
             <select
               value={pageSize}
-              onChange={(event) => setPageSize(Number(event.target.value))}
+              onChange={(event) => {
+                setPageSize(Number(event.target.value));
+                setCurrentPage(1);
+              }}
               className="px-2 py-1 rounded-lg border border-gray-300 bg-white text-sm"
             >
               <option value={10}>10</option>
@@ -434,19 +440,19 @@ export function DynamicTable({ sheetName, columns, rows, onEdit }: DynamicTableP
 
           <div className="inline-flex items-center gap-2">
             <button
-              onClick={() => setCurrentPage((prev) => Math.max(1, prev - 1))}
-              disabled={currentPage === 1}
+              onClick={() => setCurrentPage((prev) => Math.max(1, Math.min(prev, totalPages) - 1))}
+              disabled={safeCurrentPage === 1}
               className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg border border-gray-300 bg-white text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <ChevronLeft size={15} />
               Anterior
             </button>
             <span className="text-sm text-gray-600 px-2">
-              Página {currentPage} de {totalPages}
+              Página {safeCurrentPage} de {totalPages}
             </span>
             <button
-              onClick={() => setCurrentPage((prev) => Math.min(totalPages, prev + 1))}
-              disabled={currentPage === totalPages}
+              onClick={() => setCurrentPage((prev) => Math.min(totalPages, Math.min(prev, totalPages) + 1))}
+              disabled={safeCurrentPage === totalPages}
               className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg border border-gray-300 bg-white text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               Siguiente

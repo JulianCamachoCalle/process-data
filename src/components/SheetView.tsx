@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useSheetData, useAddRow, useUpdateRow } from '../hooks/useSheetData';
+import type { SheetRow } from '../hooks/useSheetData';
 import { DynamicTable } from './DynamicTable';
 import { ModalForm } from './ModalForm';
 import Swal from 'sweetalert2';
@@ -17,7 +18,8 @@ export function SheetView({ sheetName }: SheetViewProps) {
   const updateMutation = useUpdateRow(sheetName);
 
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [editingRow, setEditingRow] = useState<Record<string, unknown> | null>(null);
+  const [editingRow, setEditingRow] = useState<SheetRow | null>(null);
+  const [modalInstance, setModalInstance] = useState(0);
 
   if (isLoading) {
     return (
@@ -50,24 +52,26 @@ export function SheetView({ sheetName }: SheetViewProps) {
 
   const handleOpenAdd = () => {
     setEditingRow(null);
+    setModalInstance((prev) => prev + 1);
     setIsModalOpen(true);
   };
 
-  const handleOpenEdit = (row: Record<string, unknown>) => {
+  const handleOpenEdit = (row: SheetRow) => {
     setEditingRow(row);
+    setModalInstance((prev) => prev + 1);
     setIsModalOpen(true);
   };
 
   const handleModalSubmit = (formData: Record<string, string>) => {
     if (editingRow) {
-      const rowIndex = editingRow._rowIndex;
-      if (typeof rowIndex !== 'number') {
-        Swal.fire('Error', 'No se encontró el índice del registro a actualizar.', 'error');
+      const rowId = editingRow._id;
+      if (typeof rowId !== 'string' || !rowId.trim()) {
+        Swal.fire('Error', 'No se encontró el identificador del registro a actualizar.', 'error');
         return;
       }
 
       updateMutation.mutate(
-        { ...formData, _rowIndex: rowIndex },
+        { ...formData, _id: rowId },
         {
           onSuccess: () => {
             setIsModalOpen(false);
@@ -132,12 +136,15 @@ export function SheetView({ sheetName }: SheetViewProps) {
 
       {data && data.columns && (
         <ModalForm
+          key={modalInstance}
           isOpen={isModalOpen}
           onClose={() => setIsModalOpen(false)}
           onSubmit={handleModalSubmit}
           title={editingRow ? 'Editar registro' : 'Nuevo registro'}
+          sheetName={sheetName}
           columns={data.columns}
           initialData={editingRow}
+          sampleData={data.rows[0]}
           isSubmitting={isSubmitting}
         />
       )}
