@@ -1,15 +1,28 @@
-@import url('https://fonts.googleapis.com/css2?family=Nunito:wght@600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Montserrat:wght@600;700;800&display=swap');
 @import "tailwindcss";
+
+@theme {
+  --color-brand-red: #E60000;
+  --color-brand-black: #1A1A1A;
+  --color-brand-white: #FFFFFF;
+}
 
 :root {
 	color-scheme: light;
+	--fondo-principal: #f6f7fb;
+	--texto-principal: #151821;
+	--borde-suave: #e8ebf3;
 }
 
 body {
 	margin: 0;
 	min-height: 100vh;
-	font-family: 'Plus Jakarta Sans', sans-serif;
-	color: #0f172a;
+	font-family: 'Inter', sans-serif;
+	color: var(--texto-principal);
+	background:
+		radial-gradient(circle at 8% 10%, rgba(230, 0, 0, 0.08) 0%, rgba(230, 0, 0, 0) 38%),
+		radial-gradient(circle at 92% 90%, rgba(17, 24, 39, 0.08) 0%, rgba(17, 24, 39, 0) 34%),
+		var(--fondo-principal);
 	text-rendering: geometricPrecision;
 	-webkit-font-smoothing: antialiased;
 	-moz-osx-font-smoothing: grayscale;
@@ -22,5 +35,26 @@ body {
 h1,
 h2,
 h3 {
-	font-family: 'Nunito', 'Plus Jakarta Sans', sans-serif;
+	font-family: 'Montserrat', 'Inter', sans-serif;
+}
+
+* {
+	scrollbar-width: thin;
+	scrollbar-color: #c8cfdd transparent;
+}
+
+*::-webkit-scrollbar {
+	width: 10px;
+	height: 10px;
+}
+
+*::-webkit-scrollbar-thumb {
+	background: linear-gradient(180deg, #d6dbe7, #c7cfdd);
+	border-radius: 999px;
+	border: 2px solid transparent;
+	background-clip: content-box;
+}
+
+*::-webkit-scrollbar-track {
+	background: transparent;
 }
