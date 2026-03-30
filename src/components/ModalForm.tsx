@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { Save, X, FilePenLine, Lock, Sparkles } from 'lucide-react';
 import {
   formatInputValueByType,
+  getFormDefaultValue,
   inferFormInputType,
   isHiddenFormColumn,
   isReadOnlyFormColumn,
@@ -17,14 +18,16 @@ interface FormField {
 }
 
 function buildInitialFormData(
+  sheetName: string,
   fields: FormField[],
   initialData?: FormInitialData | null,
-  sampleData?: FormInitialData | null,
 ) {
   const values: Record<string, string> = {};
 
   for (const field of fields) {
-    const sourceValue = initialData?.[field.column] ?? sampleData?.[field.column] ?? '';
+    const sourceValue = initialData
+      ? (initialData[field.column] ?? '')
+      : getFormDefaultValue(sheetName, field.column, field.inputType);
     values[field.column] = formatInputValueByType(field.inputType, sourceValue);
   }
 
@@ -38,8 +41,10 @@ interface ModalFormProps {
   title: string;
   sheetName: string;
   columns: string[];
+  selectOptionsByColumn?: Record<string, string[]>;
+  previewValuesByColumn?: Record<string, string>;
+  onFormValueChange?: (column: string, value: string) => void;
   initialData?: FormInitialData | null;
-  sampleData?: FormInitialData | null;
   isSubmitting?: boolean;
 }
 
@@ -50,8 +55,10 @@ export function ModalForm({
   title,
   sheetName,
   columns,
+  selectOptionsByColumn,
+  previewValuesByColumn,
+  onFormValueChange,
   initialData,
-  sampleData,
   isSubmitting,
 }: ModalFormProps) {
   const fields = useMemo<FormField[]>(
@@ -59,7 +66,7 @@ export function ModalForm({
       columns
         .filter((column) => !isHiddenFormColumn(sheetName, column))
         .map((column) => {
-          const sampleValue = initialData?.[column] ?? sampleData?.[column] ?? '';
+          const sampleValue = initialData?.[column] ?? '';
           const inputType = inferFormInputType(sheetName, column, sampleValue);
 
           return {
@@ -68,11 +75,11 @@ export function ModalForm({
             readOnly: isReadOnlyFormColumn(sheetName, column),
           };
         }),
-    [columns, initialData, sampleData, sheetName],
+    [columns, initialData, sheetName],
   );
 
   const [formData, setFormData] = useState<Record<string, string>>(() =>
-    buildInitialFormData(fields, initialData, sampleData),
+    buildInitialFormData(sheetName, fields, initialData),
   );
 
   const editableCount = fields.filter((field) => !field.readOnly).length;
@@ -83,6 +90,7 @@ export function ModalForm({
 
   const handleChange = (col: string, val: string) => {
     setFormData(prev => ({ ...prev, [col]: val }));
+    onFormValueChange?.(col, val);
   };
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -105,6 +113,8 @@ export function ModalForm({
         return { type: 'number' as const, inputMode: 'decimal' as const, step: 'any' };
       case 'date':
         return { type: 'date' as const };
+      case 'month':
+        return { type: 'month' as const };
       case 'email':
         return { type: 'email' as const, inputMode: 'email' as const };
       case 'tel':
@@ -144,6 +154,13 @@ export function ModalForm({
               {fields.map((field) => {
                 const inputProps = getInputProps(field.inputType);
                 const value = formData[field.column] || '';
+                const selectOptions = selectOptionsByColumn?.[field.column] ?? [];
+                const isSelectField = selectOptions.length > 0;
+                const previewValue = previewValuesByColumn?.[field.column];
+                const readOnlyDisplayValue =
+                  previewValue !== undefined && previewValue !== null && previewValue !== ''
+                    ? previewValue
+                    : value;
 
                 return (
                   <div key={field.column} className={field.inputType === 'textarea' ? 'md:col-span-2' : ''}>
@@ -157,17 +174,35 @@ export function ModalForm({
                       )}
                     </label>
 
-                    {field.inputType === 'textarea' ? (
+                    {field.readOnly ? (
+                      <div className="w-full px-3 py-2.5 border rounded-xl shadow-sm sm:text-sm transition-all bg-gray-50 text-gray-600 border-gray-200 min-h-[42px] inline-flex items-center">
+                        {readOnlyDisplayValue || 'Se calcula automáticamente'}
+                      </div>
+                    ) : isSelectField ? (
+                      <select
+                        value={value}
+                        onChange={(e) => handleChange(field.column, e.target.value)}
+                        disabled={false}
+                        className={`w-full px-3 py-2.5 border rounded-xl shadow-sm sm:text-sm transition-all ${
+                          'border-gray-300 bg-white focus:outline-none focus:ring-2 focus:ring-red-200 focus:border-red-400'
+                        }`}
+                      >
+                        <option value="">Seleccioná {field.column}</option>
+                        {selectOptions.map((option) => (
+                          <option key={option} value={option}>
+                            {option}
+                          </option>
+                        ))}
+                      </select>
+                    ) : field.inputType === 'textarea' ? (
                       <textarea
                         value={value}
                         onChange={(e) => handleChange(field.column, e.target.value)}
-                        readOnly={field.readOnly}
+                        readOnly={false}
                         rows={3}
-                        placeholder={field.readOnly ? 'Se calcula automáticamente' : `Ingresá ${field.column}`}
+                        placeholder={`Ingresá ${field.column}`}
                         className={`w-full px-3 py-2.5 border rounded-xl shadow-sm sm:text-sm transition-all resize-y min-h-24 ${
-                          field.readOnly
-                            ? 'bg-gray-50 text-gray-500 border-gray-200 cursor-not-allowed'
-                            : 'border-gray-300 focus:outline-none focus:ring-2 focus:ring-red-200 focus:border-red-400'
+                          'border-gray-300 focus:outline-none focus:ring-2 focus:ring-red-200 focus:border-red-400'
                         }`}
                       />
                     ) : (
@@ -175,12 +210,10 @@ export function ModalForm({
                         {...inputProps}
                         value={value}
                         onChange={(e) => handleChange(field.column, e.target.value)}
-                        readOnly={field.readOnly}
-                        placeholder={field.readOnly ? 'Se calcula automáticamente' : `Ingresá ${field.column}`}
+                        readOnly={false}
+                        placeholder={`Ingresá ${field.column}`}
                         className={`w-full px-3 py-2.5 border rounded-xl shadow-sm sm:text-sm transition-all ${
-                          field.readOnly
-                            ? 'bg-gray-50 text-gray-500 border-gray-200 cursor-not-allowed'
-                            : 'border-gray-300 focus:outline-none focus:ring-2 focus:ring-red-200 focus:border-red-400'
+                          'border-gray-300 focus:outline-none focus:ring-2 focus:ring-red-200 focus:border-red-400'
                         }`}
                       />
                     )}

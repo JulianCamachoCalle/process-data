@@ -15,7 +15,9 @@ import {
   ChevronRight,
 } from 'lucide-react';
 import {
+  formatCurrencyPen,
   formatNumberEs,
+  isLikelyCurrencyColumn,
   isDateColumn,
   isTypeColumn,
   normalizeText,
@@ -24,11 +26,30 @@ import {
 } from '../lib/tableHelpers';
 import type { SheetRow } from '../hooks/useSheetData';
 
+const BASE_SHEET_NAMES = new Set([
+  'DESTINOS',
+  'TARIFAS',
+  'TIENDAS',
+  'COURIER',
+  'VENDEDORES',
+  'FULLFILMENT',
+  'ORIGEN',
+  'RESULTADOS',
+  'TIPO DE PUNTO',
+  'TIPO DE RECOJO',
+]);
+
 interface DynamicTableProps {
   sheetName: string;
   columns: string[];
   rows: SheetRow[];
   onEdit: (row: SheetRow) => void;
+}
+
+interface InsightCard {
+  label: string;
+  value: string;
+  helper: string;
 }
 
 export function DynamicTable({ sheetName, columns, rows, onEdit }: DynamicTableProps) {
@@ -167,6 +188,132 @@ export function DynamicTable({ sheetName, columns, rows, onEdit }: DynamicTableP
     };
   }, [filteredRows, numericInsightColumn]);
 
+  const firstNonIdTextColumn = useMemo(() => {
+    return (
+      columns.find((column) => {
+        const normalized = normalizeText(column);
+        if (!normalized || normalized.startsWith('id') || normalized === '__id') return false;
+
+        const hasTextValue = rows.some((row) => {
+          const value = row[column];
+          return typeof value === 'string' && value.trim().length > 0;
+        });
+
+        return hasTextValue;
+      }) ?? null
+    );
+  }, [columns, rows]);
+
+  const uniqueBaseRecords = useMemo(() => {
+    if (!firstNonIdTextColumn) return 0;
+
+    return new Set(
+      rows
+        .map((row) => normalizeText(String(row[firstNonIdTextColumn] ?? '')))
+        .filter(Boolean),
+    ).size;
+  }, [firstNonIdTextColumn, rows]);
+
+  const currencyColumns = useMemo(
+    () => columns.filter((column) => isLikelyCurrencyColumn(column)),
+    [columns],
+  );
+
+  const shouldRenderAsCurrency = (columnName: string, rawValue: unknown) => {
+    if (!currencyColumns.includes(columnName)) return false;
+    return parseNumericValue(rawValue) !== null;
+  };
+
+  const renderCellValue = (columnName: string, rawValue: unknown) => {
+    if (rawValue === undefined || rawValue === null || rawValue === '') return '-';
+
+    const numericValue = parseNumericValue(rawValue);
+    if (shouldRenderAsCurrency(columnName, rawValue) && numericValue !== null) {
+      return formatCurrencyPen(numericValue);
+    }
+
+    return String(rawValue);
+  };
+
+  const insightCards = useMemo<InsightCard[]>(() => {
+    const totalRecords = rows.length;
+    const visibleRecords = filteredRows.length;
+
+    if (BASE_SHEET_NAMES.has(sheetName)) {
+      const coverage = totalRecords > 0 ? Math.round((visibleRecords / totalRecords) * 100) : 0;
+      const singularLabelBySheet: Record<string, string> = {
+        DESTINOS: 'destinos',
+        TARIFAS: 'tarifas',
+        TIENDAS: 'tiendas',
+        COURIER: 'couriers',
+        VENDEDORES: 'vendedores',
+        FULLFILMENT: 'fullfilment',
+        ORIGEN: 'orígenes',
+        RESULTADOS: 'resultados',
+        'TIPO DE PUNTO': 'tipos de punto',
+        'TIPO DE RECOJO': 'tipos de recojo',
+      };
+      const singular = singularLabelBySheet[sheetName] ?? 'registros';
+      const uniqueHelperColumnLabel = firstNonIdTextColumn ?? 'columna principal';
+
+      return [
+        {
+          label: `Total de ${singular}`,
+          value: formatNumberEs(totalRecords),
+          helper: 'Registros disponibles en la tabla',
+        },
+        {
+          label: `${singular.charAt(0).toUpperCase()}${singular.slice(1)} visibles`,
+          value: formatNumberEs(visibleRecords),
+          helper: 'Resultado actual de filtros y búsqueda',
+        },
+        {
+          label: `${singular.charAt(0).toUpperCase()}${singular.slice(1)} únicos`,
+          value: formatNumberEs(uniqueBaseRecords),
+          helper: firstNonIdTextColumn
+            ? `Valores únicos en columna ${uniqueHelperColumnLabel}`
+            : 'No se detectó una columna principal de texto',
+        },
+        {
+          label: 'Cobertura visible',
+          value: `${coverage}%`,
+          helper: `${visibleRecords} de ${totalRecords} registros`,
+        },
+      ];
+    }
+
+    return [
+      {
+        label: 'Total de registros',
+        value: formatNumberEs(totalRecords),
+        helper: 'Registros disponibles en la tabla',
+      },
+      {
+        label: 'Registros visibles',
+        value: formatNumberEs(visibleRecords),
+        helper: 'Resultado actual de filtros y búsqueda',
+      },
+      {
+        label: typeCoverage?.label ?? 'Cobertura de tipos',
+        value: typeCoverage?.value ?? 'N/D',
+        helper: typeCoverage?.helper ?? 'No se detectó una columna de tipo o categoría',
+      },
+      {
+        label: numericInsight?.label ?? 'Indicador numérico',
+        value: numericInsight?.value ?? 'N/D',
+        helper: numericInsight?.helper ?? 'No se detectó una columna numérica útil',
+      },
+    ];
+  }, [
+    sheetName,
+    rows.length,
+    filteredRows.length,
+    uniqueBaseRecords,
+    firstNonIdTextColumn,
+    typeCoverage,
+    numericInsight,
+  ]);
+
   const handleDelete = (row: SheetRow) => {
     Swal.fire({
       title: '¿Confirmás esta eliminación?',
@@ -185,7 +332,7 @@ export function DynamicTable({ sheetName, columns, rows, onEdit }: DynamicTableP
           return;
         }
 
-        deleteMutation.mutate(rowId, {
+        deleteMutation.mutate({ rowId, rowNumber: typeof row._rowNumber === 'number' ? row._rowNumber : null }, {
           onSuccess: () => {
             Swal.fire('Eliminado', 'El registro fue eliminado correctamente.', 'success');
           },
@@ -214,34 +361,13 @@ export function DynamicTable({ sheetName, columns, rows, onEdit }: DynamicTableP
   return (
     <div className="space-y-4">
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
-        <div className="rounded-xl border border-gray-200 bg-white px-4 py-3 shadow-sm">
-          <p className="text-xs text-gray-500 font-semibold uppercase tracking-wide">Total de registros</p>
-          <p className="text-2xl font-bold text-gray-900 mt-1">{formatNumberEs(rows.length)}</p>
-          <p className="text-xs text-gray-500 mt-1">Registros disponibles en la tabla</p>
-        </div>
-        <div className="rounded-xl border border-gray-200 bg-white px-4 py-3 shadow-sm">
-          <p className="text-xs text-gray-500 font-semibold uppercase tracking-wide">Registros visibles</p>
-          <p className="text-2xl font-bold text-gray-900 mt-1">{formatNumberEs(filteredRows.length)}</p>
-          <p className="text-xs text-gray-500 mt-1">Resultado actual de filtros y búsqueda</p>
-        </div>
-        <div className="rounded-xl border border-gray-200 bg-white px-4 py-3 shadow-sm">
-          <p className="text-xs text-gray-500 font-semibold uppercase tracking-wide">
-            {typeCoverage?.label ?? 'Cobertura de tipos'}
-          </p>
-          <p className="text-2xl font-bold text-gray-900 mt-1">{typeCoverage?.value ?? 'N/D'}</p>
-          <p className="text-xs text-gray-500 mt-1">
-            {typeCoverage?.helper ?? 'No se detectó una columna de tipo o categoría'}
-          </p>
-        </div>
-        <div className="rounded-xl border border-gray-200 bg-white px-4 py-3 shadow-sm">
-          <p className="text-xs text-gray-500 font-semibold uppercase tracking-wide">
-            {numericInsight?.label ?? 'Indicador numérico'}
-          </p>
-          <p className="text-2xl font-bold text-gray-900 mt-1">{numericInsight?.value ?? 'N/D'}</p>
-          <p className="text-xs text-gray-500 mt-1">
-            {numericInsight?.helper ?? 'No se detectó una columna numérica útil'}
-          </p>
-        </div>
+        {insightCards.map((card) => (
+          <div key={card.label} className="rounded-xl border border-gray-200 bg-white px-4 py-3 shadow-sm">
+            <p className="text-xs text-gray-500 font-semibold uppercase tracking-wide">{card.label}</p>
+            <p className="text-2xl font-bold text-gray-900 mt-1">{card.value}</p>
+            <p className="text-xs text-gray-500 mt-1">{card.helper}</p>
+          </div>
+        ))}
       </div>
 
       <div className="rounded-2xl border border-gray-200 bg-white shadow-[0_24px_50px_-36px_rgba(15,23,42,0.8)] overflow-hidden">
@@ -410,7 +536,7 @@ export function DynamicTable({ sheetName, columns, rows, onEdit }: DynamicTableP
                       </td>
                       {columns.map((col) => (
                         <td key={`${key}-${col}`} className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">
-                          {row[col] !== undefined && row[col] !== null ? String(row[col]) : '-'}
+                          {renderCellValue(col, row[col])}
                         </td>
                       ))}
                     </tr>
