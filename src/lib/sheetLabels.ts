@@ -1,20 +1,25 @@
+// ⚠️ IMPORTANTE:
+// - CLAVE (izquierda): nombre técnico real de la hoja (backend/procesos).
+// - VALOR (derecha): etiqueta visual para UI (editable sin romper procesos).
+// Si quieres cambiar cómo lo ve el usuario, editá SOLO los valores.
 const SHEET_LABELS: Record<string, string> = {
   DESTINOS: 'Destinos',
   TARIFAS: 'Tarifas',
   TIENDAS: 'Tiendas',
-  COURIER: 'Mensajerías',
+  COURIER: 'Couriers',
   VENDEDORES: 'Vendedores',
-  FULLFILMENT: 'Cumplimiento',
+  FULLFILMENT: 'FullFilment',
   ORIGEN: 'Origen',
   RESULTADOS: 'Resultados',
-  'TIPO DE PUNTO': 'Tipo de punto',
-  'TIPO DE RECOJO': 'Tipo de recojo',
+  'TIPO DE PUNTO': 'Tipo de Punto',
+  'TIPO DE RECOJO': 'Tipo de Recojo',
   ENVIOS: 'Envíos',
   RECOJOS: 'Recojos',
   'LEADS GANADOS': 'Leads ganados',
 };
 
 const BASE_SHEETS = new Set([
+  // Mantener estos nombres técnicos alineados con Google Sheets.
   'DESTINOS',
   'TARIFAS',
   'TIENDAS',

@@ -3,11 +3,17 @@ import { Link, useLocation } from 'react-router-dom';
 import { LayoutDashboard, Database, Sparkles, ShieldCheck, Layers3, Workflow } from 'lucide-react';
 import { getSheetLabel, groupSheetsByDomain } from '../lib/sheetLabels';
 
-interface SidebarProps {
-  sheets: string[];
+interface SidebarPrefetchHandlers {
+  onSheetHover?: (sheet: string) => void;
+  onSheetFocus?: (sheet: string) => void;
 }
 
-export function Sidebar({ sheets }: SidebarProps) {
+interface SidebarProps {
+  sheets: string[];
+  prefetchHandlers?: SidebarPrefetchHandlers;
+}
+
+export function Sidebar({ sheets, prefetchHandlers }: SidebarProps) {
   const location = useLocation();
   const groupedSheets = groupSheetsByDomain(sheets);
 
@@ -29,6 +35,8 @@ export function Sidebar({ sheets }: SidebarProps) {
             <Link
               key={sheet}
               to={path}
+              onMouseEnter={() => prefetchHandlers?.onSheetHover?.(sheet)}
+              onFocus={() => prefetchHandlers?.onSheetFocus?.(sheet)}
               className={`group flex items-center gap-3 w-full text-left px-4 py-2.5 rounded-xl border transition-all duration-200 ${
                 isActive
                   ? 'bg-white/10 text-white font-semibold border-red-500/70 shadow-[0_8px_24px_-18px_rgba(255,255,255,0.8)]'
