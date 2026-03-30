@@ -58,6 +58,24 @@ function filterRowsByRange(rows: Row[], dateColumn: string | null, from: string,
   });
 }
 
+function isDateWithinRange(value: unknown, from: string, to: string) {
+  const parsed = parseDateValue(value);
+  if (!parsed) return false;
+
+  const fromDate = from ? parseDateValue(from) : null;
+  const toDateRaw = to ? parseDateValue(to) : null;
+  const toDate = toDateRaw ? new Date(toDateRaw) : null;
+
+  if (toDate) {
+    toDate.setHours(23, 59, 59, 999);
+  }
+
+  if (fromDate && parsed < fromDate) return false;
+  if (toDate && parsed > toDate) return false;
+
+  return true;
+}
+
 function safeDivide(numerator: number, denominator: number) {
   if (!denominator) return 0;
   return numerator / denominator;
@@ -153,12 +171,10 @@ export function DashboardOverview() {
     const tiendasInRange = filterRowsByRange(tiendasRows, tiendasDateColumn, dateFrom, dateTo);
     const fullfilmentInRange = filterRowsByRange(fullfilmentRows, fullfilmentDateColumn, dateFrom, dateTo);
 
-    const leadGanadoPeriodoCol = getColumnByCandidates(leadsColumns, ['Lead ganado en periodo?', 'lead ganado en periodo']);
+    const leadFechaGanadoCol = getColumnByCandidates(leadsColumns, ['Fecha Lead Ganado', 'fecha_lead_ganado']);
     const cantidadEnviosCol = getColumnByCandidates(leadsColumns, ['Cantidad de envios', 'cantidad de envíos']);
 
-    const tiendasRegistradas = leadsInRange.filter(
-      (row) => normalizeText(getStringValue(row, leadGanadoPeriodoCol)) === 'si',
-    ).length;
+    const tiendasRegistradas = leadsRows.filter((row) => isDateWithinRange(row[leadFechaGanadoCol ?? ''], dateFrom, dateTo)).length;
 
     const leadsGanados = leadsInRange.filter((row) => getNumericValue(row, cantidadEnviosCol) > 0).length;
 
