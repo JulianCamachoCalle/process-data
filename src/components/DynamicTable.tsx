@@ -61,7 +61,17 @@ export function DynamicTable({ sheetName, columns, rows, onEdit }: DynamicTableP
   const [pageSize, setPageSize] = useState(10);
   const [currentPage, setCurrentPage] = useState(1);
 
-  const dateColumn = useMemo(() => columns.find((column) => isDateColumn(column)) ?? null, [columns]);
+  const dateColumn = useMemo(() => {
+    if (sheetName === 'LEADS GANADOS') {
+      const fechaLeadGanado = columns.find(
+        (column) => normalizeText(column) === normalizeText('Fecha Lead Ganado'),
+      );
+
+      if (fechaLeadGanado) return fechaLeadGanado;
+    }
+
+    return columns.find((column) => isDateColumn(column)) ?? null;
+  }, [columns, sheetName]);
   const typeColumn = useMemo(() => columns.find((column) => isTypeColumn(column)) ?? null, [columns]);
 
   const numericInsightColumn = useMemo(() => {
@@ -224,7 +234,34 @@ export function DynamicTable({ sheetName, columns, rows, onEdit }: DynamicTableP
     return parseNumericValue(rawValue) !== null;
   };
 
-  const renderCellValue = (columnName: string, rawValue: unknown) => {
+  const isDateWithinRange = (value: unknown) => {
+    const parsed = parseDateValue(value);
+    if (!parsed) return false;
+
+    const fromDate = dateFrom ? parseDateValue(dateFrom) : null;
+    const toDateRaw = dateTo ? parseDateValue(dateTo) : null;
+    const toDate = toDateRaw ? new Date(toDateRaw) : null;
+
+    if (toDate) {
+      toDate.setHours(23, 59, 59, 999);
+    }
+
+    if (fromDate && parsed < fromDate) return false;
+    if (toDate && parsed > toDate) return false;
+
+    return true;
+  };
+
+  const renderCellValue = (columnName: string, rawValue: unknown, row: SheetRow) => {
+    if (sheetName === 'LEADS GANADOS' && normalizeText(columnName) === normalizeText('Lead ganado en periodo?')) {
+      const fechaCol = columns.find((col) => normalizeText(col) === normalizeText('Fecha Lead Ganado'));
+      if (!fechaCol) return '-';
+
+      if (!dateFrom && !dateTo) return 'Si';
+
+      return isDateWithinRange(row[fechaCol]) ? 'Si' : 'No';
+    }
+
     if (rawValue === undefined || rawValue === null || rawValue === '') return '-';
 
     const numericValue = parseNumericValue(rawValue);
@@ -536,7 +573,7 @@ export function DynamicTable({ sheetName, columns, rows, onEdit }: DynamicTableP
                       </td>
                       {columns.map((col) => (
                         <td key={`${key}-${col}`} className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">
-                          {renderCellValue(col, row[col])}
+                          {renderCellValue(col, row[col], row)}
                         </td>
                       ))}
                     </tr>
