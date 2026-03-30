@@ -1,8 +1,11 @@
 import { Routes, Route, Navigate, useNavigate, useParams } from 'react-router-dom';
+import { useEffect, useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { Sidebar } from './components/Sidebar';
 import { SheetView } from './components/SheetView';
 import { DashboardOverview } from './features/dashboard/DashboardOverview';
 import { Login } from './features/auth/Login';
+import { prefetchSheetData } from './hooks/useSheetData';
 
 const SHEETS = [
   'DESTINOS',
@@ -21,21 +24,76 @@ const SHEETS = [
 ];
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
-  const token = localStorage.getItem('auth_token');
-  if (!token) return <Navigate to="/login" replace />;
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const validateSession = async () => {
+      try {
+        const response = await fetch('/api/auth', {
+          method: 'GET',
+          credentials: 'include',
+        });
+
+        if (!isMounted) return;
+        setIsAuthenticated(response.ok);
+      } catch {
+        if (!isMounted) return;
+        setIsAuthenticated(false);
+      }
+    };
+
+    void validateSession();
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  if (isAuthenticated === null) {
+    return (
+      <div className="min-h-screen flex items-center justify-center text-sm text-gray-500">
+        Verificando sesión...
+      </div>
+    );
+  }
+
+  if (!isAuthenticated) {
+    return <Navigate to="/login" replace />;
+  }
+
   return <>{children}</>;
 }
 
 function Layout() {
+  const queryClient = useQueryClient();
   const navigate = useNavigate();
-  const handleLogout = () => {
-    localStorage.removeItem('auth_token');
-    navigate('/login');
+
+  const prefetchSheet = (sheetName: string) => {
+    void prefetchSheetData(queryClient, sheetName);
+  };
+
+  const handleLogout = async () => {
+    try {
+      await fetch('/api/auth', {
+        method: 'DELETE',
+        credentials: 'include',
+      });
+    } finally {
+      navigate('/login', { replace: true });
+    }
   };
 
   return (
     <div className="flex h-screen bg-transparent overflow-hidden text-gray-900 font-sans selection:bg-red-100 selection:text-red-900">
-      <Sidebar sheets={SHEETS} />
+      <Sidebar
+        sheets={SHEETS}
+        prefetchHandlers={{
+          onSheetHover: prefetchSheet,
+          onSheetFocus: prefetchSheet,
+        }}
+      />
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden bg-gradient-to-b from-white/90 via-white/75 to-white/95 z-10 relative backdrop-blur-sm">
         <header className="h-20 border-b border-gray-200/80 flex items-center justify-between px-8 bg-white/75 backdrop-blur-md sticky top-0 z-20 shadow-[0_10px_30px_-20px_rgba(15,23,42,0.45)]">
           <div>
