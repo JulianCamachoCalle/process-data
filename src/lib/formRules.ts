@@ -1,17 +1,21 @@
 import { normalizeText, parseDateValue, parseNumericValue } from './tableHelpers';
 
-export type FormInputType = 'text' | 'textarea' | 'number' | 'date' | 'email' | 'tel';
+export type FormInputType = 'text' | 'textarea' | 'number' | 'date' | 'month' | 'email' | 'tel';
 
 interface SheetFormRule {
   hiddenColumns?: string[];
   readOnlyColumns?: string[];
   inputOverrides?: Record<string, FormInputType>;
+  uniqueColumns?: string[];
+  defaultValues?: Record<string, string>;
 }
 
 const DEFAULT_SHEET_FORM_RULE: SheetFormRule = {
   hiddenColumns: [],
   readOnlyColumns: [],
   inputOverrides: {},
+  uniqueColumns: [],
+  defaultValues: {},
 };
 
 // ⚠️ IMPORTANTE:
@@ -22,31 +26,98 @@ const DEFAULT_SHEET_FORM_RULE: SheetFormRule = {
 // Para columnas calculadas automáticas que NO deben editarse, agregalas en `readOnlyColumns`
 // de la hoja correspondiente cuando me pases el listado exacto.
 export const SHEET_FORM_RULES: Record<string, SheetFormRule> = {
-  DESTINOS: {},
+  DESTINOS: {
+    uniqueColumns: ['Destinos'],
+  },
   TARIFAS: {
+    inputOverrides: {
+      'Cobro Entrega': 'number',
+      'Pago Moto': 'number',
+      Notas: 'textarea',
+    },
+    defaultValues: {
+      'Cobro Entrega': '0',
+      'Pago Moto': '0',
+    },
     readOnlyColumns: [
       // Ejemplo futuro: 'Tarifa Final'
     ],
   },
-  TIENDAS: {},
-  COURIER: {},
-  VENDEDORES: {},
-  FULLFILMENT: {},
-  ORIGEN: {},
-  RESULTADOS: {},
-  'TIPO DE PUNTO': {},
-  'TIPO DE RECOJO': {},
+  TIENDAS: {
+    uniqueColumns: ['Nombre'],
+  },
+  COURIER: {
+    uniqueColumns: ['Nombre'],
+  },
+  VENDEDORES: {
+    uniqueColumns: ['Nombre'],
+  },
+  FULLFILMENT: {
+    uniqueColumns: ['¿Es FullFilment?'],
+  },
+  ORIGEN: {
+    uniqueColumns: ['Opcion'],
+  },
+  RESULTADOS: {
+    uniqueColumns: ['Resultado'],
+  },
+  'TIPO DE PUNTO': {
+    uniqueColumns: ['Tipo de Punto'],
+  },
+  'TIPO DE RECOJO': {
+    uniqueColumns: ['Tipo de Recojo'],
+  },
   ENVIOS: {
+    inputOverrides: {
+      Mes: 'month',
+      'Excedente pagado moto': 'number',
+      observaciones: 'textarea',
+      Observaciones: 'textarea',
+    },
     readOnlyColumns: [
-      // Ejemplo futuro: 'Costo Total'
+      'Cobro Entrega',
+      'Pago moto',
+      'Extra punto moto',
+      'Extra punto empresa',
+      'ingreso total fila',
+      'Ingreso total fila',
+      'costo total fila',
+      'Costo total fila',
+      'idVendedor',
     ],
+    defaultValues: {
+      Mes: '__CURRENT_MONTH__',
+      'Excedente pagado moto': '0',
+    },
   },
   RECOJOS: {
     readOnlyColumns: [
       // Ejemplo futuro: 'Tiempo Estimado'
     ],
   },
-  'LEADS GANADOS': {},
+  'LEADS GANADOS': {
+    inputOverrides: {
+      'Fecha ingreso lead': 'date',
+      'Fecha registro lead': 'date',
+      'Fecha Lead Ganado': 'date',
+      Distrito: 'text',
+      'Anulados Fullfilment': 'number',
+      'Cantidad de envios': 'number',
+      Notas: 'textarea',
+    },
+    readOnlyColumns: [
+      'Dias Lead a Registro',
+      'Dias Registro a Ganado',
+      'Dias lead a ganado',
+      'Lead ganado en periodo?',
+      'Cantidad de envios',
+      'Ingreso anulados fullfilment',
+    ],
+    defaultValues: {
+      'Anulados Fullfilment': '0',
+      'Cantidad de envios': '0',
+    },
+  },
 };
 
 function normalizeColumnName(columnName: string) {
@@ -73,7 +144,21 @@ export function isIdLikeColumn(columnName: string): boolean {
     return true;
   }
 
+  // También contempla IDs de negocio como: idDestinos, idTiendas, idCourier, etc.
+  if (normalized.startsWith('id')) {
+    return true;
+  }
+
   return normalized.startsWith('id ') || normalized.endsWith(' id');
+}
+
+export function getUniqueFormColumns(sheetName: string, availableColumns: string[]): string[] {
+  const rule = getSheetRule(sheetName);
+  const configuredUnique = rule.uniqueColumns ?? [];
+
+  return availableColumns.filter((availableColumn) =>
+    configuredUnique.some((configuredColumn) => columnEquals(configuredColumn, availableColumn)),
+  );
 }
 
 export function isHiddenFormColumn(sheetName: string, columnName: string): boolean {
@@ -93,6 +178,13 @@ export function isReadOnlyFormColumn(sheetName: string, columnName: string): boo
 function getOverrideType(sheetName: string, columnName: string): FormInputType | null {
   const rule = getSheetRule(sheetName);
   const entries = Object.entries(rule.inputOverrides ?? {});
+  const found = entries.find(([key]) => columnEquals(key, columnName));
+  return found?.[1] ?? null;
+}
+
+function getDefaultValueOverride(sheetName: string, columnName: string): string | null {
+  const rule = getSheetRule(sheetName);
+  const entries = Object.entries(rule.defaultValues ?? {});
   const found = entries.find(([key]) => columnEquals(key, columnName));
   return found?.[1] ?? null;
 }
@@ -174,5 +266,42 @@ export function formatInputValueByType(inputType: FormInputType, value: unknown)
     return String(parsedNumber);
   }
 
+  if (inputType === 'month') {
+    const parsedDate = parseDateValue(value);
+    if (parsedDate) {
+      return `${parsedDate.getFullYear()}-${pad(parsedDate.getMonth() + 1)}`;
+    }
+
+    const raw = String(value ?? '').trim();
+    const monthMatch = raw.match(/^(\d{4})-(\d{2})(?:-\d{2})?$/);
+    if (monthMatch) {
+      return `${monthMatch[1]}-${monthMatch[2]}`;
+    }
+
+    return '';
+  }
+
   return String(value);
+}
+
+export function getFormDefaultValue(sheetName: string, columnName: string, inputType: FormInputType): string {
+  const now = new Date();
+  const currentMonth = `${now.getFullYear()}-${pad(now.getMonth() + 1)}`;
+
+  const override = getDefaultValueOverride(sheetName, columnName);
+  if (override !== null) {
+    if (override === '__CURRENT_MONTH__') {
+      return currentMonth;
+    }
+
+    return override;
+  }
+
+  if (inputType === 'number') return '';
+  if (inputType === 'date') return '';
+  if (inputType === 'month') {
+    return currentMonth;
+  }
+
+  return '';
 }

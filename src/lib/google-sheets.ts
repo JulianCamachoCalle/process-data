@@ -144,6 +144,7 @@ function mapRowsWithStableIds(
         return acc;
       }, {}),
       _id: typeof stableId === 'string' ? stableId : '',
+      _rowNumber: row.rowNumber,
     };
   });
 

@@ -68,3 +68,28 @@ export function formatNumberEs(value: number): string {
     maximumFractionDigits: 2,
   }).format(value);
 }
+
+export function formatCurrencyPen(value: number): string {
+  return new Intl.NumberFormat('es-PE', {
+    style: 'currency',
+    currency: 'PEN',
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(value);
+}
+
+export function isLikelyCurrencyColumn(columnName: string): boolean {
+  const normalized = normalizeText(columnName);
+
+  return [
+    'cobro',
+    'pago',
+    'monto',
+    'precio',
+    'costo',
+    'importe',
+    'saldo',
+    'comision',
+    'comisión',
+  ].some((keyword) => normalized.includes(normalizeText(keyword)));
+}
