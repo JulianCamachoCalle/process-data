@@ -74,6 +74,21 @@ interface EnvioRecord {
   extra_punto_empresa: number;
 }
 
+interface RecojoRecord {
+  stable_id: string;
+  business_id: number;
+  mes: string | null;
+  id_tienda: number;
+  id_tipo_recojo: number;
+  veces: number;
+  cobro_a_tienda_por_recojo: number;
+  pago_moto_por_recojo: number;
+  ingreso_recojo_total: number;
+  costo_recojo_total: number;
+  observaciones: string | null;
+  id_vendedor: number | null;
+}
+
 interface LeadGanadoRecord {
   stable_id: string;
   business_id: number;
@@ -86,7 +101,6 @@ interface LeadGanadoRecord {
   dias_registro_a_ganado: number;
   dias_lead_a_ganado: number;
   id_fullfilment: number;
-  lead_ganado_en_periodo: string;
   notas: string | null;
   distrito: string | null;
   cantidad_envios: number;
@@ -173,6 +187,20 @@ const ENVIOS_COLUMNS = [
   'Extra punto moto',
   'Extra punto empresa',
 ] as const;
+const RECOJOS_SHEET_NAME = 'RECOJOS';
+const RECOJOS_COLUMNS = [
+  'idRecojo',
+  'Mes',
+  'Tienda',
+  'Tipo de Recojo',
+  'Veces',
+  'Cobro a tienda por recojo',
+  'Pago moto por recojo',
+  'Ingreso recojo total',
+  'Costo recojo total',
+  'Observaciones',
+  'Vendedor',
+] as const;
 const LEADS_GANADOS_SHEET_NAME = 'LEADS GANADOS';
 const LEADS_GANADOS_COLUMNS = [
   'idLeadGanado',
@@ -232,6 +260,7 @@ function shouldUseSupabaseForSheet(sheetName: string) {
       Boolean(getBaseSheetConfig(sheetName)) ||
       sheetName === TARIFAS_SHEET_NAME ||
       sheetName === ENVIOS_SHEET_NAME ||
+      sheetName === RECOJOS_SHEET_NAME ||
       sheetName === LEADS_GANADOS_SHEET_NAME
     )
   );
@@ -350,6 +379,14 @@ interface EnvioReferenceData {
   vendedorIdByTiendaId: Map<number, number>;
 }
 
+interface RecojoReferenceData {
+  tiendaLabelById: Map<number, string>;
+  tipoRecojoLabelById: Map<number, string>;
+  vendedorLabelById: Map<number, string>;
+  vendedorIdByTiendaId: Map<number, number>;
+  recojoGratisId: number | null;
+}
+
 function toEnvioSheetRow(record: EnvioRecord, refs: EnvioReferenceData): SheetRow {
   const tienda = refs.tiendaLabelById.get(record.id_tienda) ?? `#${record.id_tienda}`;
   const destino = refs.destinoLabelById.get(record.id_destino) ?? `#${record.id_destino}`;
@@ -439,13 +476,6 @@ function calculateLeadDerivedValues(input: {
   const diasRegistroAGanado = diffDays(fechaRegistro, fechaGanado);
   const diasLeadAGanado = diffDays(fechaIngreso, fechaGanado);
 
-  const leadGanadoEnPeriodo =
-    fechaGanado && fechaRegistro &&
-    fechaGanado.getFullYear() === fechaRegistro.getFullYear() &&
-    fechaGanado.getMonth() === fechaRegistro.getMonth()
-      ? 'Si'
-      : 'No';
-
   const anuladosFullfilment = Math.round(parseNumericValue(input.anuladosFullfilmentRaw) ?? 0);
   const cantidadEnvios = Math.max(0, Math.round(parseNumericValue(input.cantidadEnviosRaw) ?? 0));
   const ingresoAnuladosFullfilment = anuladosFullfilment * 2;
@@ -457,10 +487,26 @@ function calculateLeadDerivedValues(input: {
     dias_lead_a_registro: diasLeadARegistro,
     dias_registro_a_ganado: diasRegistroAGanado,
     dias_lead_a_ganado: diasLeadAGanado,
-    lead_ganado_en_periodo: leadGanadoEnPeriodo,
     cantidad_envios: cantidadEnvios,
     anulados_fullfilment: formatCostForStorage(anuladosFullfilment),
     ingreso_anulados_fullfilment: formatCostForStorage(ingresoAnuladosFullfilment),
+  };
+}
+
+function toRecojoSheetRow(record: RecojoRecord, refs: RecojoReferenceData): SheetRow {
+  return {
+    _id: record.stable_id,
+    idRecojo: record.business_id,
+    Mes: formatMonthForDisplay(record.mes),
+    Tienda: refs.tiendaLabelById.get(record.id_tienda) ?? `#${record.id_tienda}`,
+    'Tipo de Recojo': refs.tipoRecojoLabelById.get(record.id_tipo_recojo) ?? `#${record.id_tipo_recojo}`,
+    Veces: String(record.veces ?? 0),
+    'Cobro a tienda por recojo': formatCostForDisplay(record.cobro_a_tienda_por_recojo),
+    'Pago moto por recojo': formatCostForDisplay(record.pago_moto_por_recojo),
+    'Ingreso recojo total': formatCostForDisplay(record.ingreso_recojo_total),
+    'Costo recojo total': formatCostForDisplay(record.costo_recojo_total),
+    Observaciones: record.observaciones ?? '',
+    Vendedor: record.id_vendedor ? refs.vendedorLabelById.get(record.id_vendedor) ?? `#${record.id_vendedor}` : '',
   };
 }
 
@@ -484,7 +530,7 @@ function toLeadGanadoSheetRow(record: LeadGanadoRecord, refs: LeadReferenceData)
     'Dias Registro a Ganado': String(record.dias_registro_a_ganado ?? 0),
     'Dias lead a ganado': String(record.dias_lead_a_ganado ?? 0),
     FullFilment: refs.fullfilmentLabelById.get(record.id_fullfilment) ?? `#${record.id_fullfilment}`,
-    'Lead ganado en periodo?': record.lead_ganado_en_periodo ?? 'No',
+    'Lead ganado en periodo?': '',
     Notas: record.notas ?? '',
     Distrito: record.distrito ?? '',
     'Cantidad de envios': String(record.cantidad_envios ?? 0),
@@ -765,14 +811,15 @@ async function fetchEnvioReferenceData(): Promise<EnvioReferenceData> {
   const vendedorIdByTiendaId = new Map<number, number>();
   const { data: leadsData, error: leadsError } = await supabase
     .from('leads_ganados')
-    .select('id_tienda,id_vendedor')
-    .limit(5000);
+    .select('id_tienda,id_vendedor,business_id,updated_at')
+    .order('business_id', { ascending: false })
+    .limit(20000);
 
   if (!leadsError) {
-    for (const row of (leadsData ?? []) as Array<{ id_tienda: number; id_vendedor: number }>) {
+    for (const row of (leadsData ?? []) as Array<{ id_tienda: number; id_vendedor: number; business_id: number; updated_at: string }>) {
       const tiendaId = Number(row.id_tienda);
       const vendedorId = Number(row.id_vendedor);
-      if (Number.isFinite(tiendaId) && Number.isFinite(vendedorId)) {
+      if (Number.isFinite(tiendaId) && Number.isFinite(vendedorId) && !vendedorIdByTiendaId.has(tiendaId)) {
         vendedorIdByTiendaId.set(tiendaId, vendedorId);
       }
     }
@@ -789,6 +836,45 @@ async function fetchEnvioReferenceData(): Promise<EnvioReferenceData> {
     deliveredResultadoId,
     tarifaByDestinoId,
     vendedorIdByTiendaId,
+  };
+}
+
+async function fetchRecojoReferenceData(): Promise<RecojoReferenceData> {
+  if (!supabase) throw new Error('Supabase no está configurado');
+
+  const [tiendaLabelById, tipoRecojoLabelById, vendedorLabelById] = await Promise.all([
+    fetchReferenceMap('tiendas', ['business_id', 'id'], ['nombre']),
+    fetchReferenceMap('tipo_recojo', ['business_id', 'id'], ['tipo_recojo']),
+    fetchReferenceMap('vendedores', ['business_id', 'id'], ['nombre']),
+  ]);
+
+  const recojoGratisId =
+    Array.from(tipoRecojoLabelById.entries()).find(([, label]) => normalizeLookupKey(label).includes(normalizeLookupKey('gratis')))?.[0] ??
+    null;
+
+  const vendedorIdByTiendaId = new Map<number, number>();
+  const { data: leadsData, error: leadsError } = await supabase
+    .from('leads_ganados')
+    .select('id_tienda,id_vendedor,business_id')
+    .order('business_id', { ascending: false })
+    .limit(20000);
+
+  if (!leadsError) {
+    for (const row of (leadsData ?? []) as Array<{ id_tienda: number; id_vendedor: number; business_id: number }>) {
+      const tiendaId = Number(row.id_tienda);
+      const vendedorId = Number(row.id_vendedor);
+      if (Number.isFinite(tiendaId) && Number.isFinite(vendedorId) && !vendedorIdByTiendaId.has(tiendaId)) {
+        vendedorIdByTiendaId.set(tiendaId, vendedorId);
+      }
+    }
+  }
+
+  return {
+    tiendaLabelById,
+    tipoRecojoLabelById,
+    vendedorLabelById,
+    vendedorIdByTiendaId,
+    recojoGratisId,
   };
 }
 
@@ -818,6 +904,32 @@ async function fetchEnviosFromSupabase(): Promise<SheetData> {
   };
 }
 
+async function fetchRecojosFromSupabase(): Promise<SheetData> {
+  if (!supabase) throw new Error('Supabase no está configurado');
+
+  await requireSupabaseSession();
+
+  const [refs, recojosResponse] = await Promise.all([
+    fetchRecojoReferenceData(),
+    supabase
+      .from('recojos')
+      .select(
+        'stable_id,business_id,mes,id_tienda,id_tipo_recojo,veces,cobro_a_tienda_por_recojo,pago_moto_por_recojo,ingreso_recojo_total,costo_recojo_total,observaciones,id_vendedor',
+      )
+      .order('business_id', { ascending: true }),
+  ]);
+
+  const { data, error } = recojosResponse;
+  if (error) {
+    throw new Error(error.message || 'No se pudieron cargar RECOJOS desde Supabase');
+  }
+
+  return {
+    columns: [...RECOJOS_COLUMNS],
+    rows: ((data ?? []) as RecojoRecord[]).map((record) => toRecojoSheetRow(record, refs)),
+  };
+}
+
 async function fetchLeadReferenceData(): Promise<LeadReferenceData> {
   const [tiendaLabelById, vendedorLabelById, fullfilmentLabelById, origenLabelById] = await Promise.all([
     fetchReferenceMap('tiendas', ['business_id', 'id'], ['nombre']),
@@ -844,7 +956,7 @@ async function fetchLeadsGanadosFromSupabase(): Promise<SheetData> {
     supabase
       .from('leads_ganados')
       .select(
-        'stable_id,business_id,id_tienda,id_vendedor,fecha_ingreso_lead,fecha_registro_lead,fecha_lead_ganado,dias_lead_a_registro,dias_registro_a_ganado,dias_lead_a_ganado,id_fullfilment,lead_ganado_en_periodo,notas,distrito,cantidad_envios,id_origen,anulados_fullfilment,ingreso_anulados_fullfilment',
+        'stable_id,business_id,id_tienda,id_vendedor,fecha_ingreso_lead,fecha_registro_lead,fecha_lead_ganado,dias_lead_a_registro,dias_registro_a_ganado,dias_lead_a_ganado,id_fullfilment,notas,distrito,cantidad_envios,id_origen,anulados_fullfilment,ingreso_anulados_fullfilment',
       )
       .order('business_id', { ascending: true }),
   ]);
@@ -861,6 +973,12 @@ async function fetchLeadsGanadosFromSupabase(): Promise<SheetData> {
 }
 
 export async function fetchSheet(name: string): Promise<SheetData> {
+  if (name === RECOJOS_SHEET_NAME && isSupabaseConfigured()) {
+    const data = await fetchRecojosFromSupabase();
+    triggerOutboxSyncBestEffort();
+    return data;
+  }
+
   if (name === LEADS_GANADOS_SHEET_NAME && isSupabaseConfigured()) {
     const data = await fetchLeadsGanadosFromSupabase();
     triggerOutboxSyncBestEffort();
@@ -933,6 +1051,22 @@ export function useEnvioFormOptions(enabled: boolean) {
         resultados: Array.from(refs.resultadoLabelById.values()).sort((a, b) => a.localeCompare(b, 'es')),
         tipoPunto: Array.from(refs.tipoPuntoLabelById.values()).sort((a, b) => a.localeCompare(b, 'es')),
         fullfilment: Array.from(refs.fullfilmentLabelById.values()).sort((a, b) => a.localeCompare(b, 'es')),
+      };
+    },
+    enabled,
+    staleTime: SHEET_QUERY_STALE_TIME_MS,
+  });
+}
+
+export function useRecojoFormOptions(enabled: boolean) {
+  return useQuery({
+    queryKey: ['sheet-options', 'RECOJOS'],
+    queryFn: async () => {
+      const refs = await fetchRecojoReferenceData();
+
+      return {
+        tiendas: Array.from(refs.tiendaLabelById.values()).sort((a, b) => a.localeCompare(b, 'es')),
+        tipoRecojo: Array.from(refs.tipoRecojoLabelById.values()).sort((a, b) => a.localeCompare(b, 'es')),
       };
     },
     enabled,
@@ -1052,9 +1186,77 @@ export function useLeadGanadoAutoPreview(input: {
         'Dias Lead a Registro': String(derived.dias_lead_a_registro),
         'Dias Registro a Ganado': String(derived.dias_registro_a_ganado),
         'Dias lead a ganado': String(derived.dias_lead_a_ganado),
-        'Lead ganado en periodo?': derived.lead_ganado_en_periodo,
+        'Lead ganado en periodo?': '',
         'Cantidad de envios': String(derived.cantidad_envios),
         'Ingreso anulados fullfilment': formatCostForDisplay(derived.ingreso_anulados_fullfilment),
+      };
+    },
+    staleTime: 5_000,
+  });
+}
+
+function calculateRecojoDerivedValues(input: {
+  idTipoRecojo: number;
+  vecesRaw: unknown;
+  refs: RecojoReferenceData;
+}) {
+  const veces = Math.max(0, Math.round(parseNumericValue(input.vecesRaw) ?? 0));
+  const pagoMotoPorRecojo = 4;
+  const isGratis = input.refs.recojoGratisId !== null && input.idTipoRecojo === input.refs.recojoGratisId;
+  const cobroATiendaPorRecojo = isGratis ? 0 : 8;
+
+  const ingresoRecojoTotal = veces * cobroATiendaPorRecojo;
+  const costoRecojoTotal = veces * pagoMotoPorRecojo;
+
+  return {
+    veces,
+    cobro_a_tienda_por_recojo: formatCostForStorage(cobroATiendaPorRecojo),
+    pago_moto_por_recojo: formatCostForStorage(pagoMotoPorRecojo),
+    ingreso_recojo_total: formatCostForStorage(ingresoRecojoTotal),
+    costo_recojo_total: formatCostForStorage(costoRecojoTotal),
+  };
+}
+
+export function useRecojoAutoPreview(input: {
+  enabled: boolean;
+  tipoRecojo: string;
+  tienda: string;
+  veces: string;
+}) {
+  return useQuery({
+    queryKey: ['sheet-preview', 'RECOJOS', input.tipoRecojo, input.tienda, input.veces],
+    enabled: input.enabled,
+    queryFn: async () => {
+      const refs = await fetchRecojoReferenceData();
+
+      const idTipoRecojo = input.tipoRecojo ? findIdByLabelOrThrow(refs.tipoRecojoLabelById, input.tipoRecojo, 'Tipo de Recojo') : null;
+      const idTienda = input.tienda ? findIdByLabelOrThrow(refs.tiendaLabelById, input.tienda, 'Tienda') : null;
+
+      if (idTipoRecojo === null) {
+        return {
+          'Cobro a tienda por recojo': '0.00',
+          'Pago moto por recojo': '4.00',
+          'Ingreso recojo total': '0.00',
+          'Costo recojo total': '0.00',
+          Vendedor: 'Se asigna por Tienda (Leads Ganados)',
+        };
+      }
+
+      const derived = calculateRecojoDerivedValues({
+        idTipoRecojo,
+        vecesRaw: input.veces,
+        refs,
+      });
+
+      const vendedorId = idTienda !== null ? refs.vendedorIdByTiendaId.get(idTienda) ?? null : null;
+      const vendedorLabel = vendedorId ? refs.vendedorLabelById.get(vendedorId) ?? `#${vendedorId}` : 'Se asigna por Tienda (Leads Ganados)';
+
+      return {
+        'Cobro a tienda por recojo': formatCostForDisplay(derived.cobro_a_tienda_por_recojo),
+        'Pago moto por recojo': formatCostForDisplay(derived.pago_moto_por_recojo),
+        'Ingreso recojo total': formatCostForDisplay(derived.ingreso_recojo_total),
+        'Costo recojo total': formatCostForDisplay(derived.costo_recojo_total),
+        Vendedor: vendedorLabel,
       };
     },
     staleTime: 5_000,
@@ -1393,6 +1595,108 @@ async function deleteEnvioSupabase(params: DeleteMutationPayload): Promise<Mutat
   };
 }
 
+async function addRecojoSupabase(rowData: Record<string, unknown>): Promise<MutationRowResponse> {
+  if (!supabase) throw new Error('Supabase no está configurado');
+  await requireSupabaseSession();
+
+  const refs = await fetchRecojoReferenceData();
+
+  const idTienda = findIdByLabelOrThrow(refs.tiendaLabelById, rowData.Tienda, 'Tienda');
+  const idTipoRecojo = findIdByLabelOrThrow(refs.tipoRecojoLabelById, rowData['Tipo de Recojo'], 'Tipo de Recojo');
+  const idVendedor = refs.vendedorIdByTiendaId.get(idTienda) ?? null;
+
+  const derived = calculateRecojoDerivedValues({
+    idTipoRecojo,
+    vecesRaw: rowData.Veces,
+    refs,
+  });
+
+  const { data, error } = await supabase
+    .from('recojos')
+    .insert({
+      mes: formatMonthForStorage(rowData.Mes),
+      id_tienda: idTienda,
+      id_tipo_recojo: idTipoRecojo,
+      id_vendedor: idVendedor,
+      observaciones: String(rowData.Observaciones ?? rowData.observaciones ?? '').trim() || null,
+      ...derived,
+    })
+    .select(
+      'stable_id,business_id,mes,id_tienda,id_tipo_recojo,veces,cobro_a_tienda_por_recojo,pago_moto_por_recojo,ingreso_recojo_total,costo_recojo_total,observaciones,id_vendedor',
+    )
+    .single();
+
+  if (error) {
+    throw new Error(error.message || 'No se pudo crear recojo en Supabase');
+  }
+
+  return {
+    success: true,
+    row: toRecojoSheetRow(data as RecojoRecord, refs),
+  };
+}
+
+async function updateRecojoSupabase(rowData: UpdateMutationPayload): Promise<MutationRowResponse> {
+  if (!supabase) throw new Error('Supabase no está configurado');
+  await requireSupabaseSession();
+
+  const refs = await fetchRecojoReferenceData();
+
+  const idTienda = findIdByLabelOrThrow(refs.tiendaLabelById, rowData.Tienda, 'Tienda');
+  const idTipoRecojo = findIdByLabelOrThrow(refs.tipoRecojoLabelById, rowData['Tipo de Recojo'], 'Tipo de Recojo');
+  const idVendedor = refs.vendedorIdByTiendaId.get(idTienda) ?? null;
+
+  const derived = calculateRecojoDerivedValues({
+    idTipoRecojo,
+    vecesRaw: rowData.Veces,
+    refs,
+  });
+
+  const { data, error } = await supabase
+    .from('recojos')
+    .update({
+      mes: formatMonthForStorage(rowData.Mes),
+      id_tienda: idTienda,
+      id_tipo_recojo: idTipoRecojo,
+      id_vendedor: idVendedor,
+      observaciones: String(rowData.Observaciones ?? rowData.observaciones ?? '').trim() || null,
+      ...derived,
+    })
+    .eq('stable_id', rowData._id)
+    .select(
+      'stable_id,business_id,mes,id_tienda,id_tipo_recojo,veces,cobro_a_tienda_por_recojo,pago_moto_por_recojo,ingreso_recojo_total,costo_recojo_total,observaciones,id_vendedor',
+    )
+    .single();
+
+  if (error) {
+    throw new Error(error.message || 'No se pudo actualizar recojo en Supabase');
+  }
+
+  return {
+    success: true,
+    row: toRecojoSheetRow(data as RecojoRecord, refs),
+  };
+}
+
+async function deleteRecojoSupabase(params: DeleteMutationPayload): Promise<MutationRowResponse> {
+  if (!supabase) throw new Error('Supabase no está configurado');
+  await requireSupabaseSession();
+
+  const { error } = await supabase
+    .from('recojos')
+    .delete()
+    .eq('stable_id', params.rowId);
+
+  if (error) {
+    throw new Error(error.message || 'No se pudo eliminar recojo en Supabase');
+  }
+
+  return {
+    success: true,
+    deletedId: params.rowId,
+  };
+}
+
 async function addLeadGanadoSupabase(rowData: Record<string, unknown>): Promise<MutationRowResponse> {
   if (!supabase) throw new Error('Supabase no está configurado');
   await requireSupabaseSession();
@@ -1434,7 +1738,7 @@ async function addLeadGanadoSupabase(rowData: Record<string, unknown>): Promise<
       ...derived,
     })
     .select(
-      'stable_id,business_id,id_tienda,id_vendedor,fecha_ingreso_lead,fecha_registro_lead,fecha_lead_ganado,dias_lead_a_registro,dias_registro_a_ganado,dias_lead_a_ganado,id_fullfilment,lead_ganado_en_periodo,notas,distrito,cantidad_envios,id_origen,anulados_fullfilment,ingreso_anulados_fullfilment',
+      'stable_id,business_id,id_tienda,id_vendedor,fecha_ingreso_lead,fecha_registro_lead,fecha_lead_ganado,dias_lead_a_registro,dias_registro_a_ganado,dias_lead_a_ganado,id_fullfilment,notas,distrito,cantidad_envios,id_origen,anulados_fullfilment,ingreso_anulados_fullfilment',
     )
     .single();
 
@@ -1491,7 +1795,7 @@ async function updateLeadGanadoSupabase(rowData: UpdateMutationPayload): Promise
     })
     .eq('stable_id', rowData._id)
     .select(
-      'stable_id,business_id,id_tienda,id_vendedor,fecha_ingreso_lead,fecha_registro_lead,fecha_lead_ganado,dias_lead_a_registro,dias_registro_a_ganado,dias_lead_a_ganado,id_fullfilment,lead_ganado_en_periodo,notas,distrito,cantidad_envios,id_origen,anulados_fullfilment,ingreso_anulados_fullfilment',
+      'stable_id,business_id,id_tienda,id_vendedor,fecha_ingreso_lead,fecha_registro_lead,fecha_lead_ganado,dias_lead_a_registro,dias_registro_a_ganado,dias_lead_a_ganado,id_fullfilment,notas,distrito,cantidad_envios,id_origen,anulados_fullfilment,ingreso_anulados_fullfilment',
     )
     .single();
 
@@ -1592,6 +1896,10 @@ export function useAddRow(sheetName: string) {
 
   return useMutation({
     mutationFn: async (rowData: Record<string, unknown>) => {
+      if (sheetName === RECOJOS_SHEET_NAME && isSupabaseConfigured()) {
+        return addRecojoSupabase(rowData);
+      }
+
       if (sheetName === LEADS_GANADOS_SHEET_NAME && isSupabaseConfigured()) {
         return addLeadGanadoSupabase(rowData);
       }
@@ -1649,6 +1957,10 @@ export function useUpdateRow(sheetName: string) {
   return useMutation({
     mutationFn: async (rowData: UpdateMutationPayload) => {
       if (shouldUseSupabaseForSheet(sheetName)) {
+        if (sheetName === RECOJOS_SHEET_NAME && isSupabaseConfigured()) {
+          return updateRecojoSupabase(rowData);
+        }
+
         if (sheetName === LEADS_GANADOS_SHEET_NAME && isSupabaseConfigured()) {
           return updateLeadGanadoSupabase(rowData);
         }
@@ -1716,6 +2028,10 @@ export function useDeleteRow(sheetName: string) {
 
   return useMutation({
     mutationFn: async (params: DeleteMutationPayload) => {
+      if (sheetName === RECOJOS_SHEET_NAME && isSupabaseConfigured()) {
+        return deleteRecojoSupabase(params);
+      }
+
       if (sheetName === LEADS_GANADOS_SHEET_NAME && isSupabaseConfigured()) {
         return deleteLeadGanadoSupabase(params);
       }
