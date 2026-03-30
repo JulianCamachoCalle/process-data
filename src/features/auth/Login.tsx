@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { LockKeyhole, ShieldCheck, Sparkles } from 'lucide-react';
+import { isSupabaseConfigured, supabase } from '../../lib/supabase';
 
 export function Login() {
   const [password, setPassword] = useState('');
@@ -14,22 +15,31 @@ export function Login() {
     setIsLoading(true);
 
     try {
+      if (isSupabaseConfigured() && supabase) {
+        const { error: supabaseAuthError } = await supabase.auth.signInAnonymously();
+        if (supabaseAuthError) {
+          console.error('[auth] supabase signInAnonymously failed', supabaseAuthError);
+          setError(supabaseAuthError.message || 'No se pudo iniciar sesión en Supabase');
+          return;
+        }
+      }
+
       const response = await fetch('/api/auth', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({ password }),
+        credentials: 'include',
       });
 
-      const data: { token?: string; error?: string } = await response.json().catch(() => ({}));
+      const data: { success?: boolean; error?: string } = await response.json().catch(() => ({}));
 
-      if (!response.ok || !data.token) {
+      if (!response.ok || !data.success) {
         setError(data.error || 'No se pudo iniciar sesión');
         return;
       }
 
-      localStorage.setItem('auth_token', data.token);
       navigate('/');
     } catch {
       setError('No se pudo conectar con el servidor');

@@ -1,10 +1,24 @@
 import { useState } from 'react';
-import { useSheetData, useAddRow, useUpdateRow } from '../hooks/useSheetData';
+import {
+  useSheetData,
+  useAddRow,
+  useUpdateRow,
+  useDestinoOptions,
+  useEnvioFormOptions,
+  useEnvioAutoPreview,
+  useRecojoFormOptions,
+  useRecojoAutoPreview,
+  useLeadGanadoAutoPreview,
+  useDistritoOptions,
+} from '../hooks/useSheetData';
+import type { SheetRow } from '../hooks/useSheetData';
 import { DynamicTable } from './DynamicTable';
 import { ModalForm } from './ModalForm';
 import Swal from 'sweetalert2';
 import { Plus, RefreshCcw, Table2, ShieldAlert } from 'lucide-react';
 import { getSheetLabel } from '../lib/sheetLabels';
+import { getUniqueFormColumns } from '../lib/formRules';
+import { normalizeText, parseNumericValue } from '../lib/tableHelpers';
 
 interface SheetViewProps {
   sheetName: string;
@@ -13,11 +27,123 @@ interface SheetViewProps {
 export function SheetView({ sheetName }: SheetViewProps) {
   const sheetLabel = getSheetLabel(sheetName);
   const { data, isLoading, isError, error, refetch } = useSheetData(sheetName);
+  const {
+    data: destinosData,
+  } = useDestinoOptions(sheetName === 'TARIFAS');
+
+  const { data: envioFormOptions } = useEnvioFormOptions(sheetName === 'ENVIOS');
+  const { data: recojoFormOptions } = useRecojoFormOptions(sheetName === 'RECOJOS');
+  const { data: leadsTiendasData } = useSheetData(sheetName === 'LEADS GANADOS' ? 'TIENDAS' : '');
+  const { data: leadsVendedoresData } = useSheetData(sheetName === 'LEADS GANADOS' ? 'VENDEDORES' : '');
+  const { data: leadsFullfilmentData } = useSheetData(sheetName === 'LEADS GANADOS' ? 'FULLFILMENT' : '');
+  const { data: leadsOrigenData } = useSheetData(sheetName === 'LEADS GANADOS' ? 'ORIGEN' : '');
+  const { data: distritoOptions } = useDistritoOptions(sheetName === 'LEADS GANADOS');
   const addMutation = useAddRow(sheetName);
   const updateMutation = useUpdateRow(sheetName);
 
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [editingRow, setEditingRow] = useState<Record<string, unknown> | null>(null);
+  const [editingRow, setEditingRow] = useState<SheetRow | null>(null);
+  const [modalInstance, setModalInstance] = useState(0);
+  const [previewInput, setPreviewInput] = useState({
+    destino: '',
+    resultado: '',
+    tipoPunto: '',
+    tienda: '',
+    excedentePagadoMoto: '0',
+    mes: '',
+  });
+  const [leadPreviewInput, setLeadPreviewInput] = useState({
+    fechaIngresoLead: '',
+    fechaRegistroLead: '',
+    fechaLeadGanado: '',
+    anuladosFullfilment: '0',
+    tienda: '',
+  });
+  const [recojoPreviewInput, setRecojoPreviewInput] = useState({
+    tipoRecojo: '',
+    tienda: '',
+    veces: '1',
+  });
+
+  const columns = data?.columns ?? [];
+  const rows = data?.rows ?? [];
+
+  const uniqueColumns = getUniqueFormColumns(sheetName, columns);
+
+  const destinoOptions = (destinosData?.rows ?? [])
+    .map((row) => String(row.Destinos ?? '').trim())
+    .filter(Boolean);
+
+  const selectOptionsByColumn: Record<string, string[]> =
+    sheetName === 'TARIFAS'
+      ? {
+          Destino: Array.from(new Set(destinoOptions)),
+        }
+      : sheetName === 'ENVIOS'
+        ? {
+            Tienda: envioFormOptions?.tiendas ?? [],
+            Destino: envioFormOptions?.destinos ?? [],
+            Resultado: envioFormOptions?.resultados ?? [],
+            'Tipo Punto': envioFormOptions?.tipoPunto ?? [],
+            FullFilment: envioFormOptions?.fullfilment ?? [],
+          }
+        : sheetName === 'LEADS GANADOS'
+          ? {
+              Tienda: Array.from(new Set((leadsTiendasData?.rows ?? []).map((row) => String(row.Nombre ?? '').trim()).filter(Boolean))),
+              Vendedor: Array.from(new Set((leadsVendedoresData?.rows ?? []).map((row) => String(row.Nombre ?? '').trim()).filter(Boolean))),
+              FullFilment: Array.from(new Set((leadsFullfilmentData?.rows ?? []).map((row) => String(row['¿Es FullFilment?'] ?? '').trim()).filter(Boolean))),
+              Origen: Array.from(new Set((leadsOrigenData?.rows ?? []).map((row) => String(row.Opcion ?? '').trim()).filter(Boolean))),
+              Distrito: distritoOptions ?? [],
+            }
+        : sheetName === 'RECOJOS'
+          ? {
+              Tienda: recojoFormOptions?.tiendas ?? [],
+              'Tipo de Recojo': recojoFormOptions?.tipoRecojo ?? [],
+            }
+        : {};
+
+  const { data: envioPreviewData } = useEnvioAutoPreview({
+    enabled: isModalOpen && sheetName === 'ENVIOS',
+    destino: previewInput.destino,
+    resultado: previewInput.resultado,
+    tipoPunto: previewInput.tipoPunto,
+    tienda: previewInput.tienda,
+    excedentePagadoMoto: previewInput.excedentePagadoMoto,
+  });
+
+  const { data: leadPreviewData } = useLeadGanadoAutoPreview({
+    enabled: isModalOpen && sheetName === 'LEADS GANADOS',
+    fechaIngresoLead: leadPreviewInput.fechaIngresoLead,
+    fechaRegistroLead: leadPreviewInput.fechaRegistroLead,
+    fechaLeadGanado: leadPreviewInput.fechaLeadGanado,
+    anuladosFullfilment: leadPreviewInput.anuladosFullfilment,
+    tienda: leadPreviewInput.tienda,
+  });
+
+  const { data: recojoPreviewData } = useRecojoAutoPreview({
+    enabled: isModalOpen && sheetName === 'RECOJOS',
+    tipoRecojo: recojoPreviewInput.tipoRecojo,
+    tienda: recojoPreviewInput.tienda,
+    veces: recojoPreviewInput.veces,
+  });
+
+  const previewValuesByColumn: Record<string, string> =
+    sheetName === 'ENVIOS'
+      ? {
+          ...(envioPreviewData ?? {}),
+          'Excedente pagado moto': String(parseNumericValue(previewInput.excedentePagadoMoto) ?? 0),
+        }
+      : sheetName === 'LEADS GANADOS'
+        ? {
+            ...(leadPreviewData ?? {}),
+            'Anulados Fullfilment': String(parseNumericValue(leadPreviewInput.anuladosFullfilment) ?? 0),
+          }
+      : sheetName === 'RECOJOS'
+        ? {
+            ...(recojoPreviewData ?? {}),
+            Veces: String(Math.max(0, Math.round(parseNumericValue(recojoPreviewInput.veces) ?? 0))),
+          }
+      : {};
 
   if (isLoading) {
     return (
@@ -50,24 +176,218 @@ export function SheetView({ sheetName }: SheetViewProps) {
 
   const handleOpenAdd = () => {
     setEditingRow(null);
+    const now = new Date();
+    const currentMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+    setPreviewInput({
+      destino: '',
+      resultado: '',
+      tipoPunto: '',
+      tienda: '',
+      excedentePagadoMoto: '0',
+      mes: currentMonth,
+    });
+    setLeadPreviewInput({
+      fechaIngresoLead: '',
+      fechaRegistroLead: '',
+      fechaLeadGanado: '',
+      anuladosFullfilment: '0',
+      tienda: '',
+    });
+    setRecojoPreviewInput({
+      tipoRecojo: '',
+      tienda: '',
+      veces: '1',
+    });
+    setModalInstance((prev) => prev + 1);
     setIsModalOpen(true);
   };
 
-  const handleOpenEdit = (row: Record<string, unknown>) => {
+  const handleOpenEdit = (row: SheetRow) => {
     setEditingRow(row);
+    setPreviewInput({
+      destino: String(row.Destino ?? '').trim(),
+      resultado: String(row.Resultado ?? '').trim(),
+      tipoPunto: String(row['Tipo Punto'] ?? '').trim(),
+      tienda: String(row.Tienda ?? '').trim(),
+      excedentePagadoMoto: String(parseNumericValue(row['Excedente pagado moto']) ?? 0),
+      mes: String(row.Mes ?? '').trim(),
+    });
+    setLeadPreviewInput({
+      fechaIngresoLead: String(row['Fecha ingreso lead'] ?? '').trim(),
+      fechaRegistroLead: String(row['Fecha registro lead'] ?? '').trim(),
+      fechaLeadGanado: String(row['Fecha Lead Ganado'] ?? '').trim(),
+      anuladosFullfilment: String(parseNumericValue(row['Anulados Fullfilment']) ?? 0),
+      tienda: String(row.Tienda ?? '').trim(),
+    });
+    setRecojoPreviewInput({
+      tipoRecojo: String(row['Tipo de Recojo'] ?? '').trim(),
+      tienda: String(row.Tienda ?? '').trim(),
+      veces: String(parseNumericValue(row.Veces) ?? 1),
+    });
+    setModalInstance((prev) => prev + 1);
     setIsModalOpen(true);
   };
 
   const handleModalSubmit = (formData: Record<string, string>) => {
+    const normalizedFormData = Object.entries(formData).reduce<Record<string, string>>((acc, [key, value]) => {
+      acc[key] = typeof value === 'string' ? value.trim() : '';
+      return acc;
+    }, {});
+
+    const duplicateColumn = uniqueColumns.find((uniqueColumn) => {
+      const submittedValue = normalizedFormData[uniqueColumn] ?? '';
+      if (!submittedValue) return false;
+
+      return rows.some((row) => {
+        if (editingRow && row._id === editingRow._id) {
+          return false;
+        }
+
+        const existingValue = String(row[uniqueColumn] ?? '').trim();
+        return normalizeText(existingValue) === normalizeText(submittedValue);
+      });
+    });
+
+    if (duplicateColumn) {
+      Swal.fire(
+        'Dato duplicado',
+        `El campo "${duplicateColumn}" ya existe. Ingresá un valor diferente.`,
+        'warning',
+      );
+      return;
+    }
+
+    if (sheetName === 'TARIFAS') {
+      const destino = String(normalizedFormData.Destino ?? '').trim();
+      if (!destino) {
+        Swal.fire('Validación', 'Destino es obligatorio.', 'warning');
+        return;
+      }
+
+      const cobroEntregaValue = parseNumericValue(normalizedFormData['Cobro Entrega']);
+      const pagoMotoValue = parseNumericValue(normalizedFormData['Pago Moto']);
+
+      const cobroEntrega = cobroEntregaValue ?? 0;
+      const pagoMoto = pagoMotoValue ?? 0;
+
+      const hasValidCostFormat = (raw: string) => {
+        const text = String(raw ?? '').trim();
+        if (!text) return true;
+        return /^\d+(?:[.,]\d{1,2})?$/.test(text);
+      };
+
+      if (!hasValidCostFormat(normalizedFormData['Cobro Entrega']) || !hasValidCostFormat(normalizedFormData['Pago Moto'])) {
+        Swal.fire('Validación', 'Cobro Entrega y Pago Moto aceptan máximo 2 decimales.', 'warning');
+        return;
+      }
+
+      normalizedFormData['Cobro Entrega'] = String(cobroEntrega);
+      normalizedFormData['Pago Moto'] = String(pagoMoto);
+      normalizedFormData.Notas = String(normalizedFormData.Notas ?? '').trim();
+    }
+
+    if (sheetName === 'ENVIOS') {
+      const requiredSelects = ['Tienda', 'Destino', 'Resultado', 'Tipo Punto', 'FullFilment'];
+      const missingField = requiredSelects.find((field) => !String(normalizedFormData[field] ?? '').trim());
+
+      if (missingField) {
+        Swal.fire('Validación', `${missingField} es obligatorio.`, 'warning');
+        return;
+      }
+
+      const excedenteText = String(normalizedFormData['Excedente pagado moto'] ?? '').trim();
+      if (excedenteText && !/^\d+(?:[.,]\d{1,2})?$/.test(excedenteText)) {
+        Swal.fire('Validación', 'Excedente pagado moto acepta máximo 2 decimales.', 'warning');
+        return;
+      }
+
+      if (!String(normalizedFormData.Mes ?? '').trim()) {
+        const now = new Date();
+        normalizedFormData.Mes = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+      }
+
+      normalizedFormData['Excedente pagado moto'] = String(parseNumericValue(normalizedFormData['Excedente pagado moto']) ?? 0);
+      normalizedFormData.observaciones = String(normalizedFormData.observaciones ?? '').trim();
+    }
+
+    if (sheetName === 'LEADS GANADOS') {
+      const requiredSelects = ['Tienda', 'Vendedor', 'FullFilment', 'Origen', 'Distrito'];
+      const missingField = requiredSelects.find((field) => !String(normalizedFormData[field] ?? '').trim());
+
+      if (missingField) {
+        Swal.fire('Validación', `${missingField} es obligatorio.`, 'warning');
+        return;
+      }
+
+      const requiredDates = ['Fecha ingreso lead', 'Fecha registro lead', 'Fecha Lead Ganado'];
+      const missingDate = requiredDates.find((field) => !String(normalizedFormData[field] ?? '').trim());
+
+      if (missingDate) {
+        Swal.fire('Validación', `${missingDate} es obligatoria.`, 'warning');
+        return;
+      }
+
+      const hasValidCostFormat = (raw: string) => {
+        const text = String(raw ?? '').trim();
+        if (!text) return true;
+        return /^\d+(?:[.,]\d{1,2})?$/.test(text);
+      };
+
+      if (!hasValidCostFormat(normalizedFormData['Anulados Fullfilment'])) {
+        Swal.fire('Validación', 'Anulados Fullfilment acepta máximo 2 decimales.', 'warning');
+        return;
+      }
+
+      normalizedFormData['Anulados Fullfilment'] = String(parseNumericValue(normalizedFormData['Anulados Fullfilment']) ?? 0);
+      normalizedFormData.Notas = String(normalizedFormData.Notas ?? '').trim();
+    }
+
+    if (sheetName === 'RECOJOS') {
+      const requiredSelects = ['Tienda', 'Tipo de Recojo'];
+      const missingField = requiredSelects.find((field) => !String(normalizedFormData[field] ?? '').trim());
+
+      if (missingField) {
+        Swal.fire('Validación', `${missingField} es obligatorio.`, 'warning');
+        return;
+      }
+
+      if (!String(normalizedFormData.Mes ?? '').trim()) {
+        const now = new Date();
+        normalizedFormData.Mes = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+      }
+
+      const veces = parseNumericValue(normalizedFormData.Veces);
+      if (veces === null || !Number.isFinite(veces)) {
+        Swal.fire('Validación', 'Veces debe ser numérico.', 'warning');
+        return;
+      }
+
+      const vecesRedondeadas = Math.round(veces);
+      if (vecesRedondeadas < 0) {
+        Swal.fire('Validación', 'Veces no puede ser negativo.', 'warning');
+        return;
+      }
+
+      normalizedFormData.Veces = String(vecesRedondeadas);
+      normalizedFormData.Observaciones = String(normalizedFormData.Observaciones ?? normalizedFormData.observaciones ?? '').trim();
+    }
+
     if (editingRow) {
-      const rowIndex = editingRow._rowIndex;
-      if (typeof rowIndex !== 'number') {
-        Swal.fire('Error', 'No se encontró el índice del registro a actualizar.', 'error');
+      const rowId = editingRow._id;
+      if (typeof rowId !== 'string' || !rowId.trim()) {
+        Swal.fire('Error', 'No se encontró el identificador del registro a actualizar.', 'error');
         return;
       }
 
       updateMutation.mutate(
-        { ...formData, _rowIndex: rowIndex },
+        {
+          ...normalizedFormData,
+          _id: rowId,
+          _rowNumber:
+            typeof editingRow._rowNumber === 'number' && Number.isInteger(editingRow._rowNumber)
+              ? editingRow._rowNumber
+              : undefined,
+        },
         {
           onSuccess: () => {
             setIsModalOpen(false);
@@ -77,7 +397,7 @@ export function SheetView({ sheetName }: SheetViewProps) {
         }
       );
     } else {
-      addMutation.mutate(formData, {
+      addMutation.mutate(normalizedFormData, {
         onSuccess: () => {
           setIsModalOpen(false);
           Swal.fire('Creado', 'El registro fue creado correctamente.', 'success');
@@ -120,8 +440,8 @@ export function SheetView({ sheetName }: SheetViewProps) {
       {data && data.rows && data.columns ? (
         <DynamicTable 
           sheetName={sheetName} 
-          columns={data.columns} 
-          rows={data.rows} 
+          columns={columns}
+          rows={rows}
           onEdit={handleOpenEdit} 
         />
       ) : (
@@ -132,11 +452,58 @@ export function SheetView({ sheetName }: SheetViewProps) {
 
       {data && data.columns && (
         <ModalForm
+          key={modalInstance}
           isOpen={isModalOpen}
           onClose={() => setIsModalOpen(false)}
           onSubmit={handleModalSubmit}
           title={editingRow ? 'Editar registro' : 'Nuevo registro'}
-          columns={data.columns}
+          sheetName={sheetName}
+          columns={columns}
+          selectOptionsByColumn={selectOptionsByColumn}
+          previewValuesByColumn={previewValuesByColumn}
+          onFormValueChange={(column: string, value: string) => {
+            if (sheetName === 'ENVIOS') {
+              if (column === 'Destino') {
+                setPreviewInput((prev) => ({ ...prev, destino: value }));
+              } else if (column === 'Resultado') {
+                setPreviewInput((prev) => ({ ...prev, resultado: value }));
+              } else if (column === 'Tipo Punto') {
+                setPreviewInput((prev) => ({ ...prev, tipoPunto: value }));
+              } else if (column === 'Tienda') {
+                setPreviewInput((prev) => ({ ...prev, tienda: value }));
+              } else if (column === 'Excedente pagado moto') {
+                setPreviewInput((prev) => ({ ...prev, excedentePagadoMoto: value }));
+              } else if (column === 'Mes') {
+                setPreviewInput((prev) => ({ ...prev, mes: value }));
+              }
+              return;
+            }
+
+            if (sheetName === 'LEADS GANADOS') {
+              if (column === 'Fecha ingreso lead') {
+                setLeadPreviewInput((prev) => ({ ...prev, fechaIngresoLead: value }));
+              } else if (column === 'Fecha registro lead') {
+                setLeadPreviewInput((prev) => ({ ...prev, fechaRegistroLead: value }));
+              } else if (column === 'Fecha Lead Ganado') {
+                setLeadPreviewInput((prev) => ({ ...prev, fechaLeadGanado: value }));
+              } else if (column === 'Anulados Fullfilment') {
+                setLeadPreviewInput((prev) => ({ ...prev, anuladosFullfilment: value }));
+              } else if (column === 'Tienda') {
+                setLeadPreviewInput((prev) => ({ ...prev, tienda: value }));
+              }
+              return;
+            }
+
+            if (sheetName === 'RECOJOS') {
+              if (column === 'Tipo de Recojo') {
+                setRecojoPreviewInput((prev) => ({ ...prev, tipoRecojo: value }));
+              } else if (column === 'Tienda') {
+                setRecojoPreviewInput((prev) => ({ ...prev, tienda: value }));
+              } else if (column === 'Veces') {
+                setRecojoPreviewInput((prev) => ({ ...prev, veces: value }));
+              }
+            }
+          }}
           initialData={editingRow}
           isSubmitting={isSubmitting}
         />
