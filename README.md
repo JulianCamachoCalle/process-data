@@ -1,11 +1,86 @@
-# Data - Setup Google Sheets
+# Process Data — Panel logístico con Google Sheets
 
-Este recorte conserva la configuracion base de OAuth 2.0 + Google Sheets API para validar credenciales rapidamente y dejar inicializada la hoja.
+Aplicación React + API routes de Vercel para operar múltiples hojas de Google Sheets con autenticación administrativa.
 
-## Incluye
+## Arquitectura real actual
 
-- Pantalla unica de inicio con estado de conexion
-- Checklist visual de variables de entorno
-- Boton para conectar y desconectar Google OAuth
-- Inicializacion automatica del spreadsheet al autenticar
+- **Frontend**: React + React Router + React Query.
+- **Backend**: rutas en `api/*.ts` desplegadas como funciones serverless (Vercel).
+- **Persistencia**: Google Sheets vía `google-spreadsheet` autenticando con **Service Account**.
+- **Autenticación**:
+  - Login por contraseña (`ADMIN_PASSWORD`) en backend.
+  - Emisión de JWT firmado con `JWT_SECRET`.
+  - JWT almacenado en **cookie httpOnly** (`auth_token`) con `SameSite=Lax`, `Path=/`, `Max-Age=8h` y `Secure` en producción.
+  - Frontend **no** guarda token en `localStorage`.
 
+## Flujo de autenticación
+
+### 1) Login
+
+- `POST /api/auth`
+- Body: `{ "password": "..." }`
+- Si es válido, backend responde `Set-Cookie` con JWT httpOnly y `{ success: true }`.
+
+### 2) Verificación de sesión
+
+- `GET /api/auth`
+- Valida la cookie y responde:
+  - `200 { authenticated: true }` si la sesión está activa.
+  - `401 { authenticated: false }` si no hay sesión válida.
+
+### 3) Logout
+
+- `DELETE /api/auth`
+- Limpia la cookie y responde `{ success: true }`.
+
+## Seguridad de APIs de datos
+
+- `api/sheet.ts` valida JWT exclusivamente desde cookie httpOnly.
+- El frontend envía cookies con `credentials: 'include'` en login, logout, verificación y CRUD.
+
+## Identidad estable por fila
+
+Para evitar inconsistencias por orden/cambios en Google Sheets:
+
+- Se usa columna técnica `__id` como identidad estable de negocio.
+- En lectura, si alguna fila no tiene `__id`, se genera UUID y se persiste.
+- El frontend recibe `_id` para update/delete.
+- `_rowIndex` queda como metadato opcional de debug/display, no identidad primaria.
+
+## Variables de entorno requeridas
+
+- `ADMIN_PASSWORD`
+- `JWT_SECRET`
+- `GOOGLE_SERVICE_ACCOUNT_EMAIL`
+- `GOOGLE_PRIVATE_KEY`
+- `GOOGLE_SHEET_ID`
+
+## Desarrollo local
+
+```bash
+npm install
+npm run dev
+```
+
+## Calidad
+
+```bash
+npm run lint
+```
+
+## Prewarm/Backfill de IDs antes de producción
+
+Para evitar la latencia del primer acceso (cuando se crean `__id` faltantes), ejecutá un backfill global después del deploy:
+
+- Endpoint: `POST /api/backfill-ids`
+- Seguridad: requiere cookie httpOnly `auth_token` válida (mismo esquema de auth que `api/sheet.ts`).
+- Comportamiento: recorre todas las hojas del documento, garantiza `__id` por fila y devuelve un resumen por hoja (`title`, `rowCount`, `hadBackfill`, `durationMs`).
+
+Ejemplo rápido (desde navegador autenticado o cliente que envíe cookies):
+
+```bash
+curl -X POST https://<tu-dominio>/api/backfill-ids \
+  --cookie "auth_token=<jwt>"
+```
+
+Es idempotente: si todas las filas ya tienen `__id`, responde sin cambios y con menor costo/latencia.
