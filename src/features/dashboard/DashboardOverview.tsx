@@ -1,86 +1,258 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
+import { Activity, AlertCircle, ChartColumnBig } from 'lucide-react';
 import { useSheetData } from '../../hooks/useSheetData';
-import { 
-  BarChart, 
-  Bar, 
-  XAxis, 
-  YAxis, 
-  CartesianGrid, 
-  Tooltip, 
-  Legend, 
-  ResponsiveContainer 
-} from 'recharts';
-import { 
-  Package, 
-  DollarSign, 
-  CreditCard, 
-  TrendingUp,
-  AlertCircle,
-  Activity,
-  ChartColumnBig
-} from 'lucide-react';
+import { formatCurrencyPen, formatNumberEs, normalizeText, parseDateValue, parseNumericValue } from '../../lib/tableHelpers';
 
-function parseCurrency(value: string | number | boolean | undefined): number {
-  if (value === undefined || value === null || value === '') return 0;
-  if (typeof value === 'number') return value;
-  if (typeof value === 'boolean') return 0;
-  const cleaned = value.toString().replace(/[S/$,\s]/g, '');
-  const parsed = parseFloat(cleaned);
-  return isNaN(parsed) ? 0 : parsed;
+type Row = Record<string, unknown>;
+
+function getColumnByCandidates(columns: string[], candidates: string[]) {
+  return (
+    columns.find((column) => {
+      const normalizedColumn = normalizeText(column);
+      return candidates.some((candidate) => normalizeText(candidate) === normalizedColumn);
+    }) ?? null
+  );
+}
+
+function getDateColumn(columns: string[]) {
+  return getColumnByCandidates(columns, [
+    'Fecha',
+    'Fecha de envio',
+    'Fecha envío',
+    'Fecha de recojo',
+    'Fecha registro',
+    'Fecha de registro',
+  ]);
+}
+
+function getStringValue(row: Row, column: string | null) {
+  if (!column) return '';
+  return String(row[column] ?? '').trim();
+}
+
+function getNumericValue(row: Row, column: string | null) {
+  if (!column) return 0;
+  return parseNumericValue(row[column]) ?? 0;
+}
+
+function filterRowsByRange(rows: Row[], dateColumn: string | null, from: string, to: string) {
+  if (!dateColumn || (!from && !to)) return rows;
+
+  const fromDate = from ? parseDateValue(from) : null;
+  const toDateRaw = to ? parseDateValue(to) : null;
+  const toDate = toDateRaw ? new Date(toDateRaw) : null;
+
+  if (toDate) {
+    toDate.setHours(23, 59, 59, 999);
+  }
+
+  return rows.filter((row) => {
+    const value = row[dateColumn];
+    const parsed = parseDateValue(value);
+    if (!parsed) return false;
+
+    if (fromDate && parsed < fromDate) return false;
+    if (toDate && parsed > toDate) return false;
+
+    return true;
+  });
+}
+
+function safeDivide(numerator: number, denominator: number) {
+  if (!denominator) return 0;
+  return numerator / denominator;
+}
+
+function getMostFrequent(values: string[]) {
+  const count = new Map<string, number>();
+
+  for (const value of values) {
+    const key = value.trim();
+    if (!key) continue;
+    count.set(key, (count.get(key) ?? 0) + 1);
+  }
+
+  let winner = '';
+  let winnerCount = 0;
+  for (const [value, currentCount] of count) {
+    if (currentCount > winnerCount) {
+      winner = value;
+      winnerCount = currentCount;
+    }
+  }
+
+  return winner;
+}
+
+function findTipoRecojoBusinessId(rows: Row[], labelCandidates: string[]) {
+  if (!rows.length) return null;
+  const columns = Object.keys(rows[0]);
+  const idColumn = getColumnByCandidates(columns, ['idTipoRecojo', 'business_id', 'id']);
+  const textColumn = getColumnByCandidates(columns, ['tipo de recojo', 'Tipo de Recojo', 'tipo_recojo', 'nombre']);
+  if (!idColumn || !textColumn) return null;
+
+  for (const row of rows) {
+    const text = normalizeText(String(row[textColumn] ?? ''));
+    if (labelCandidates.some((candidate) => text === normalizeText(candidate))) {
+      return parseNumericValue(row[idColumn]);
+    }
+  }
+
+  return null;
 }
 
 export function DashboardOverview() {
-  const { data, isLoading, error } = useSheetData('ENVIOS');
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
+
+  const enviosQuery = useSheetData('ENVIOS');
+  const recojosQuery = useSheetData('RECOJOS');
+  const leadsQuery = useSheetData('LEADS GANADOS');
+  const tiendasQuery = useSheetData('TIENDAS');
+  const fullfilmentQuery = useSheetData('FULLFILMENT');
+  const tipoRecojoQuery = useSheetData('TIPO DE RECOJO');
+
+  const isLoading =
+    enviosQuery.isLoading ||
+    recojosQuery.isLoading ||
+    leadsQuery.isLoading ||
+    tiendasQuery.isLoading ||
+    fullfilmentQuery.isLoading ||
+    tipoRecojoQuery.isLoading;
+
+  const error =
+    enviosQuery.error ||
+    recojosQuery.error ||
+    leadsQuery.error ||
+    tiendasQuery.error ||
+    fullfilmentQuery.error ||
+    tipoRecojoQuery.error;
 
   const metrics = useMemo(() => {
-    if (!data?.rows) {
-      return { totalEnvios: 0, totalIngreso: 0, totalCosto: 0, margen: 0, chartData: [] };
-    }
+    const enviosColumns = enviosQuery.data?.columns ?? [];
+    const enviosRows = (enviosQuery.data?.rows ?? []) as Row[];
+    const recojosColumns = recojosQuery.data?.columns ?? [];
+    const recojosRows = (recojosQuery.data?.rows ?? []) as Row[];
+    const leadsColumns = leadsQuery.data?.columns ?? [];
+    const leadsRows = (leadsQuery.data?.rows ?? []) as Row[];
+    const tiendasColumns = tiendasQuery.data?.columns ?? [];
+    const tiendasRows = (tiendasQuery.data?.rows ?? []) as Row[];
+    const fullfilmentColumns = fullfilmentQuery.data?.columns ?? [];
+    const fullfilmentRows = (fullfilmentQuery.data?.rows ?? []) as Row[];
+    const tipoRecojoRows = (tipoRecojoQuery.data?.rows ?? []) as Row[];
 
-    let totalIngreso = 0;
-    let totalCosto = 0;
-    
-    // Grouping by "mes"
-    const byMonth: Record<string, { mes: string; Ingreso: number; Costo: number }> = {};
+    const enviosDateColumn = getDateColumn(enviosColumns);
+    const recojosDateColumn = getDateColumn(recojosColumns);
+    const leadsDateColumn = getDateColumn(leadsColumns);
+    const tiendasDateColumn = getDateColumn(tiendasColumns);
+    const fullfilmentDateColumn = getDateColumn(fullfilmentColumns);
 
-    data.rows.forEach(row => {
-      // Find keys case-insensitively just in case
-      const findKey = (search: string) => Object.keys(row).find(k => k.toLowerCase().includes(search.toLowerCase()));
-      
-      const ingresoKey = findKey('ingreso total') || findKey('ingreso');
-      const costoKey = findKey('costo total') || findKey('costo');
-      const mesKey = findKey('mes');
+    const enviosInRange = filterRowsByRange(enviosRows, enviosDateColumn, dateFrom, dateTo);
+    const recojosInRange = filterRowsByRange(recojosRows, recojosDateColumn, dateFrom, dateTo);
+    const leadsInRange = filterRowsByRange(leadsRows, leadsDateColumn, dateFrom, dateTo);
+    const tiendasInRange = filterRowsByRange(tiendasRows, tiendasDateColumn, dateFrom, dateTo);
+    const fullfilmentInRange = filterRowsByRange(fullfilmentRows, fullfilmentDateColumn, dateFrom, dateTo);
 
-      const ingreso = ingresoKey ? parseCurrency(row[ingresoKey]) : 0;
-      const costo = costoKey ? parseCurrency(row[costoKey]) : 0;
-      const mes = mesKey ? String(row[mesKey]).trim() : 'Desconocido';
+    const leadGanadoPeriodoCol = getColumnByCandidates(leadsColumns, ['Lead ganado en periodo?', 'lead ganado en periodo']);
+    const cantidadEnviosCol = getColumnByCandidates(leadsColumns, ['Cantidad de envios', 'cantidad de envíos']);
 
-      totalIngreso += ingreso;
-      totalCosto += costo;
+    const tiendasRegistradas = leadsInRange.filter(
+      (row) => normalizeText(getStringValue(row, leadGanadoPeriodoCol)) === 'si',
+    ).length;
 
-      if (mes) {
-        if (!byMonth[mes]) {
-          byMonth[mes] = { mes, Ingreso: 0, Costo: 0 };
-        }
-        byMonth[mes].Ingreso += ingreso;
-        byMonth[mes].Costo += costo;
-      }
-    });
+    const leadsGanados = leadsInRange.filter((row) => getNumericValue(row, cantidadEnviosCol) > 0).length;
 
-    const chartData = Object.values(byMonth).sort((a, b) => {
-      // Very basic sort, assuming months are text like "Enero", "Febrero" or numbers
-      // A more robust sort would require exact month formats, but this is a start
-      return a.mes.localeCompare(b.mes);
-    });
+    const enviosTotales = enviosInRange.length;
+    const promedioTE = safeDivide(enviosTotales, tiendasRegistradas);
+
+    const anuladosFullfilmentCol = getColumnByCandidates(fullfilmentColumns, [
+      'anulados full filment',
+      'ingresos anulados fullfilment',
+      'ingresos anulados full filment',
+      'anulados fullfilment',
+    ]);
+    const ingresosAnuladosFullfilment = fullfilmentInRange.reduce(
+      (acc, row) => acc + getNumericValue(row, anuladosFullfilmentCol),
+      0,
+    );
+
+    const ingresoTotalEnviosCol = getColumnByCandidates(enviosColumns, ['Ingreso total fila', 'Ingreso total', 'ingreso total']);
+    const costoTotalEnviosCol = getColumnByCandidates(enviosColumns, ['Costo total fila', 'Costo total', 'costo total']);
+
+    const ingresoRecojoTotalCol = getColumnByCandidates(recojosColumns, ['Ingreso recojo total', 'ingreso recojo total']);
+    const costoRecojoTotalCol = getColumnByCandidates(recojosColumns, ['Costo recojo total', 'costo recojo total']);
+
+    const costeAplicativosCol = getColumnByCandidates(fullfilmentColumns, [
+      'Coste aplicativos',
+      'Costo aplicativos',
+      'coste aplicativos',
+      'costo aplicativos',
+    ]);
+
+    const ingresoTotalEnvios = enviosInRange.reduce((acc, row) => acc + getNumericValue(row, ingresoTotalEnviosCol), 0);
+    const ingresoTotalRecojos = recojosInRange.reduce((acc, row) => acc + getNumericValue(row, ingresoRecojoTotalCol), 0);
+    const ingresoTotalOperativo = ingresoTotalEnvios + ingresoTotalRecojos + ingresosAnuladosFullfilment;
+
+    const costoTotalEnvios = enviosInRange.reduce((acc, row) => acc + getNumericValue(row, costoTotalEnviosCol), 0);
+    const costoTotalRecojos = recojosInRange.reduce((acc, row) => acc + getNumericValue(row, costoRecojoTotalCol), 0);
+    const costeAplicativos = fullfilmentInRange.reduce((acc, row) => acc + getNumericValue(row, costeAplicativosCol), 0);
+    const costoTotalOperativo = costoTotalEnvios + costoTotalRecojos + costeAplicativos;
+
+    const margenTotalOperativo = ingresoTotalOperativo - costoTotalOperativo;
+    const ticketPromedioMes = safeDivide(ingresoTotalOperativo, enviosTotales);
+    const costoOperativoPorLeadGanado = safeDivide(costoTotalOperativo, tiendasRegistradas);
+    const ingresoPorLeadGanado = safeDivide(ingresoTotalOperativo, tiendasRegistradas);
+
+    const recojoCobradoId = findTipoRecojoBusinessId(tipoRecojoRows, ['cobrado', 'recojo cobrado']) ?? 1;
+    const recojoGratisId = findTipoRecojoBusinessId(tipoRecojoRows, ['gratis', 'recojo gratis']) ?? 2;
+
+    const idTipoRecojoColumn = getColumnByCandidates(recojosColumns, ['idTipoRecojo', 'id tipo recojo']);
+
+    const recojosCobrados = recojosInRange.filter(
+      (row) => getNumericValue(row, idTipoRecojoColumn) === recojoCobradoId,
+    ).length;
+    const recojosGratis = recojosInRange.filter(
+      (row) => getNumericValue(row, idTipoRecojoColumn) === recojoGratisId,
+    ).length;
+
+    const pagoTotalMotorizadoRecojo = recojosInRange.reduce(
+      (acc, row) => acc + getNumericValue(row, costoRecojoTotalCol),
+      0,
+    );
+
+    const distritoColumn = getColumnByCandidates(tiendasColumns, ['Distrito', 'distrito']);
+    const distritoLeadGanadoFrecuente = getMostFrequent(
+      tiendasInRange.map((row) => getStringValue(row, distritoColumn)).filter(Boolean),
+    );
 
     return {
-      totalEnvios: data.rows.length,
-      totalIngreso,
-      totalCosto,
-      margen: totalIngreso - totalCosto,
-      chartData
+      periodo: dateFrom || dateTo ? `${dateFrom || '...'} → ${dateTo || '...'}` : 'Sin filtro (todo el periodo)',
+      tiendasRegistradas,
+      leadsGanados,
+      enviosTotales,
+      promedioTE,
+      ingresosAnuladosFullfilment,
+      ingresoTotalOperativo,
+      costoTotalOperativo,
+      margenTotalOperativo,
+      ticketPromedioMes,
+      costoOperativoPorLeadGanado,
+      ingresoPorLeadGanado,
+      recojosCobrados,
+      recojosGratis,
+      pagoTotalMotorizadoRecojo,
+      distritoLeadGanadoFrecuente,
     };
-  }, [data]);
+  }, [
+    enviosQuery.data,
+    recojosQuery.data,
+    leadsQuery.data,
+    tiendasQuery.data,
+    fullfilmentQuery.data,
+    tipoRecojoQuery.data,
+    dateFrom,
+    dateTo,
+  ]);
 
   if (isLoading) {
     return (
@@ -103,88 +275,99 @@ export function DashboardOverview() {
 
   return (
     <div className="space-y-6">
-      <div className="rounded-2xl border border-gray-200 bg-white/90 shadow-[0_24px_44px_-30px_rgba(15,23,42,0.65)] px-6 py-5 backdrop-blur-sm flex items-center justify-between gap-4">
+      <div className="rounded-2xl border border-gray-200 bg-white/90 shadow-[0_24px_44px_-30px_rgba(15,23,42,0.65)] px-6 py-5 backdrop-blur-sm flex items-center justify-between gap-4 flex-wrap">
         <div>
           <h1 className="text-2xl font-extrabold text-gray-900 inline-flex items-center gap-2">
             <Activity className="text-red-600" size={24} />
-            Resumen de Operaciones
+            Resumen General
           </h1>
-          <p className="text-sm text-gray-500 mt-1">Métricas clave del rendimiento logístico.</p>
+          <p className="text-sm text-gray-500 mt-1">KPI del periodo y métricas operativas.</p>
         </div>
         <div className="hidden md:inline-flex items-center gap-2 rounded-full border border-red-200 bg-red-50 px-3 py-1 text-xs font-semibold text-red-700">
           <ChartColumnBig size={14} />
           Vista ejecutiva
         </div>
       </div>
-      
-      {/* KPI Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-        <KpiCard 
-          title="Total Envíos" 
-          value={metrics.totalEnvios.toString()} 
-          icon={<Package className="text-red-500" size={24} />} 
-        />
-        <KpiCard 
-          title="Ingreso Total" 
-          value={`S/ ${metrics.totalIngreso.toLocaleString('es-PE', { minimumFractionDigits: 2 })}`} 
-          icon={<DollarSign className="text-green-500" size={24} />} 
-        />
-        <KpiCard 
-          title="Costo Total" 
-          value={`S/ ${metrics.totalCosto.toLocaleString('es-PE', { minimumFractionDigits: 2 })}`} 
-          icon={<CreditCard className="text-red-500" size={24} />} 
-        />
-        <KpiCard 
-          title="Margen" 
-          value={`S/ ${metrics.margen.toLocaleString('es-PE', { minimumFractionDigits: 2 })}`} 
-          icon={<TrendingUp className="text-purple-500" size={24} />} 
-        />
+
+      <div className="rounded-2xl border border-gray-200 bg-white p-4">
+        <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Filtro de periodo</p>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 items-end">
+          <label className="text-sm text-gray-600">
+            Fecha inicio
+            <input
+              type="date"
+              value={dateFrom}
+              onChange={(event) => setDateFrom(event.target.value)}
+              className="mt-1 w-full rounded-xl border border-gray-300 px-3 py-2"
+            />
+          </label>
+          <label className="text-sm text-gray-600">
+            Fecha fin
+            <input
+              type="date"
+              value={dateTo}
+              onChange={(event) => setDateTo(event.target.value)}
+              className="mt-1 w-full rounded-xl border border-gray-300 px-3 py-2"
+            />
+          </label>
+          <div className="text-sm text-gray-500">Periodo: <span className="font-semibold text-gray-800">{metrics.periodo}</span></div>
+        </div>
       </div>
 
-      {/* Chart */}
-      <div className="bg-white p-6 rounded-2xl shadow-[0_24px_50px_-36px_rgba(15,23,42,0.8)] border border-gray-200 mt-8 h-96">
-        <h2 className="text-lg font-bold text-gray-800 mb-6">Ingresos vs Costos por Mes</h2>
-        {metrics.chartData.length > 0 ? (
-          <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={metrics.chartData} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
-              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#E5E7EB" />
-              <XAxis dataKey="mes" axisLine={false} tickLine={false} tick={{ fill: '#6B7280' }} dy={10} />
-              <YAxis 
-                axisLine={false} 
-                tickLine={false} 
-                tick={{ fill: '#6B7280' }} 
-                tickFormatter={(value) => `S/ ${value}`}
-              />
-              <Tooltip 
-                cursor={{ fill: '#F3F4F6' }}
-                contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
-                formatter={(value: number | undefined) => [value !== undefined ? `S/ ${value.toLocaleString('es-PE', { minimumFractionDigits: 2 })}` : 'S/ 0.00', undefined]}
-              />
-              <Legend wrapperStyle={{ paddingTop: '20px' }} />
-              <Bar dataKey="Ingreso" fill="#10B981" radius={[4, 4, 0, 0]} maxBarSize={50} />
-              <Bar dataKey="Costo" fill="#EF4444" radius={[4, 4, 0, 0]} maxBarSize={50} />
-            </BarChart>
-          </ResponsiveContainer>
-        ) : (
-          <div className="flex items-center justify-center h-full text-gray-400">
-            No hay datos suficientes para graficar.
-          </div>
-        )}
-      </div>
+      <Section title="KPIS DEL PERIODO">
+        <KpiGrid>
+          <KpiCard title="Tiendas Registradas" value={formatNumberEs(metrics.tiendasRegistradas)} />
+          <KpiCard title="Leads Ganados" value={formatNumberEs(metrics.leadsGanados)} />
+          <KpiCard title="Envíos Totales" value={formatNumberEs(metrics.enviosTotales)} />
+          <KpiCard title="Promedio T. E." value={formatNumberEs(metrics.promedioTE)} />
+          <KpiCard title="Ingresos anulados fullfilment" value={formatCurrencyPen(metrics.ingresosAnuladosFullfilment)} />
+          <KpiCard title="Ingreso total operativo" value={formatCurrencyPen(metrics.ingresoTotalOperativo)} />
+          <KpiCard title="Costo total operativo" value={formatCurrencyPen(metrics.costoTotalOperativo)} />
+          <KpiCard title="Margen total operativo" value={formatCurrencyPen(metrics.margenTotalOperativo)} />
+          <KpiCard title="Ticket promedio del mes" value={formatCurrencyPen(metrics.ticketPromedioMes)} />
+          <KpiCard title="Costo operativo por lead ganado" value={formatCurrencyPen(metrics.costoOperativoPorLeadGanado)} />
+          <KpiCard title="Ingreso por lead ganado" value={formatCurrencyPen(metrics.ingresoPorLeadGanado)} />
+        </KpiGrid>
+      </Section>
+
+      <Section title="RECOJOS">
+        <KpiGrid>
+          <KpiCard title="Recojos cobrados" value={formatNumberEs(metrics.recojosCobrados)} />
+          <KpiCard title="Recojos gratis" value={formatNumberEs(metrics.recojosGratis)} />
+          <KpiCard title="Pago total al motorizado por recojo" value={formatCurrencyPen(metrics.pagoTotalMotorizadoRecojo)} />
+        </KpiGrid>
+      </Section>
+
+      <Section title="DISTRITO">
+        <KpiGrid>
+          <KpiCard
+            title="Distrito lead ganado más frecuente"
+            value={metrics.distritoLeadGanadoFrecuente || 'N/D'}
+          />
+        </KpiGrid>
+      </Section>
     </div>
   );
 }
 
-function KpiCard({ title, value, icon }: { title: string, value: string, icon: React.ReactNode }) {
+function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <div className="bg-white p-6 rounded-2xl shadow-[0_24px_50px_-36px_rgba(15,23,42,0.8)] border border-gray-200 flex items-center space-x-4 hover:-translate-y-0.5 hover:shadow-[0_28px_56px_-38px_rgba(15,23,42,0.95)] transition-all">
-      <div className="p-3 bg-gray-50 rounded-xl border border-gray-200">
-        {icon}
-      </div>
-      <div>
-        <p className="text-sm font-semibold text-gray-500">{title}</p>
-        <p className="text-2xl font-bold text-gray-900">{value}</p>
-      </div>
+    <div className="space-y-3">
+      <h2 className="text-sm font-extrabold tracking-wide text-gray-700 uppercase">{title}</h2>
+      {children}
+    </div>
+  );
+}
+
+function KpiGrid({ children }: { children: React.ReactNode }) {
+  return <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">{children}</div>;
+}
+
+function KpiCard({ title, value }: { title: string; value: string }) {
+  return (
+    <div className="bg-white p-4 rounded-2xl shadow-[0_20px_42px_-34px_rgba(15,23,42,0.9)] border border-gray-200">
+      <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">{title}</p>
+      <p className="text-2xl font-bold text-gray-900 mt-1">{value}</p>
     </div>
   );
 }
