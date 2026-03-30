@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { LockKeyhole, ShieldCheck, Sparkles } from 'lucide-react';
+import { isSupabaseConfigured, supabase } from '../../lib/supabase';
 
 export function Login() {
   const [password, setPassword] = useState('');
@@ -14,6 +15,15 @@ export function Login() {
     setIsLoading(true);
 
     try {
+      if (isSupabaseConfigured() && supabase) {
+        const { error: supabaseAuthError } = await supabase.auth.signInAnonymously();
+        if (supabaseAuthError) {
+          console.error('[auth] supabase signInAnonymously failed', supabaseAuthError);
+          setError(supabaseAuthError.message || 'No se pudo iniciar sesión en Supabase');
+          return;
+        }
+      }
+
       const response = await fetch('/api/auth', {
         method: 'POST',
         headers: {
