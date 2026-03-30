@@ -68,6 +68,24 @@ interface EnvioEntityConfig {
   extraPuntoEmpresaField: string;
 }
 
+interface RecojoEntityConfig {
+  sheetName: string;
+  sheetBusinessIdField: string;
+  mesField: string;
+  idTiendaField: string;
+  tiendaLabelField?: string;
+  idTipoRecojoField: string;
+  tipoRecojoLabelField?: string;
+  vecesField: string;
+  cobroATiendaField: string;
+  pagoMotoField: string;
+  ingresoRecojoTotalField: string;
+  costoRecojoTotalField: string;
+  observacionesField: string;
+  idVendedorField: string;
+  vendedorLabelField?: string;
+}
+
 interface LeadGanadoEntityConfig {
   sheetName: string;
   businessIdField: string;
@@ -83,7 +101,7 @@ interface LeadGanadoEntityConfig {
   diasLeadGanadoField: string;
   idFullfilmentField: string;
   fullfilmentLabelField?: string;
-  leadGanadoPeriodoField: string;
+  leadGanadoPeriodoField?: string;
   notasField: string;
   distritoField?: string;
   cantidadEnviosField: string;
@@ -184,6 +202,24 @@ const ENVIO_ENTITY_CONFIG: EnvioEntityConfig = {
   fullfilmentLabelField: 'FullFilment',
   extraPuntoMotoField: 'Extra punto moto',
   extraPuntoEmpresaField: 'Extra punto empresa',
+};
+
+const RECOJO_ENTITY_CONFIG: RecojoEntityConfig = {
+  sheetName: 'RECOJOS',
+  sheetBusinessIdField: 'idRecojo',
+  mesField: 'Mes',
+  idTiendaField: 'idTienda',
+  tiendaLabelField: 'Tienda',
+  idTipoRecojoField: 'idTipoRecojo',
+  tipoRecojoLabelField: 'Tipo de Recojo',
+  vecesField: 'Veces',
+  cobroATiendaField: 'Cobro a tienda por recojo',
+  pagoMotoField: 'Pago moto por recojo',
+  ingresoRecojoTotalField: 'Ingreso recojo total',
+  costoRecojoTotalField: 'Costo recojo total',
+  observacionesField: 'Observaciones',
+  idVendedorField: 'idVendedor',
+  vendedorLabelField: 'Vendedor',
 };
 
 const LEAD_GANADO_ENTITY_CONFIG: LeadGanadoEntityConfig = {
@@ -609,6 +645,122 @@ function extractLeadGanadoPayload(event: OutboxEvent) {
   };
 }
 
+function extractRecojoPayload(event: OutboxEvent) {
+  const payload = event.payload as { new?: Record<string, unknown>; old?: Record<string, unknown> } | null;
+  const newRow = payload?.new ?? null;
+  const oldRow = payload?.old ?? null;
+
+  const stableId = String(newRow?.stable_id ?? oldRow?.stable_id ?? event.entity_id ?? '').trim();
+  const businessId = parseBusinessId(newRow?.business_id);
+
+  return {
+    stableId,
+    businessId,
+    mes: String(newRow?.mes ?? '').trim(),
+    idTienda: parseBusinessId(newRow?.id_tienda),
+    idTipoRecojo: parseBusinessId(newRow?.id_tipo_recojo),
+    veces: Number(newRow?.veces ?? 0),
+    cobroATienda: Number(newRow?.cobro_a_tienda_por_recojo ?? 0),
+    pagoMoto: Number(newRow?.pago_moto_por_recojo ?? 0),
+    ingresoRecojoTotal: Number(newRow?.ingreso_recojo_total ?? 0),
+    costoRecojoTotal: Number(newRow?.costo_recojo_total ?? 0),
+    observaciones: String(newRow?.observaciones ?? '').trim(),
+    idVendedor: parseBusinessId(newRow?.id_vendedor),
+  };
+}
+
+async function syncRecojoEvent(event: OutboxEvent) {
+  const sheet = await getRawSheet(RECOJO_ENTITY_CONFIG.sheetName);
+  await ensureStableIdHeader(sheet);
+
+  const headers = sheet.headerValues;
+  const findRequired = (candidate: string) => {
+    const found = findHeaderByNormalizedName(headers, candidate);
+    if (!found) throw new Error(`No se encontró columna ${candidate} en hoja ${RECOJO_ENTITY_CONFIG.sheetName}`);
+    return found;
+  };
+
+  const businessIdHeader = findRequired(RECOJO_ENTITY_CONFIG.sheetBusinessIdField);
+  const mesHeader = findRequired(RECOJO_ENTITY_CONFIG.mesField);
+  const idTiendaHeader = findRequired(RECOJO_ENTITY_CONFIG.idTiendaField);
+  const idTipoRecojoHeader = findRequired(RECOJO_ENTITY_CONFIG.idTipoRecojoField);
+  const vecesHeader = findRequired(RECOJO_ENTITY_CONFIG.vecesField);
+  const cobroHeader = findRequired(RECOJO_ENTITY_CONFIG.cobroATiendaField);
+  const pagoHeader = findRequired(RECOJO_ENTITY_CONFIG.pagoMotoField);
+  const ingresoHeader = findRequired(RECOJO_ENTITY_CONFIG.ingresoRecojoTotalField);
+  const costoHeader = findRequired(RECOJO_ENTITY_CONFIG.costoRecojoTotalField);
+  const observacionesHeader = findRequired(RECOJO_ENTITY_CONFIG.observacionesField);
+  const idVendedorHeader = findRequired(RECOJO_ENTITY_CONFIG.idVendedorField);
+
+  const tiendaLabelHeader = RECOJO_ENTITY_CONFIG.tiendaLabelField
+    ? findHeaderByNormalizedName(headers, RECOJO_ENTITY_CONFIG.tiendaLabelField)
+    : null;
+  const tipoRecojoLabelHeader = RECOJO_ENTITY_CONFIG.tipoRecojoLabelField
+    ? findHeaderByNormalizedName(headers, RECOJO_ENTITY_CONFIG.tipoRecojoLabelField)
+    : null;
+  const vendedorLabelHeader = RECOJO_ENTITY_CONFIG.vendedorLabelField
+    ? findHeaderByNormalizedName(headers, RECOJO_ENTITY_CONFIG.vendedorLabelField)
+    : null;
+
+  const recojo = extractRecojoPayload(event);
+  if (!recojo.stableId) throw new Error('Evento recojos sin stable_id');
+
+  const existingRow = await findRowByStableId(sheet, recojo.stableId);
+
+  if (event.operation === 'delete') {
+    if (existingRow) await existingRow.delete();
+    return;
+  }
+
+  if (recojo.businessId === null || recojo.idTienda === null || recojo.idTipoRecojo === null) {
+    throw new Error('Evento recojos incompleto para sincronizar');
+  }
+
+  const [tiendaMap, tipoRecojoMap, vendedorMap] = await Promise.all([
+    getLabelMapForSheet('TIENDAS', ['idTienda', 'idTiendas'], ['Nombre']),
+    getLabelMapForSheet('TIPO DE RECOJO', ['idTipoRecojo'], ['tipo de recojo', 'Tipo de Recojo']),
+    getLabelMapForSheet('VENDEDORES', ['idVendedor', 'idVendedores'], ['Nombre']),
+  ]);
+
+  const rowPayload: Record<string, string | number> = {
+    [businessIdHeader]: recojo.businessId,
+    [mesHeader]: normalizeMonthValue(recojo.mes),
+    [idTiendaHeader]: recojo.idTienda,
+    [idTipoRecojoHeader]: recojo.idTipoRecojo,
+    [vecesHeader]: Number.isFinite(recojo.veces) ? Math.round(recojo.veces) : 0,
+    [cobroHeader]: Number.isFinite(recojo.cobroATienda) ? recojo.cobroATienda : 0,
+    [pagoHeader]: Number.isFinite(recojo.pagoMoto) ? recojo.pagoMoto : 0,
+    [ingresoHeader]: Number.isFinite(recojo.ingresoRecojoTotal) ? recojo.ingresoRecojoTotal : 0,
+    [costoHeader]: Number.isFinite(recojo.costoRecojoTotal) ? recojo.costoRecojoTotal : 0,
+    [observacionesHeader]: recojo.observaciones,
+    [idVendedorHeader]: recojo.idVendedor ?? '',
+    [STABLE_ROW_ID_COLUMN]: recojo.stableId,
+  };
+
+  if (tiendaLabelHeader) rowPayload[tiendaLabelHeader] = tiendaMap.get(recojo.idTienda) ?? `#${recojo.idTienda}`;
+  if (tipoRecojoLabelHeader) {
+    rowPayload[tipoRecojoLabelHeader] = tipoRecojoMap.get(recojo.idTipoRecojo) ?? `#${recojo.idTipoRecojo}`;
+  }
+  if (vendedorLabelHeader && recojo.idVendedor) {
+    rowPayload[vendedorLabelHeader] = vendedorMap.get(recojo.idVendedor) ?? `#${recojo.idVendedor}`;
+  }
+
+  if (existingRow) {
+    existingRow.assign(rowPayload);
+    await existingRow.save();
+    return;
+  }
+
+  const createdRow = await sheet.addRow(rowPayload);
+  await copyPreviousRowFormat(sheet, createdRow.rowNumber).catch((error: unknown) => {
+    console.info('[sync-outbox] format-copy skipped', {
+      entity: event.entity,
+      sheet: RECOJO_ENTITY_CONFIG.sheetName,
+      message: error instanceof Error ? error.message : 'unknown',
+    });
+  });
+}
+
 async function syncLeadGanadoEvent(event: OutboxEvent) {
   const sheet = await getRawSheet(LEAD_GANADO_ENTITY_CONFIG.sheetName);
   await ensureStableIdHeader(sheet);
@@ -629,7 +781,9 @@ async function syncLeadGanadoEvent(event: OutboxEvent) {
   const diasRegistroGanadoHeader = findRequired(LEAD_GANADO_ENTITY_CONFIG.diasRegistroGanadoField);
   const diasLeadGanadoHeader = findRequired(LEAD_GANADO_ENTITY_CONFIG.diasLeadGanadoField);
   const idFullfilmentHeader = findRequired(LEAD_GANADO_ENTITY_CONFIG.idFullfilmentField);
-  const leadGanadoPeriodoHeader = findRequired(LEAD_GANADO_ENTITY_CONFIG.leadGanadoPeriodoField);
+  const leadGanadoPeriodoHeader = LEAD_GANADO_ENTITY_CONFIG.leadGanadoPeriodoField
+    ? findHeaderByNormalizedName(sheet.headerValues, LEAD_GANADO_ENTITY_CONFIG.leadGanadoPeriodoField)
+    : null;
   const notasHeader = findRequired(LEAD_GANADO_ENTITY_CONFIG.notasField);
   const distritoHeader = LEAD_GANADO_ENTITY_CONFIG.distritoField
     ? findHeaderByNormalizedName(sheet.headerValues, LEAD_GANADO_ENTITY_CONFIG.distritoField)
@@ -690,7 +844,6 @@ async function syncLeadGanadoEvent(event: OutboxEvent) {
     [diasRegistroGanadoHeader]: Number.isFinite(lead.diasRegistroAGanado) ? lead.diasRegistroAGanado : 0,
     [diasLeadGanadoHeader]: Number.isFinite(lead.diasLeadAGanado) ? lead.diasLeadAGanado : 0,
     [idFullfilmentHeader]: lead.idFullfilment,
-    [leadGanadoPeriodoHeader]: lead.leadGanadoEnPeriodo || 'No',
     [notasHeader]: lead.notas,
     [cantidadEnviosHeader]: Number.isFinite(lead.cantidadEnvios) ? Math.round(lead.cantidadEnvios) : 0,
     [idOrigenHeader]: lead.idOrigen,
@@ -703,6 +856,7 @@ async function syncLeadGanadoEvent(event: OutboxEvent) {
   if (vendedorLabelHeader) rowPayload[vendedorLabelHeader] = vendedorMap.get(lead.idVendedor) ?? `#${lead.idVendedor}`;
   if (fullfilmentLabelHeader) rowPayload[fullfilmentLabelHeader] = fullfilmentMap.get(lead.idFullfilment) ?? `#${lead.idFullfilment}`;
   if (origenLabelHeader) rowPayload[origenLabelHeader] = origenMap.get(lead.idOrigen) ?? `#${lead.idOrigen}`;
+  if (leadGanadoPeriodoHeader) rowPayload[leadGanadoPeriodoHeader] = lead.leadGanadoEnPeriodo || '';
   if (distritoHeader) rowPayload[distritoHeader] = lead.distrito;
 
   if (existingRow) {
@@ -962,6 +1116,11 @@ async function processOutboxEvent(event: OutboxEvent) {
     return;
   }
 
+  if (event.entity === 'recojos') {
+    await syncRecojoEvent(event);
+    return;
+  }
+
   if (event.entity === 'tarifas') {
     await syncTarifaEvent(event);
     return;
@@ -1017,7 +1176,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const { data: pendingEvents, error: fetchError } = await getSyncOutboxTable(supabaseAdmin)
       .select('id,entity,entity_id,operation,payload,attempts')
       .eq('status', 'pending')
-      .in('entity', [...Object.keys(BASE_ENTITY_CONFIG), 'tarifas', 'envios', 'leads_ganados'])
+      .in('entity', [...Object.keys(BASE_ENTITY_CONFIG), 'tarifas', 'envios', 'recojos', 'leads_ganados'])
       .order('created_at', { ascending: true })
       .limit(limit);
 
