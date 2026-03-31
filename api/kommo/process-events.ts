@@ -83,27 +83,79 @@ function mapKommoLeadToLeadGanado(payload: Record<string, unknown>) {
   };
 }
 
+function mapKommoContactToTable(payload: Record<string, unknown>) {
+  const contactId = asNumber(payload.id, 0);
+  if (!contactId) {
+    return null;
+  }
+
+  const createdAtTs = asNumber(payload.created_at, 0);
+  const updatedAtTs = asNumber(payload.updated_at, 0);
+  const closestTaskAtTs = asNumber(payload.closest_task_at, 0);
+
+  const embedded = payload._embedded as Record<string, unknown> | undefined;
+
+  return {
+    stable_id: `kommo-contact-${contactId}`,
+    business_id: contactId,
+    name: payload.name ?? null,
+    first_name: payload.first_name ?? null,
+    last_name: payload.last_name ?? null,
+    responsible_user_id: asNumber(payload.responsible_user_id, 0) || null,
+    group_id: asNumber(payload.group_id, 0) || null,
+    created_at: createdAtTs ? new Date(createdAtTs * 1000).toISOString() : null,
+    updated_at: updatedAtTs ? new Date(updatedAtTs * 1000).toISOString() : null,
+    closest_task_at: closestTaskAtTs ? new Date(closestTaskAtTs * 1000).toISOString() : null,
+    is_deleted: payload.is_deleted ?? false,
+    is_unsorted: payload.is_unsorted ?? false,
+    custom_fields_values: payload.custom_fields_values ?? null,
+    account_id: asNumber(payload.account_id, 0) || null,
+    embedded_data: embedded ? { tags: embedded.tags, companies: embedded.companies } : null,
+  };
+}
+
 async function processEvent(event: KommoEventRow) {
-  if (event.event_type !== 'lead.pull' && event.event_type !== 'webhook') {
-    throw new Error(`Tipo de evento no soportado: ${event.event_type}`);
-  }
-
   const supabase = getSupabaseAdminClient();
-  const mapped = mapKommoLeadToLeadGanado(event.payload);
-  if (!mapped) {
-    throw new Error('No se pudo derivar lead_id desde payload de Kommo');
+
+  if (event.event_type === 'lead.pull' || event.event_type === 'webhook') {
+    const mapped = mapKommoLeadToLeadGanado(event.payload);
+    if (!mapped) {
+      throw new Error('No se pudo derivar lead_id desde payload de Kommo');
+    }
+
+    const { error: upsertError } = await supabase.from('leads_ganados' as never).upsert(
+      mapped as never,
+      {
+        onConflict: 'business_id',
+      },
+    );
+
+    if (upsertError) {
+      throw new Error(upsertError.message || 'No se pudo upsert a leads_ganados');
+    }
+    return;
   }
 
-  const { error: upsertError } = await supabase.from('leads_ganados' as never).upsert(
-    mapped as never,
-    {
-      onConflict: 'business_id',
-    },
-  );
+  if (event.event_type === 'contact.pull') {
+    const mapped = mapKommoContactToTable(event.payload);
+    if (!mapped) {
+      throw new Error('No se pudo derivar contact_id desde payload de Kommo');
+    }
 
-  if (upsertError) {
-    throw new Error(upsertError.message || 'No se pudo upsert a leads_ganados');
+    const { error: upsertError } = await supabase.from('kommo_contacts' as never).upsert(
+      mapped as never,
+      {
+        onConflict: 'business_id',
+      },
+    );
+
+    if (upsertError) {
+      throw new Error(upsertError.message || 'No se pudo upsert a kommo_contacts');
+    }
+    return;
   }
+
+  throw new Error(`Tipo de evento no soportado: ${event.event_type}`);
 }
 
 export default async function kommoProcessEventsHandler(req: VercelRequest, res: VercelResponse) {
