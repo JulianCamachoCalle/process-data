@@ -194,6 +194,104 @@ function mapKommoCompanyToTable(payload: Record<string, unknown>) {
   };
 }
 
+function mapKommoTagToTable(payload: Record<string, unknown>) {
+  const tagId = asNumber(payload.id, 0);
+  if (!tagId) {
+    return null;
+  }
+
+  return {
+    stable_id: `kommo-tag-${tagId}`,
+    business_id: tagId,
+    name: payload.name ?? null,
+    color: payload.color ?? null,
+  };
+}
+
+function mapKommoTaskToTable(payload: Record<string, unknown>) {
+  const taskId = asNumber(payload.id, 0);
+  if (!taskId) {
+    return null;
+  }
+
+  const createdAtTs = asNumber(payload.created_at, 0);
+  const updatedAtTs = asNumber(payload.updated_at, 0);
+  const closestTaskAtTs = asNumber(payload.closest_task_at, 0);
+  const completeTillTs = asNumber(payload.complete_till, 0);
+  const completedAtTs = asNumber(payload.completed_at, 0);
+
+  return {
+    stable_id: `kommo-task-${taskId}`,
+    business_id: taskId,
+    name: payload.name ?? null,
+    text: payload.text ?? null,
+    task_type_id: asNumber(payload.task_type_id, 0) || null,
+    status: payload.status ?? null,
+    group_id: asNumber(payload.group_id, 0) || null,
+    created_by: asNumber(payload.created_by, 0) || null,
+    duration: asNumber(payload.duration, 0) || null,
+    complete_till: completeTillTs ? new Date(completeTillTs * 1000).toISOString() : null,
+    is_completed: payload.is_completed ?? false,
+    result: payload.result ?? null,
+    responsible_user_id: asNumber(payload.responsible_user_id, 0) || null,
+    created_at: createdAtTs ? new Date(createdAtTs * 1000).toISOString() : null,
+    updated_at: updatedAtTs ? new Date(updatedAtTs * 1000).toISOString() : null,
+    closest_task_at: closestTaskAtTs ? new Date(closestTaskAtTs * 1000).toISOString() : null,
+    completed_at: completedAtTs ? new Date(completedAtTs * 1000).toISOString() : null,
+  };
+}
+
+function mapKommoNoteToTable(payload: Record<string, unknown>) {
+  const noteId = asNumber(payload.id, 0);
+  if (!noteId) {
+    return null;
+  }
+
+  const createdAtTs = asNumber(payload.created_at, 0);
+  const updatedAtTs = asNumber(payload.updated_at, 0);
+
+  return {
+    stable_id: `kommo-note-${noteId}`,
+    business_id: noteId,
+    note_type: payload.note_type ?? null,
+    body: payload.body ?? null,
+    element_type: payload.element_type ?? null,
+    element_id: asNumber(payload.element_id, 0) || null,
+    created_by: asNumber(payload.created_by, 0) || null,
+    created_at: createdAtTs ? new Date(createdAtTs * 1000).toISOString() : null,
+    updated_at: updatedAtTs ? new Date(updatedAtTs * 1000).toISOString() : null,
+  };
+}
+
+function mapKommoCallToTable(payload: Record<string, unknown>) {
+  const callId = asNumber(payload.id, 0);
+  if (!callId) {
+    return null;
+  }
+
+  const createdAtTs = asNumber(payload.created_at, 0);
+  const updatedAtTs = asNumber(payload.updated_at, 0);
+
+  return {
+    stable_id: `kommo-call-${callId}`,
+    business_id: callId,
+    call_type: payload.call_type ?? null,
+    call_status: payload.call_status ?? null,
+    phone: payload.phone ?? null,
+    caller_id: payload.caller_id ?? null,
+    direction: payload.direction ?? null,
+    duration: asNumber(payload.duration, 0) || null,
+    source: payload.source ?? null,
+    link: payload.link ?? null,
+    element_type: payload.element_type ?? null,
+    element_id: asNumber(payload.element_id, 0) || null,
+    created_by: asNumber(payload.created_by, 0) || null,
+    responsible_user_id: asNumber(payload.responsible_user_id, 0) || null,
+    created_at: createdAtTs ? new Date(createdAtTs * 1000).toISOString() : null,
+    updated_at: updatedAtTs ? new Date(updatedAtTs * 1000).toISOString() : null,
+  };
+}
+
 async function processEvent(event: KommoEventRow) {
   const supabase = getSupabaseAdminClient();
 
@@ -288,6 +386,82 @@ async function processEvent(event: KommoEventRow) {
     return;
   }
 
+  if (event.event_type === 'tag.pull') {
+    const mapped = mapKommoTagToTable(event.payload);
+    if (!mapped) {
+      throw new Error('No se pudo derivar tag_id desde payload de Kommo');
+    }
+
+    const { error: upsertError } = await supabase.from('kommo_tags' as never).upsert(
+      mapped as never,
+      {
+        onConflict: 'business_id',
+      },
+    );
+
+    if (upsertError) {
+      throw new Error(upsertError.message || 'No se pudo upsert a kommo_tags');
+    }
+    return;
+  }
+
+  if (event.event_type === 'task.pull') {
+    const mapped = mapKommoTaskToTable(event.payload);
+    if (!mapped) {
+      throw new Error('No se pudo derivar task_id desde payload de Kommo');
+    }
+
+    const { error: upsertError } = await supabase.from('kommo_tasks' as never).upsert(
+      mapped as never,
+      {
+        onConflict: 'business_id',
+      },
+    );
+
+    if (upsertError) {
+      throw new Error(upsertError.message || 'No se pudo upsert a kommo_tasks');
+    }
+    return;
+  }
+
+  if (event.event_type === 'note.pull') {
+    const mapped = mapKommoNoteToTable(event.payload);
+    if (!mapped) {
+      throw new Error('No se pudo derivar note_id desde payload de Kommo');
+    }
+
+    const { error: upsertError } = await supabase.from('kommo_notes' as never).upsert(
+      mapped as never,
+      {
+        onConflict: 'business_id',
+      },
+    );
+
+    if (upsertError) {
+      throw new Error(upsertError.message || 'No se pudo upsert a kommo_notes');
+    }
+    return;
+  }
+
+  if (event.event_type === 'call.pull') {
+    const mapped = mapKommoCallToTable(event.payload);
+    if (!mapped) {
+      throw new Error('No se pudo derivar call_id desde payload de Kommo');
+    }
+
+    const { error: upsertError } = await supabase.from('kommo_calls' as never).upsert(
+      mapped as never,
+      {
+        onConflict: 'business_id',
+      },
+    );
+
+    if (upsertError) {
+      throw new Error(upsertError.message || 'No se pudo upsert a kommo_calls');
+    }
+    return;
+  }
+
   throw new Error(`Tipo de evento no soportado: ${event.event_type}`);
 }
 
@@ -307,7 +481,7 @@ export default async function kommoProcessEventsHandler(req: VercelRequest, res:
     }
 
     const limitQuery = Array.isArray(req.query.limit) ? req.query.limit[0] : req.query.limit;
-    const limit = Math.max(1, Math.min(200, Number(limitQuery ?? DEFAULT_LIMIT) || DEFAULT_LIMIT));
+    const limit = Math.max(1, Math.min(2000, Number(limitQuery ?? DEFAULT_LIMIT) || DEFAULT_LIMIT));
 
     const supabase = getSupabaseAdminClient();
     const { data, error } = await supabase
