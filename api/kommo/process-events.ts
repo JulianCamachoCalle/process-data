@@ -258,13 +258,16 @@ function mapKommoNoteToTable(payload: Record<string, unknown>) {
   const createdAtTs = asNumber(payload.created_at, 0);
   const updatedAtTs = asNumber(payload.updated_at, 0);
 
+  // entity_type comes from sync (passed in payload for disambiguation), fallback to element_type
+  const entityType = String(payload.entity_type ?? payload.element_type ?? '');
+
   return {
-    stable_id: `kommo-note-${noteId}`,
+    stable_id: `kommo-note-${entityType}-${noteId}`,
     business_id: noteId,
     note_type: payload.note_type ?? null,
     body: payload.body ?? null,
-    element_type: payload.element_type ?? null,
-    element_id: asNumber(payload.element_id, 0) || null,
+    element_type: entityType || null,
+    element_id: asNumber(payload.entity_id ?? payload.element_id, 0) || null,
     created_by: asNumber(payload.created_by, 0) || null,
     created_at: createdAtTs ? new Date(createdAtTs * 1000).toISOString() : null,
     updated_at: updatedAtTs ? new Date(updatedAtTs * 1000).toISOString() : null,
@@ -450,6 +453,24 @@ function mapKommoWebhookConfigToTable(payload: Record<string, unknown>) {
     is_active: payload.is_active ?? true,
     created_at: createdAtTs ? new Date(createdAtTs * 1000).toISOString() : null,
     updated_at: updatedAtTs ? new Date(updatedAtTs * 1000).toISOString() : null,
+  };
+}
+
+function mapKommoSourceToTable(payload: Record<string, unknown>) {
+  const sourceId = asNumber(payload.id, 0);
+  if (!sourceId) {
+    return null;
+  }
+
+  return {
+    stable_id: `kommo-source-${sourceId}`,
+    business_id: sourceId,
+    name: payload.name ?? null,
+    pipeline_id: asNumber(payload.pipeline_id, 0) || null,
+    external_id: payload.external_id ?? null,
+    is_default: payload.is_default ?? payload.default ?? false,
+    origin_code: payload.origin_code ?? null,
+    services: payload.services ?? null,
   };
 }
 
@@ -775,6 +796,25 @@ async function processEvent(event: KommoEventRow) {
 
     if (upsertError) {
       throw new Error(upsertError.message || 'No se pudo upsert a kommo_talks');
+    }
+    return;
+  }
+
+  if (event.event_type === 'source.pull') {
+    const mapped = mapKommoSourceToTable(event.payload);
+    if (!mapped) {
+      throw new Error('No se pudo derivar source_id desde payload de Kommo');
+    }
+
+    const { error: upsertError } = await supabase.from('kommo_sources' as never).upsert(
+      mapped as never,
+      {
+        onConflict: 'business_id',
+      },
+    );
+
+    if (upsertError) {
+      throw new Error(upsertError.message || 'No se pudo upsert a kommo_sources');
     }
     return;
   }

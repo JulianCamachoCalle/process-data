@@ -21,15 +21,17 @@ const ALL_RESOURCES = [
   'users',
   'pipelines',
   'tasks',
-  'notes',
+  // notes handled separately (needs entity_type)
   // NEW: Resources with standard endpoints
   'events',
   'catalogs',
   'unsorted',
+  'sources',
   // NEW: Resources needing special handling
   'tags',
   'custom_fields',
   'links',
+  'notes',
 ] as const;
 
 type KommoResource = typeof ALL_RESOURCES[number];
@@ -40,16 +42,18 @@ const RESOURCE_ENDPOINTS: Record<KommoResource, string> = {
   contacts: '/api/v4/contacts',
   companies: '/api/v4/companies',
   users: '/api/v4/users',
-  pipelines: '/api/v4/pipelines',
+  pipelines: '/api/v4/leads/pipelines',
   tasks: '/api/v4/tasks',
-  notes: '/api/v4/notes',
+  // notes handled via special function (needs entity_type)
   events: '/api/v4/events',
   catalogs: '/api/v4/catalogs',
   unsorted: '/api/v4/leads/unsorted',
+  sources: '/api/v4/sources',
   // These are handled via separate functions
   tags: '',
   custom_fields: '',
   links: '',
+  notes: '',
 };
 
 // Event types for each resource
@@ -64,6 +68,7 @@ const RESOURCE_EVENT_TYPES: Record<string, string> = {
   events: 'event.pull',
   catalogs: 'catalog.pull',
   unsorted: 'unsorted.pull',
+  sources: 'source.pull',
   tags: 'tag.pull',
   custom_fields: 'custom_field.pull',
   links: 'link.pull',
@@ -240,6 +245,47 @@ async function fetchEntityTypeCustomFields(
   return { items: allItems, totalPulled: allItems.length };
 }
 
+// Fetch notes for a specific entity type
+async function fetchEntityNotes(
+  baseUrl: string,
+  accessToken: string,
+  entityType: string,
+  maxPages: number,
+): Promise<{ items: Array<Record<string, unknown>>; totalPulled: number }> {
+  let allItems: Array<Record<string, unknown>> = [];
+  let page = 1;
+  let hasMore = true;
+
+  while (hasMore && page <= maxPages) {
+    const url = new URL(`${baseUrl}/api/v4/${entityType}/notes`);
+    url.searchParams.set('limit', '250');
+    url.searchParams.set('page', String(page));
+
+    const response = await fetch(url.toString(), {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+    });
+
+    if (!response.ok) {
+      const raw = await response.text();
+      throw new Error(`Kommo notes (${entityType}) page ${page} error (${response.status}): ${raw}`);
+    }
+
+    const payload = (await response.json()) as Record<string, unknown>;
+    const items = (payload._embedded as Record<string, unknown> | undefined)?.notes as Array<Record<string, unknown>> ?? [];
+    allItems = [...allItems, ...items];
+
+    const nextLink = (payload._links as Record<string, unknown> | undefined)?.next;
+    hasMore = !!nextLink;
+    page++;
+  }
+
+  return { items: allItems, totalPulled: allItems.length };
+}
+
 // Fetch links for a specific entity (leads, contacts, companies)
 async function fetchEntityLinks(
   baseUrl: string,
@@ -325,8 +371,8 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
       hasMore?: boolean;
     }> = [];
 
-    // Handle special resources (tags, custom_fields need entity_type iteration)
-    if (selectedResource === 'tags' || selectedResource === 'custom_fields') {
+    // Handle special resources (tags, custom_fields, notes need entity_type iteration)
+    if (selectedResource === 'tags' || selectedResource === 'custom_fields' || selectedResource === 'notes') {
       const entityTypes = ['leads', 'contacts', 'companies'];
       const maxPagesParam = asSingleQueryParam(req.query.max_pages);
       const maxPages = maxPagesParam ? Math.min(20, parseInt(maxPagesParam, 10) || 5) : 5;
@@ -344,6 +390,14 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
           items = result.items;
         } else if (selectedResource === 'custom_fields') {
           const result = await fetchEntityTypeCustomFields(
+            freshConnection.account_base_url,
+            freshConnection.access_token,
+            entityType,
+            maxPages,
+          );
+          items = result.items;
+        } else if (selectedResource === 'notes') {
+          const result = await fetchEntityNotes(
             freshConnection.account_base_url,
             freshConnection.access_token,
             entityType,

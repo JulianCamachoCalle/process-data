@@ -213,3 +213,24 @@ create index if not exists idx_kommo_talk_messages_created_at on public.kommo_ta
 
 drop trigger if exists trg_kommo_talk_messages_updated_at on public.kommo_talk_messages;
 create trigger trg_kommo_talk_messages_updated_at before update on public.kommo_talk_messages for each row execute function public.set_updated_at();
+
+-- Kommo Sources table (API v4 /api/v4/sources)
+create table if not exists public.kommo_sources (
+  id uuid primary key default gen_random_uuid(),
+  stable_id text not null unique,
+  business_id bigint not null unique,
+  name text,
+  pipeline_id bigint,
+  external_id text,
+  is_default boolean,
+  origin_code text,
+  services jsonb,
+  created_at_db timestamptz not null default now(),
+  updated_at_db timestamptz not null default now()
+);
+
+create index if not exists idx_kommo_sources_business_id on public.kommo_sources (business_id);
+create index if not exists idx_kommo_sources_pipeline_id on public.kommo_sources (pipeline_id);
+
+drop trigger if exists trg_kommo_sources_updated_at on public.kommo_sources;
+create trigger trg_kommo_sources_updated_at before update on public.kommo_sources for each row execute function public.set_updated_at();
