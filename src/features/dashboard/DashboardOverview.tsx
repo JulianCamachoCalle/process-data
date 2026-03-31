@@ -14,17 +14,6 @@ function getColumnByCandidates(columns: string[], candidates: string[]) {
   );
 }
 
-function getDateColumn(columns: string[]) {
-  return getColumnByCandidates(columns, [
-    'Fecha',
-    'Fecha de envio',
-    'Fecha envío',
-    'Fecha de recojo',
-    'Fecha registro',
-    'Fecha de registro',
-  ]);
-}
-
 function getStringValue(row: Row, column: string | null) {
   if (!column) return '';
   return String(row[column] ?? '').trim();
@@ -56,24 +45,6 @@ function filterRowsByRange(rows: Row[], dateColumn: string | null, from: string,
 
     return true;
   });
-}
-
-function isDateWithinRange(value: unknown, from: string, to: string) {
-  const parsed = parseDateValue(value);
-  if (!parsed) return false;
-
-  const fromDate = from ? parseDateValue(from) : null;
-  const toDateRaw = to ? parseDateValue(to) : null;
-  const toDate = toDateRaw ? new Date(toDateRaw) : null;
-
-  if (toDate) {
-    toDate.setHours(23, 59, 59, 999);
-  }
-
-  if (fromDate && parsed < fromDate) return false;
-  if (toDate && parsed > toDate) return false;
-
-  return true;
 }
 
 function safeDivide(numerator: number, denominator: number) {
@@ -111,7 +82,7 @@ function findTipoRecojoBusinessId(rows: Row[], labelCandidates: string[]) {
 
   for (const row of rows) {
     const text = normalizeText(String(row[textColumn] ?? ''));
-    if (labelCandidates.some((candidate) => text === normalizeText(candidate))) {
+    if (labelCandidates.some((candidate) => text.includes(normalizeText(candidate)))) {
       return parseNumericValue(row[idColumn]);
     }
   }
@@ -126,24 +97,18 @@ export function DashboardOverview() {
   const enviosQuery = useSheetData('ENVIOS');
   const recojosQuery = useSheetData('RECOJOS');
   const leadsQuery = useSheetData('LEADS GANADOS');
-  const tiendasQuery = useSheetData('TIENDAS');
-  const fullfilmentQuery = useSheetData('FULLFILMENT');
   const tipoRecojoQuery = useSheetData('TIPO DE RECOJO');
 
   const isLoading =
     enviosQuery.isLoading ||
     recojosQuery.isLoading ||
     leadsQuery.isLoading ||
-    tiendasQuery.isLoading ||
-    fullfilmentQuery.isLoading ||
     tipoRecojoQuery.isLoading;
 
   const error =
     enviosQuery.error ||
     recojosQuery.error ||
     leadsQuery.error ||
-    tiendasQuery.error ||
-    fullfilmentQuery.error ||
     tipoRecojoQuery.error;
 
   const metrics = useMemo(() => {
@@ -153,42 +118,36 @@ export function DashboardOverview() {
     const recojosRows = (recojosQuery.data?.rows ?? []) as Row[];
     const leadsColumns = leadsQuery.data?.columns ?? [];
     const leadsRows = (leadsQuery.data?.rows ?? []) as Row[];
-    const tiendasColumns = tiendasQuery.data?.columns ?? [];
-    const tiendasRows = (tiendasQuery.data?.rows ?? []) as Row[];
-    const fullfilmentColumns = fullfilmentQuery.data?.columns ?? [];
-    const fullfilmentRows = (fullfilmentQuery.data?.rows ?? []) as Row[];
     const tipoRecojoRows = (tipoRecojoQuery.data?.rows ?? []) as Row[];
 
-    const enviosDateColumn = getDateColumn(enviosColumns);
-    const recojosDateColumn = getDateColumn(recojosColumns);
-    const leadsDateColumn = getDateColumn(leadsColumns);
-    const tiendasDateColumn = getDateColumn(tiendasColumns);
-    const fullfilmentDateColumn = getDateColumn(fullfilmentColumns);
+    const enviosDateColumn = getColumnByCandidates(enviosColumns, ['Mes', 'mes', 'Fecha', 'Fecha de envio', 'Fecha envío']);
+    const recojosDateColumn = getColumnByCandidates(recojosColumns, ['Mes', 'mes', 'Fecha', 'Fecha de recojo']);
+    const leadsDateColumn = getColumnByCandidates(leadsColumns, ['Fecha Lead Ganado', 'fecha_lead_ganado', 'Fecha registro lead']);
 
     const enviosInRange = filterRowsByRange(enviosRows, enviosDateColumn, dateFrom, dateTo);
     const recojosInRange = filterRowsByRange(recojosRows, recojosDateColumn, dateFrom, dateTo);
     const leadsInRange = filterRowsByRange(leadsRows, leadsDateColumn, dateFrom, dateTo);
-    const tiendasInRange = filterRowsByRange(tiendasRows, tiendasDateColumn, dateFrom, dateTo);
-    const fullfilmentInRange = filterRowsByRange(fullfilmentRows, fullfilmentDateColumn, dateFrom, dateTo);
 
-    const leadFechaGanadoCol = getColumnByCandidates(leadsColumns, ['Fecha Lead Ganado', 'fecha_lead_ganado']);
-    const cantidadEnviosCol = getColumnByCandidates(leadsColumns, ['Cantidad de envios', 'cantidad de envíos']);
+    const tiendaLeadCol = getColumnByCandidates(leadsColumns, ['Tienda', 'tienda']);
+    const ingresosAnuladosCol = getColumnByCandidates(leadsColumns, [
+      'Ingreso anulados fullfilment',
+      'Ingresos anulados fullfilment',
+      'ingreso anulados fullfilment',
+      'ingreso anulados full filment',
+    ]);
+    const distritoLeadCol = getColumnByCandidates(leadsColumns, ['Distrito', 'distrito']);
 
-    const tiendasRegistradas = leadsRows.filter((row) => isDateWithinRange(row[leadFechaGanadoCol ?? ''], dateFrom, dateTo)).length;
+    const tiendasRegistradas = new Set(
+      leadsInRange.map((row) => normalizeText(getStringValue(row, tiendaLeadCol))).filter(Boolean),
+    ).size;
 
-    const leadsGanados = leadsInRange.filter((row) => getNumericValue(row, cantidadEnviosCol) > 0).length;
+    const leadsGanados = leadsInRange.length;
 
     const enviosTotales = enviosInRange.length;
     const promedioTE = safeDivide(enviosTotales, tiendasRegistradas);
 
-    const anuladosFullfilmentCol = getColumnByCandidates(fullfilmentColumns, [
-      'anulados full filment',
-      'ingresos anulados fullfilment',
-      'ingresos anulados full filment',
-      'anulados fullfilment',
-    ]);
-    const ingresosAnuladosFullfilment = fullfilmentInRange.reduce(
-      (acc, row) => acc + getNumericValue(row, anuladosFullfilmentCol),
+    const ingresosAnuladosFullfilment = leadsInRange.reduce(
+      (acc, row) => acc + getNumericValue(row, ingresosAnuladosCol),
       0,
     );
 
@@ -198,48 +157,52 @@ export function DashboardOverview() {
     const ingresoRecojoTotalCol = getColumnByCandidates(recojosColumns, ['Ingreso recojo total', 'ingreso recojo total']);
     const costoRecojoTotalCol = getColumnByCandidates(recojosColumns, ['Costo recojo total', 'costo recojo total']);
 
-    const costeAplicativosCol = getColumnByCandidates(fullfilmentColumns, [
-      'Coste aplicativos',
-      'Costo aplicativos',
-      'coste aplicativos',
-      'costo aplicativos',
-    ]);
-
     const ingresoTotalEnvios = enviosInRange.reduce((acc, row) => acc + getNumericValue(row, ingresoTotalEnviosCol), 0);
     const ingresoTotalRecojos = recojosInRange.reduce((acc, row) => acc + getNumericValue(row, ingresoRecojoTotalCol), 0);
     const ingresoTotalOperativo = ingresoTotalEnvios + ingresoTotalRecojos + ingresosAnuladosFullfilment;
 
     const costoTotalEnvios = enviosInRange.reduce((acc, row) => acc + getNumericValue(row, costoTotalEnviosCol), 0);
     const costoTotalRecojos = recojosInRange.reduce((acc, row) => acc + getNumericValue(row, costoRecojoTotalCol), 0);
-    const costeAplicativos = fullfilmentInRange.reduce((acc, row) => acc + getNumericValue(row, costeAplicativosCol), 0);
-    const costoTotalOperativo = costoTotalEnvios + costoTotalRecojos + costeAplicativos;
+    const costoTotalOperativo = costoTotalEnvios + costoTotalRecojos;
 
     const margenTotalOperativo = ingresoTotalOperativo - costoTotalOperativo;
     const ticketPromedioMes = safeDivide(ingresoTotalOperativo, enviosTotales);
-    const costoOperativoPorLeadGanado = safeDivide(costoTotalOperativo, tiendasRegistradas);
-    const ingresoPorLeadGanado = safeDivide(ingresoTotalOperativo, tiendasRegistradas);
+    const costoOperativoPorLeadGanado = safeDivide(costoTotalOperativo, leadsGanados);
+    const ingresoPorLeadGanado = safeDivide(ingresoTotalOperativo, leadsGanados);
 
     const recojoCobradoId = findTipoRecojoBusinessId(tipoRecojoRows, ['cobrado', 'recojo cobrado']) ?? 1;
     const recojoGratisId = findTipoRecojoBusinessId(tipoRecojoRows, ['gratis', 'recojo gratis']) ?? 2;
 
     const idTipoRecojoColumn = getColumnByCandidates(recojosColumns, ['idTipoRecojo', 'id tipo recojo']);
+    const tipoRecojoColumn = getColumnByCandidates(recojosColumns, ['Tipo de Recojo', 'tipo de recojo']);
+    const vecesRecojoColumn = getColumnByCandidates(recojosColumns, ['Veces', 'veces']);
 
-    const recojosCobrados = recojosInRange.filter(
-      (row) => getNumericValue(row, idTipoRecojoColumn) === recojoCobradoId,
-    ).length;
-    const recojosGratis = recojosInRange.filter(
-      (row) => getNumericValue(row, idTipoRecojoColumn) === recojoGratisId,
-    ).length;
+    const recojoRowsByType = recojosInRange.map((row) => {
+      const veces = Math.max(0, getNumericValue(row, vecesRecojoColumn));
+      const tipoById = getNumericValue(row, idTipoRecojoColumn);
+      const tipoByLabel = normalizeText(getStringValue(row, tipoRecojoColumn));
+
+      const isGratisById = tipoById > 0 && tipoById === recojoGratisId;
+      const isCobradoById = tipoById > 0 && tipoById === recojoCobradoId;
+      const isGratisByLabel = tipoByLabel.includes('gratis');
+      const isCobradoByLabel = tipoByLabel.includes('cobra') || tipoByLabel.includes('pedido');
+
+      return {
+        veces,
+        isGratis: isGratisById || (!isCobradoById && isGratisByLabel),
+        isCobrado: isCobradoById || (!isGratisById && isCobradoByLabel),
+      };
+    });
+
+    const recojosCobrados = recojoRowsByType.reduce((acc, row) => (row.isCobrado ? acc + row.veces : acc), 0);
+    const recojosGratis = recojoRowsByType.reduce((acc, row) => (row.isGratis ? acc + row.veces : acc), 0);
 
     const pagoTotalMotorizadoRecojo = recojosInRange.reduce(
       (acc, row) => acc + getNumericValue(row, costoRecojoTotalCol),
       0,
     );
 
-    const distritoColumn = getColumnByCandidates(tiendasColumns, ['Distrito', 'distrito']);
-    const distritoLeadGanadoFrecuente = getMostFrequent(
-      tiendasInRange.map((row) => getStringValue(row, distritoColumn)).filter(Boolean),
-    );
+    const distritoLeadGanadoFrecuente = getMostFrequent(leadsInRange.map((row) => getStringValue(row, distritoLeadCol)).filter(Boolean));
 
     return {
       periodo: dateFrom || dateTo ? `${dateFrom || '...'} → ${dateTo || '...'}` : 'Sin filtro (todo el periodo)',
@@ -263,8 +226,6 @@ export function DashboardOverview() {
     enviosQuery.data,
     recojosQuery.data,
     leadsQuery.data,
-    tiendasQuery.data,
-    fullfilmentQuery.data,
     tipoRecojoQuery.data,
     dateFrom,
     dateTo,
