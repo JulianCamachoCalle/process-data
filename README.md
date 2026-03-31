@@ -128,8 +128,8 @@ Se agregó una capa inicial de automatización de leads desde Kommo sin romper e
 
 ### Cron Kommo en Vercel
 
-- `GET/POST /api/cron/kommo-sync` cada 5 min
-- `GET/POST /api/cron/kommo-process-events` cada 2 min
+- `GET/POST /api/cron/kommo-sync` diario a las 3:10 AM
+- `GET/POST /api/cron/kommo-process-events` diario a las 3:20 AM
 
 ### SQL bootstrap
 
@@ -174,7 +174,7 @@ curl -X POST https://<tu-dominio>/api/sync-outbox \
 ### Cron automático en Vercel
 
 - Ruta del cron: `GET/POST /api/cron/sync-outbox`
-- Configurado en `vercel.json` cada 1 minuto.
+- Configurado en `vercel.json` diario a las 3:00 AM.
 - Importante: en variables de entorno de Vercel debés definir:
   - `SYNC_OUTBOX_SECRET`
   - `SUPABASE_URL`
