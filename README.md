@@ -105,6 +105,50 @@ Es idempotente: si todas las filas ya tienen `__id`, responde sin cambios y con 
   - `SUPABASE_SERVICE_ROLE_KEY`
 - `SYNC_OUTBOX_SECRET` (recomendado para cron)
 
+## Integración Kommo (MVP)
+
+Se agregó una capa inicial de automatización de leads desde Kommo sin romper el esquema actual.
+
+### Endpoints nuevos
+
+- `GET /api/kommo/oauth/start?base_url=https://<subdominio>.kommo.com`
+  - Requiere sesión admin (`auth_token`).
+  - Inicia OAuth 2.0 y redirige a Kommo.
+- `GET /api/kommo/oauth/callback`
+  - Callback OAuth. Guarda/actualiza tokens en `kommo_connections`.
+- `POST /api/kommo/webhook`
+  - Requiere `x-kommo-webhook-secret` o `?secret=`.
+  - Encola eventos en `kommo_webhook_events`.
+- `POST /api/kommo/sync`
+  - Requiere sesión admin o `x-kommo-sync-secret` / `?secret=`.
+  - Pull incremental de leads (`/api/v4/leads`) y los encola.
+- `POST /api/kommo/process-events`
+  - Requiere sesión admin o `x-kommo-process-secret` / `?secret=`.
+  - Procesa cola `kommo_webhook_events` y hace upsert mínimo a `leads_ganados`.
+
+### Cron Kommo en Vercel
+
+- `GET/POST /api/cron/kommo-sync` cada 5 min
+- `GET/POST /api/cron/kommo-process-events` cada 2 min
+
+### SQL bootstrap
+
+Antes de usar Kommo, ejecutar en Supabase:
+
+- `docs/kommo-bootstrap.sql`
+
+### Variables de entorno Kommo
+
+- `KOMMO_CLIENT_ID`
+- `KOMMO_CLIENT_SECRET`
+- `KOMMO_REDIRECT_URI`
+- `KOMMO_WEBHOOK_SECRET`
+- `KOMMO_SYNC_SECRET`
+- `KOMMO_PROCESS_SECRET`
+- `CRON_SECRET` (recomendado para crons de Vercel)
+
+> Nota: este MVP prioriza robustez (cola + idempotencia) y compatibilidad con tablas actuales. El mapeo de `id_tienda`, `id_fullfilment`, `id_origen` todavía está en modo básico y puede afinarse en la siguiente iteración.
+
 Entidades soportadas actualmente por el worker:
 
 - `destinos` → `DESTINOS`

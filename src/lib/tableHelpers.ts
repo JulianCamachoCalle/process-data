@@ -1,4 +1,4 @@
-const DATE_COLUMN_KEYWORDS = ['fecha', 'date', 'dia', 'día'];
+const DATE_COLUMN_KEYWORDS = ['fecha', 'date', 'dia', 'día', 'mes', 'month'];
 const TYPE_COLUMN_KEYWORDS = ['tipo', 'categoria', 'categoría', 'clase'];
 
 export function normalizeText(value: unknown): string {
@@ -27,8 +27,22 @@ export function parseDateValue(value: unknown): Date | null {
   const raw = String(value).trim();
   if (!raw) return null;
 
-  const isoDate = new Date(raw);
-  if (!Number.isNaN(isoDate.getTime())) return isoDate;
+  const monthMatch = raw.match(/^(\d{4})-(\d{2})$/);
+  if (monthMatch) {
+    const year = Number(monthMatch[1]);
+    const month = Number(monthMatch[2]);
+    const parsed = new Date(year, month - 1, 1);
+    if (!Number.isNaN(parsed.getTime())) return parsed;
+  }
+
+  const isoYmdMatch = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (isoYmdMatch) {
+    const year = Number(isoYmdMatch[1]);
+    const month = Number(isoYmdMatch[2]);
+    const day = Number(isoYmdMatch[3]);
+    const parsed = new Date(year, month - 1, day);
+    if (!Number.isNaN(parsed.getTime())) return parsed;
+  }
 
   const slashMatch = raw.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{2,4})$/);
   if (slashMatch) {
@@ -40,6 +54,9 @@ export function parseDateValue(value: unknown): Date | null {
     const parsed = new Date(year, month - 1, day);
     if (!Number.isNaN(parsed.getTime())) return parsed;
   }
+
+  const isoDate = new Date(raw);
+  if (!Number.isNaN(isoDate.getTime())) return isoDate;
 
   return null;
 }
