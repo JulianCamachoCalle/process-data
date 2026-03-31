@@ -5,6 +5,7 @@ import { Sidebar } from './components/Sidebar';
 import { SheetView } from './components/SheetView';
 import { DashboardOverview } from './features/dashboard/DashboardOverview';
 import { Login } from './features/auth/Login';
+import { KommoSyncPanel } from './features/kommo/KommoSyncPanel';
 import { prefetchSheetData } from './hooks/useSheetData';
 import { isSupabaseConfigured, supabase } from './lib/supabase';
 
@@ -70,6 +71,7 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
 function Layout() {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
+  const [showSecretPanel, setShowSecretPanel] = useState(false);
 
   const prefetchSheet = (sheetName: string) => {
     void prefetchSheetData(queryClient, sheetName);
@@ -98,6 +100,7 @@ function Layout() {
           onSheetHover: prefetchSheet,
           onSheetFocus: prefetchSheet,
         }}
+        onSecretClick={() => setShowSecretPanel(true)}
       />
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden bg-gradient-to-b from-white/90 via-white/75 to-white/95 z-10 relative backdrop-blur-sm">
         <header className="h-20 border-b border-gray-200/80 flex items-center justify-between px-8 bg-white/75 backdrop-blur-md sticky top-0 z-20 shadow-[0_10px_30px_-20px_rgba(15,23,42,0.45)]">
@@ -121,6 +124,7 @@ function Layout() {
           </div>
         </main>
       </div>
+      {showSecretPanel && <KommoSyncPanel onClose={() => setShowSecretPanel(false)} />}
     </div>
   );
 }
