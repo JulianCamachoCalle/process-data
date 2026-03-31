@@ -375,7 +375,7 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
     if (selectedResource === 'tags' || selectedResource === 'custom_fields' || selectedResource === 'notes') {
       const entityTypes = ['leads', 'contacts', 'companies'];
       const maxPagesParam = asSingleQueryParam(req.query.max_pages);
-      const maxPages = maxPagesParam ? Math.min(20, parseInt(maxPagesParam, 10) || 5) : 5;
+      const maxPages = maxPagesParam ? Math.min(50, parseInt(maxPagesParam, 10) || 5) : 5;
 
       for (const entityType of entityTypes) {
         let items: Array<Record<string, unknown>> = [];
@@ -449,7 +449,7 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
     if (selectedResource === 'links') {
       const entities = ['leads', 'contacts', 'companies'];
       const maxPagesParam = asSingleQueryParam(req.query.max_pages);
-      const maxPages = maxPagesParam ? Math.min(20, parseInt(maxPagesParam, 10) || 5) : 5;
+      const maxPages = maxPagesParam ? Math.min(50, parseInt(maxPagesParam, 10) || 5) : 5;
 
       // First get all entity IDs from each type
       for (const entity of entities) {
@@ -556,7 +556,7 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
 
       // Get maxPages from query param or default to 5
       const maxPagesParam = asSingleQueryParam(req.query.max_pages);
-      const maxPages = maxPagesParam ? Math.min(20, parseInt(maxPagesParam, 10) || 5) : 5;
+      const maxPages = maxPagesParam ? Math.min(50, parseInt(maxPagesParam, 10) || 5) : 5;
 
       // Fetch all pages
       const { items, totalPulled, hasMore } = await fetchAllPages(

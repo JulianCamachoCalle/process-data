@@ -22,6 +22,7 @@ const RESOURCES = [
   'events',
   'catalogs',
   'unsorted',
+  'sources',
   'tags',
   'custom_fields',
   'links',
