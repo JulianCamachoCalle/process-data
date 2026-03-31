@@ -77,6 +77,12 @@ export function DynamicTable({ sheetName, columns, rows, onEdit }: DynamicTableP
   const numericInsightColumn = useMemo(() => {
     const candidates = columns
       .map((column) => {
+        const normalized = normalizeText(column);
+        const isIdLike = normalized.startsWith('id') || normalized === '__id' || normalized.endsWith(' id');
+        if (isIdLike) {
+          return { column, numericCount: 0 };
+        }
+
         const numericCount = rows.reduce((acc, row) => {
           return parseNumericValue(row[column]) !== null ? acc + 1 : acc;
         }, 0);
@@ -276,6 +282,151 @@ export function DynamicTable({ sheetName, columns, rows, onEdit }: DynamicTableP
     const totalRecords = rows.length;
     const visibleRecords = filteredRows.length;
 
+    const getColumnByCandidates = (candidates: string[]) => {
+      return (
+        columns.find((column) => {
+          const normalizedColumn = normalizeText(column);
+          return candidates.some((candidate) => normalizeText(candidate) === normalizedColumn);
+        }) ?? null
+      );
+    };
+
+    const sumByColumn = (column: string | null) => {
+      if (!column) return 0;
+      return filteredRows.reduce((acc, row) => {
+        const value = parseNumericValue(row[column]);
+        return value !== null ? acc + value : acc;
+      }, 0);
+    };
+
+    if (sheetName === 'ENVIOS') {
+      const ingresoCol = getColumnByCandidates(['ingreso total fila', 'Ingreso total fila']);
+      const costoCol = getColumnByCandidates(['costo total fila', 'Costo total fila']);
+      const ingreso = sumByColumn(ingresoCol);
+      const costo = sumByColumn(costoCol);
+      const margen = ingreso - costo;
+
+      return [
+        {
+          label: 'Total de envíos',
+          value: formatNumberEs(totalRecords),
+          helper: 'Registros disponibles en la tabla',
+        },
+        {
+          label: 'Envíos visibles',
+          value: formatNumberEs(visibleRecords),
+          helper: 'Resultado actual de filtros y búsqueda',
+        },
+        {
+          label: 'Ingreso visible',
+          value: formatCurrencyPen(ingreso),
+          helper: 'Suma de ingreso total fila (filtrado)',
+        },
+        {
+          label: 'Margen visible',
+          value: formatCurrencyPen(margen),
+          helper: 'Ingreso visible - costo visible',
+        },
+      ];
+    }
+
+    if (sheetName === 'RECOJOS') {
+      const tipoCol = getColumnByCandidates(['Tipo de Recojo', 'tipo de recojo']);
+      const vecesCol = getColumnByCandidates(['Veces', 'veces']);
+      const ingresoCol = getColumnByCandidates(['Ingreso recojo total', 'ingreso recojo total']);
+      const costoCol = getColumnByCandidates(['Costo recojo total', 'costo recojo total']);
+
+      const recojosGratis = filteredRows.reduce((acc, row) => {
+        const tipo = normalizeText(String(row[tipoCol ?? ''] ?? ''));
+        const veces = Math.max(0, parseNumericValue(row[vecesCol ?? '']) ?? 0);
+        return tipo.includes('gratis') ? acc + veces : acc;
+      }, 0);
+
+      const recojosCobrados = filteredRows.reduce((acc, row) => {
+        const tipo = normalizeText(String(row[tipoCol ?? ''] ?? ''));
+        const veces = Math.max(0, parseNumericValue(row[vecesCol ?? '']) ?? 0);
+        return tipo.includes('cobra') || tipo.includes('pedido') ? acc + veces : acc;
+      }, 0);
+
+      const margenRecojos = sumByColumn(ingresoCol) - sumByColumn(costoCol);
+
+      return [
+        {
+          label: 'Total de filas',
+          value: formatNumberEs(totalRecords),
+          helper: 'Registros disponibles en la tabla',
+        },
+        {
+          label: 'Recojos cobrados (veces)',
+          value: formatNumberEs(recojosCobrados),
+          helper: 'Suma de veces con tipo cobrado',
+        },
+        {
+          label: 'Recojos gratis (veces)',
+          value: formatNumberEs(recojosGratis),
+          helper: 'Suma de veces con tipo gratis',
+        },
+        {
+          label: 'Margen recojos visible',
+          value: formatCurrencyPen(margenRecojos),
+          helper: 'Ingreso recojo total - costo recojo total',
+        },
+      ];
+    }
+
+    if (sheetName === 'LEADS GANADOS') {
+      const anuladosCol = getColumnByCandidates(['Anulados Fullfilment', 'anulados fullfilment']);
+      const ingresoAnuladosCol = getColumnByCandidates([
+        'Ingreso anulados fullfilment',
+        'ingreso anulados fullfilment',
+      ]);
+      const distritoCol = getColumnByCandidates(['Distrito', 'distrito']);
+
+      const anulados = sumByColumn(anuladosCol);
+      const ingresoAnulados = sumByColumn(ingresoAnuladosCol);
+
+      const distritoFrecuente = (() => {
+        const freq = new Map<string, number>();
+        for (const row of filteredRows) {
+          const value = String(row[distritoCol ?? ''] ?? '').trim();
+          if (!value) continue;
+          freq.set(value, (freq.get(value) ?? 0) + 1);
+        }
+        let winner = '';
+        let winnerCount = 0;
+        for (const [value, count] of freq) {
+          if (count > winnerCount) {
+            winner = value;
+            winnerCount = count;
+          }
+        }
+        return winner || 'N/D';
+      })();
+
+      return [
+        {
+          label: 'Total de leads',
+          value: formatNumberEs(totalRecords),
+          helper: 'Registros disponibles en la tabla',
+        },
+        {
+          label: 'Leads visibles',
+          value: formatNumberEs(visibleRecords),
+          helper: 'Resultado actual de filtros y búsqueda',
+        },
+        {
+          label: 'Ingreso anulados visible',
+          value: formatCurrencyPen(ingresoAnulados),
+          helper: `Anulados visibles: ${formatNumberEs(anulados)}`,
+        },
+        {
+          label: 'Distrito más frecuente',
+          value: distritoFrecuente,
+          helper: 'Calculado sobre registros filtrados',
+        },
+      ];
+    }
+
     if (BASE_SHEET_NAMES.has(sheetName)) {
       const coverage = totalRecords > 0 ? Math.round((visibleRecords / totalRecords) * 100) : 0;
       const singularLabelBySheet: Record<string, string> = {
@@ -343,8 +494,10 @@ export function DynamicTable({ sheetName, columns, rows, onEdit }: DynamicTableP
     ];
   }, [
     sheetName,
-    rows.length,
-    filteredRows.length,
+    rows,
+    columns,
+    filteredRows,
+    totalPages,
     uniqueBaseRecords,
     firstNonIdTextColumn,
     typeCoverage,
