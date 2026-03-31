@@ -163,7 +163,6 @@ async function fetchEntityTypeTags(
   baseUrl: string,
   accessToken: string,
   entityType: string,
-  fromDateIso: string | null,
   maxPages: number,
 ): Promise<{ items: Array<Record<string, unknown>>; totalPulled: number }> {
   let allItems: Array<Record<string, unknown>> = [];
@@ -340,7 +339,6 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
             freshConnection.account_base_url,
             freshConnection.access_token,
             entityType,
-            null,
             maxPages,
           );
           items = result.items;
