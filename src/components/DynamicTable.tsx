@@ -497,7 +497,6 @@ export function DynamicTable({ sheetName, columns, rows, onEdit }: DynamicTableP
     rows,
     columns,
     filteredRows,
-    totalPages,
     uniqueBaseRecords,
     firstNonIdTextColumn,
     typeCoverage,
