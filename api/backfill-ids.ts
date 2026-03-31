@@ -1,6 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createRequire } from 'node:module';
-import { ensureRowsHaveStableIdsWithSummary, getAllRawSheets } from '../src/lib/google-sheets';
+import { ensureRowsHaveStableIdsWithSummary, getAllRawSheets } from '../src/lib/google-sheets.js';
 
 const require = createRequire(import.meta.url);
 const jwt = require('jsonwebtoken') as typeof import('jsonwebtoken');

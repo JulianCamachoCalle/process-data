@@ -7,7 +7,7 @@ import {
   isVercelCronAuthorized,
   normalizeKommoBaseUrl,
   verifyAdminSession,
-} from './_shared';
+} from './_shared.js';
 
 const SYNC_SECRET_HEADER = 'x-kommo-sync-secret';
 const SYNC_SECRET_ENV = 'KOMMO_SYNC_SECRET';

@@ -10,7 +10,7 @@ import {
   getRawSheet,
   invalidateSheetDataCache,
   STABLE_ROW_ID_COLUMN,
-} from '../src/lib/google-sheets';
+} from '../src/lib/google-sheets.js';
 
 const querySchema = z.object({
   name: z.string().min(1, 'El nombre de la hoja es obligatorio'),

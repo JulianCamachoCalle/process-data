@@ -2,8 +2,8 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createClient } from '@supabase/supabase-js';
 import { createRequire } from 'node:module';
 import { z } from 'zod';
-import { getRawSheet, STABLE_ROW_ID_COLUMN } from '../src/lib/google-sheets';
-import { normalizeText } from '../src/lib/tableHelpers';
+import { getRawSheet, STABLE_ROW_ID_COLUMN } from '../src/lib/google-sheets.js';
+import { normalizeText } from '../src/lib/tableHelpers.js';
 
 const require = createRequire(import.meta.url);
 const jwt = require('jsonwebtoken') as typeof import('jsonwebtoken');

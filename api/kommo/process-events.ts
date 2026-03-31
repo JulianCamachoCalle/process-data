@@ -1,5 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { getSupabaseAdminClient, isSecretAuthorized, isVercelCronAuthorized, verifyAdminSession } from './_shared';
+import { getSupabaseAdminClient, isSecretAuthorized, isVercelCronAuthorized, verifyAdminSession } from './_shared.js';
 
 const PROCESS_SECRET_HEADER = 'x-kommo-process-secret';
 const PROCESS_SECRET_ENV = 'KOMMO_PROCESS_SECRET';
