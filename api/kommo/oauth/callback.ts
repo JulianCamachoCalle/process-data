@@ -6,7 +6,7 @@ import {
   getSupabaseAdminClient,
   readKommoOauthState,
   verifyAdminSession,
-} from '../_shared';
+} from '../_shared.js';
 
 const OAUTH_NONCE_COOKIE = 'kommo_oauth_nonce';
 
