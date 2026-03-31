@@ -114,6 +114,52 @@ function mapKommoContactToTable(payload: Record<string, unknown>) {
   };
 }
 
+function mapKommoUserToTable(payload: Record<string, unknown>) {
+  const userId = asNumber(payload.id, 0);
+  if (!userId) {
+    return null;
+  }
+
+  return {
+    stable_id: `kommo-user-${userId}`,
+    business_id: userId,
+    lang: payload.lang ?? null,
+    name: payload.name ?? null,
+    email: payload.email ?? null,
+    is_admin: payload.is_admin ?? false,
+    is_active: (payload.rights as Record<string, unknown>)?.is_active ?? true,
+    group_id: asNumber(payload.group_id, 0) || null,
+    rights: payload.rights ?? null,
+  };
+}
+
+function mapKommoCompanyToTable(payload: Record<string, unknown>) {
+  const companyId = asNumber(payload.id, 0);
+  if (!companyId) {
+    return null;
+  }
+
+  const createdAtTs = asNumber(payload.created_at, 0);
+  const updatedAtTs = asNumber(payload.updated_at, 0);
+  const closestTaskAtTs = asNumber(payload.closest_task_at, 0);
+  const embedded = payload._embedded as Record<string, unknown> | undefined;
+
+  return {
+    stable_id: `kommo-company-${companyId}`,
+    business_id: companyId,
+    name: payload.name ?? null,
+    group_id: asNumber(payload.group_id, 0) || null,
+    account_id: asNumber(payload.account_id, 0) || null,
+    responsible_user_id: asNumber(payload.responsible_user_id, 0) || null,
+    is_deleted: payload.is_deleted ?? false,
+    created_at: createdAtTs ? new Date(createdAtTs * 1000).toISOString() : null,
+    updated_at: updatedAtTs ? new Date(updatedAtTs * 1000).toISOString() : null,
+    closest_task_at: closestTaskAtTs ? new Date(closestTaskAtTs * 1000).toISOString() : null,
+    custom_fields_values: payload.custom_fields_values ?? null,
+    embedded_data: embedded ? { tags: embedded.tags } : null,
+  };
+}
+
 async function processEvent(event: KommoEventRow) {
   const supabase = getSupabaseAdminClient();
 
@@ -151,6 +197,44 @@ async function processEvent(event: KommoEventRow) {
 
     if (upsertError) {
       throw new Error(upsertError.message || 'No se pudo upsert a kommo_contacts');
+    }
+    return;
+  }
+
+  if (event.event_type === 'user.pull') {
+    const mapped = mapKommoUserToTable(event.payload);
+    if (!mapped) {
+      throw new Error('No se pudo derivar user_id desde payload de Kommo');
+    }
+
+    const { error: upsertError } = await supabase.from('kommo_users' as never).upsert(
+      mapped as never,
+      {
+        onConflict: 'business_id',
+      },
+    );
+
+    if (upsertError) {
+      throw new Error(upsertError.message || 'No se pudo upsert a kommo_users');
+    }
+    return;
+  }
+
+  if (event.event_type === 'companie.pull') {
+    const mapped = mapKommoCompanyToTable(event.payload);
+    if (!mapped) {
+      throw new Error('No se pudo derivar company_id desde payload de Kommo');
+    }
+
+    const { error: upsertError } = await supabase.from('kommo_companies' as never).upsert(
+      mapped as never,
+      {
+        onConflict: 'business_id',
+      },
+    );
+
+    if (upsertError) {
+      throw new Error(upsertError.message || 'No se pudo upsert a kommo_companies');
     }
     return;
   }
