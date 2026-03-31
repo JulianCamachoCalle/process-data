@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { LayoutDashboard, Database, Sparkles, ShieldCheck, Layers3, Workflow, Settings } from 'lucide-react';
+import { LayoutDashboard, Database, Sparkles, Layers3, Workflow, Settings } from 'lucide-react';
 import { getSheetLabel, groupSheetsByDomain } from '../lib/sheetLabels';
 
 interface SidebarPrefetchHandlers {
