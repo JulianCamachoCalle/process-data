@@ -4,6 +4,14 @@
     {
       "path": "/api/cron/sync-outbox",
       "schedule": "*/1 * * * *"
+    },
+    {
+      "path": "/api/cron/kommo-sync",
+      "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/api/cron/kommo-process-events",
+      "schedule": "*/2 * * * *"
     }
   ]
 }
