@@ -83,6 +83,40 @@ function mapKommoLeadToLeadGanado(payload: Record<string, unknown>) {
   };
 }
 
+function mapKommoLeadToKommoLeads(payload: Record<string, unknown>) {
+  const leadId = asNumber(payload.id, 0);
+  if (!leadId) {
+    return null;
+  }
+
+  const closedAtTs = asNumber(payload.closed_at, 0);
+  const closestTaskAtTs = asNumber(payload.closest_task_at, 0);
+
+  const embedded = payload._embedded as Record<string, unknown> | undefined;
+
+  return {
+    stable_id: `kommo-lead-${leadId}`,
+    business_id: leadId,
+    name: payload.name ?? null,
+    price: asNumber(payload.price, 0) || null,
+    score: asNumber(payload.score, 0) || null,
+    group_id: asNumber(payload.group_id, 0) || null,
+    closed_at: closedAtTs ? new Date(closedAtTs * 1000).toISOString() : null,
+    status_id: asNumber(payload.status_id, 0) || null,
+    account_id: asNumber(payload.account_id, 0) || null,
+    created_by: asNumber(payload.created_by, 0) || null,
+    is_deleted: payload.is_deleted ?? false,
+    labor_cost: asNumber(payload.labor_cost, 0) || null,
+    updated_by: asNumber(payload.updated_by, 0) || null,
+    pipeline_id: asNumber(payload.pipeline_id, 0) || null,
+    loss_reason_id: asNumber(payload.loss_reason_id, 0) || null,
+    closest_task_at: closestTaskAtTs ? new Date(closestTaskAtTs * 1000).toISOString() : null,
+    responsible_user_id: asNumber(payload.responsible_user_id, 0) || null,
+    custom_fields_values: payload.custom_fields_values ?? null,
+    embedded_data: embedded ? { tags: embedded.tags, companies: embedded.companies } : null,
+  };
+}
+
 function mapKommoContactToTable(payload: Record<string, unknown>) {
   const contactId = asNumber(payload.id, 0);
   if (!contactId) {
@@ -178,6 +212,21 @@ async function processEvent(event: KommoEventRow) {
 
     if (upsertError) {
       throw new Error(upsertError.message || 'No se pudo upsert a leads_ganados');
+    }
+
+    // Also save to kommo_leads with all fields
+    const mappedFull = mapKommoLeadToKommoLeads(event.payload);
+    if (mappedFull) {
+      const { error: upsertFullError } = await supabase.from('kommo_leads' as never).upsert(
+        mappedFull as never,
+        {
+          onConflict: 'business_id',
+        },
+      );
+
+      if (upsertFullError) {
+        console.error('Error upserting to kommo_leads:', upsertFullError.message);
+      }
     }
     return;
   }
