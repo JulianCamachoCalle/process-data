@@ -8,7 +8,7 @@ export function isSupabaseConfigured() {
 }
 
 export const supabase =
-  isSupabaseConfigured()
+  isSupabaseConfigured() && supabaseUrl && supabaseAnonKey
     ? createClient(supabaseUrl, supabaseAnonKey, {
         auth: {
           persistSession: true,

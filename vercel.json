@@ -3,7 +3,15 @@
   "crons": [
     {
       "path": "/api/cron/sync-outbox",
-      "schedule": "*/1 * * * *"
+      "schedule": "0 3 * * *"
+    },
+    {
+      "path": "/api/cron/kommo-sync",
+      "schedule": "10 3 * * *"
+    },
+    {
+      "path": "/api/cron/kommo-process-events",
+      "schedule": "20 3 * * *"
     }
   ]
 }
