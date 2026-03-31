@@ -82,13 +82,14 @@ async function fetchAllPages(
   accessToken: string,
   resource: KommoResource,
   fromDateIso: string | null,
-): Promise<{ items: Array<Record<string, unknown>>; totalPulled: number }> {
+  maxPages: number = 5, // Limit pages per run to avoid timeout
+): Promise<{ items: Array<Record<string, unknown>>; totalPulled: number; hasMore: boolean }> {
   let allItems: Array<Record<string, unknown>> = [];
   let page = 1;
   let hasMore = true;
   const embeddedKey = resource;
 
-  while (hasMore) {
+  while (hasMore && page <= maxPages) {
     const url = new URL(`${baseUrl}${endpoint}`);
     url.searchParams.set('limit', '250');
     url.searchParams.set('page', String(page));
@@ -121,7 +122,7 @@ async function fetchAllPages(
     page++;
   }
 
-  return { items: allItems, totalPulled: allItems.length };
+  return { items: allItems, totalPulled: allItems.length, hasMore };
 }
 
 export default async function kommoSyncHandler(req: VercelRequest, res: VercelResponse) {
@@ -163,6 +164,7 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
       staged: number;
       cursorFrom: string | null;
       cursorTo: string | null;
+      hasMore?: boolean;
     }> = [];
 
     for (const resource of resourcesToSync) {
@@ -185,13 +187,18 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
       const cursor = ((cursorRows ?? []) as Array<{ cursor_updated_at: string | null }>)[0] ?? null;
       const fromDateIso = cursor?.cursor_updated_at ?? null;
 
+      // Get maxPages from query param or default to 5
+      const maxPagesParam = asSingleQueryParam(req.query.max_pages);
+      const maxPages = maxPagesParam ? Math.min(20, parseInt(maxPagesParam, 10) || 5) : 5;
+
       // Fetch all pages
-      const { items, totalPulled } = await fetchAllPages(
+      const { items, totalPulled, hasMore } = await fetchAllPages(
         freshConnection.account_base_url,
         endpoint,
         freshConnection.access_token,
         resource,
         fromDateIso,
+        maxPages,
       );
 
       // Stage all items
@@ -238,6 +245,7 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
         staged,
         cursorFrom: fromDateIso,
         cursorTo: nextCursor,
+        hasMore,
       });
     }
 
