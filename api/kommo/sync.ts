@@ -12,6 +12,16 @@ import {
 const SYNC_SECRET_HEADER = 'x-kommo-sync-secret';
 const SYNC_SECRET_ENV = 'KOMMO_SYNC_SECRET';
 
+type KommoResource = 'leads' | 'contacts' | 'companies' | 'users' | 'pipelines';
+
+const RESOURCE_ENDPOINTS: Record<KommoResource, string> = {
+  leads: '/api/v4/leads',
+  contacts: '/api/v4/contacts',
+  companies: '/api/v4/companies',
+  users: '/api/v4/users',
+  pipelines: '/api/v4/pipelines',
+};
+
 function asSingleQueryParam(value: string | string[] | undefined) {
   return Array.isArray(value) ? value[0] : value;
 }
