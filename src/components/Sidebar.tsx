@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { LayoutDashboard, Database, Sparkles, ShieldCheck, Layers3, Workflow } from 'lucide-react';
+import { LayoutDashboard, Database, Sparkles, ShieldCheck, Layers3, Workflow, Settings } from 'lucide-react';
 import { getSheetLabel, groupSheetsByDomain } from '../lib/sheetLabels';
 
 interface SidebarPrefetchHandlers {
@@ -11,9 +11,10 @@ interface SidebarPrefetchHandlers {
 interface SidebarProps {
   sheets: string[];
   prefetchHandlers?: SidebarPrefetchHandlers;
+  onSecretClick?: () => void;
 }
 
-export function Sidebar({ sheets, prefetchHandlers }: SidebarProps) {
+export function Sidebar({ sheets, prefetchHandlers, onSecretClick }: SidebarProps) {
   const location = useLocation();
   const groupedSheets = groupSheetsByDomain(sheets);
 
@@ -98,16 +99,16 @@ export function Sidebar({ sheets, prefetchHandlers }: SidebarProps) {
         )}
       </nav>
 
-      <div className="px-4 pb-5 pt-3 border-t border-white/10">
-        <div className="rounded-xl border border-white/10 bg-white/5 px-4 py-3">
-          <div className="flex items-center gap-2 text-red-200 text-xs font-semibold mb-1">
-            <ShieldCheck size={14} />
-            Acceso Protegido
-          </div>
-          <p className="text-[11px] text-gray-300 leading-relaxed">
-            Sesión privada activa para edición y gestión de datos.
-          </p>
-        </div>
+      <div className="px-2 pb-5 pt-1.5 border-t border-white/10">
+        
+        {/* Hidden admin trigger */}
+        <button
+          onClick={onSecretClick}
+          className="mt-3 w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg border border-white/5 text-gray-600 hover:text-gray-400 hover:bg-white/5 hover:border-white/10 transition-all opacity-30 hover:opacity-60"
+        >
+          <Settings size={14} />
+          <span className="text-[10px]">Admin</span>
+        </button>
       </div>
     </aside>
   );

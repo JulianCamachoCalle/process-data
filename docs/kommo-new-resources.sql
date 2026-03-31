@@ -1,15 +1,19 @@
--- Kommo Tags table
+-- Kommo Tags table (updated: added entity_type to differentiate tags across entity types)
+-- NOTE: If table exists, run kommo-tags-migration.sql first
 create table if not exists public.kommo_tags (
   id uuid primary key default gen_random_uuid(),
   stable_id text not null unique,
-  business_id bigint not null unique,
+  business_id bigint not null,
+  entity_type text not null default 'leads',
   name text,
   color text,
   created_at_db timestamptz not null default now(),
-  updated_at_db timestamptz not null default now()
+  updated_at_db timestamptz not null default now(),
+  unique (business_id, entity_type)
 );
 
-create index if not exists idx_kommo_tags_business_id on public.kommo_tags (business_id);
+create index if not exists idx_kommo_tags_business_id on public.kommo_tags (business_id, entity_type);
+create index if not exists idx_kommo_tags_entity_type on public.kommo_tags (entity_type);
 drop trigger if exists trg_kommo_tags_updated_at on public.kommo_tags;
 create trigger trg_kommo_tags_updated_at before update on public.kommo_tags for each row execute function public.set_updated_at();
 
