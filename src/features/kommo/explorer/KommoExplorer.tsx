@@ -11,7 +11,13 @@ import {
   Eye,
   X,
 } from 'lucide-react';
-import { getKommoColumnLabel, getKommoResource, KOMMO_RESOURCES, type KommoResourceKey } from './kommoResourceConfig';
+import {
+  getGroupedKommoResources,
+  getKommoColumnLabel,
+  getKommoResource,
+  KOMMO_RESOURCES,
+  type KommoResourceKey,
+} from '../config/kommoResourceConfig';
 
 type ApiResponse = {
   success: boolean;
@@ -93,6 +99,7 @@ export function KommoExplorer() {
 function KommoExplorerView({ resource }: { resource: KommoResourceKey }) {
   const navigate = useNavigate();
   const uiConfig = useMemo(() => getKommoResource(resource) ?? KOMMO_RESOURCES[0], [resource]);
+  const groupedResources = useMemo(() => getGroupedKommoResources(), []);
 
   const [searchInput, setSearchInput] = useState('');
   const [q, setQ] = useState('');
@@ -207,10 +214,14 @@ function KommoExplorerView({ resource }: { resource: KommoResourceKey }) {
                 className="ml-auto bg-transparent outline-none text-sm"
                 aria-label="Seleccionar recurso"
               >
-                {KOMMO_RESOURCES.map((r) => (
-                  <option key={r.key} value={r.key}>
-                    {r.label}
-                  </option>
+                {groupedResources.map((section) => (
+                  <optgroup key={section.group} label={section.label}>
+                    {section.resources.map((r) => (
+                      <option key={r.key} value={r.key}>
+                        {r.label}
+                      </option>
+                    ))}
+                  </optgroup>
                 ))}
               </select>
             </label>

@@ -20,9 +20,12 @@ export type KommoResourceKey =
   | 'custom_field_groups'
   | 'links';
 
+export type KommoResourceGroup = 'core' | 'relationships' | 'metadata' | 'activity';
+
 export type KommoResourceUiConfig = {
   key: KommoResourceKey;
   label: string;
+  group: KommoResourceGroup;
   defaultSort: string;
   sortColumns: string[];
   primaryKey: 'business_id' | 'stable_id';
@@ -33,6 +36,21 @@ export type KommoResourceDataConfig = KommoResourceUiConfig & {
   listColumns: string[];
   searchColumns: string[];
   columnLabels?: Record<string, string>;
+};
+
+export type KommoResourceGroupSection = {
+  group: KommoResourceGroup;
+  label: string;
+  resources: KommoResourceDataConfig[];
+};
+
+const KOMMO_RESOURCE_GROUP_ORDER: KommoResourceGroup[] = ['core', 'relationships', 'metadata', 'activity'];
+
+const KOMMO_RESOURCE_GROUP_LABELS: Record<KommoResourceGroup, string> = {
+  core: 'Base CRM',
+  relationships: 'Relaciones y vínculos',
+  metadata: 'Configuración y catálogos',
+  activity: 'Actividad y seguimiento',
 };
 
 const DEFAULT_COLUMN_LABELS: Record<string, string> = {
@@ -138,6 +156,7 @@ export const KOMMO_RESOURCES: KommoResourceDataConfig[] = [
   {
     key: 'leads',
     label: 'Leads',
+    group: 'core',
     table: 'kommo_leads',
     primaryKey: 'business_id',
     defaultSort: 'updated_at_db',
@@ -161,6 +180,7 @@ export const KOMMO_RESOURCES: KommoResourceDataConfig[] = [
   {
     key: 'loss_reasons',
     label: 'Loss Reasons',
+    group: 'metadata',
     table: 'kommo_loss_reasons',
     primaryKey: 'business_id',
     defaultSort: 'updated_at_db',
@@ -171,6 +191,7 @@ export const KOMMO_RESOURCES: KommoResourceDataConfig[] = [
   {
     key: 'contacts',
     label: 'Contacts',
+    group: 'core',
     table: 'kommo_contacts',
     primaryKey: 'business_id',
     defaultSort: 'updated_at',
@@ -191,6 +212,7 @@ export const KOMMO_RESOURCES: KommoResourceDataConfig[] = [
   {
     key: 'companies',
     label: 'Companies',
+    group: 'core',
     table: 'kommo_companies',
     primaryKey: 'business_id',
     defaultSort: 'updated_at',
@@ -201,6 +223,7 @@ export const KOMMO_RESOURCES: KommoResourceDataConfig[] = [
   {
     key: 'users',
     label: 'Users',
+    group: 'metadata',
     table: 'kommo_users',
     primaryKey: 'business_id',
     defaultSort: 'business_id',
@@ -211,6 +234,7 @@ export const KOMMO_RESOURCES: KommoResourceDataConfig[] = [
   {
     key: 'roles',
     label: 'Roles',
+    group: 'metadata',
     table: 'kommo_roles',
     primaryKey: 'business_id',
     defaultSort: 'business_id',
@@ -221,6 +245,7 @@ export const KOMMO_RESOURCES: KommoResourceDataConfig[] = [
   {
     key: 'pipelines',
     label: 'Pipelines',
+    group: 'core',
     table: 'kommo_pipelines',
     primaryKey: 'business_id',
     defaultSort: 'updated_at_db',
@@ -231,6 +256,7 @@ export const KOMMO_RESOURCES: KommoResourceDataConfig[] = [
   {
     key: 'pipeline_statuses',
     label: 'Pipeline Statuses',
+    group: 'relationships',
     table: 'kommo_pipeline_statuses',
     primaryKey: 'stable_id',
     defaultSort: 'updated_at_db',
@@ -241,6 +267,7 @@ export const KOMMO_RESOURCES: KommoResourceDataConfig[] = [
   {
     key: 'tasks',
     label: 'Tasks',
+    group: 'activity',
     table: 'kommo_tasks',
     primaryKey: 'business_id',
     defaultSort: 'updated_at',
@@ -261,6 +288,7 @@ export const KOMMO_RESOURCES: KommoResourceDataConfig[] = [
   {
     key: 'notes',
     label: 'Notes',
+    group: 'activity',
     table: 'kommo_notes',
     primaryKey: 'stable_id',
     defaultSort: 'updated_at_db',
@@ -271,6 +299,7 @@ export const KOMMO_RESOURCES: KommoResourceDataConfig[] = [
   {
     key: 'events',
     label: 'Events',
+    group: 'activity',
     table: 'kommo_events',
     primaryKey: 'business_id',
     defaultSort: 'created_at',
@@ -281,6 +310,7 @@ export const KOMMO_RESOURCES: KommoResourceDataConfig[] = [
   {
     key: 'catalogs',
     label: 'Catalogs',
+    group: 'metadata',
     table: 'kommo_catalogs',
     primaryKey: 'business_id',
     defaultSort: 'updated_at',
@@ -291,6 +321,7 @@ export const KOMMO_RESOURCES: KommoResourceDataConfig[] = [
   {
     key: 'catalog_elements',
     label: 'Catalog Elements',
+    group: 'relationships',
     table: 'kommo_catalog_elements',
     primaryKey: 'stable_id',
     defaultSort: 'updated_at',
@@ -301,6 +332,7 @@ export const KOMMO_RESOURCES: KommoResourceDataConfig[] = [
   {
     key: 'unsorted',
     label: 'Unsorted',
+    group: 'activity',
     table: 'kommo_unsorted_leads',
     primaryKey: 'stable_id',
     defaultSort: 'updated_at_db',
@@ -321,6 +353,7 @@ export const KOMMO_RESOURCES: KommoResourceDataConfig[] = [
   {
     key: 'unsorted_summary',
     label: 'Unsorted Summary',
+    group: 'metadata',
     table: 'kommo_unsorted_summary',
     primaryKey: 'stable_id',
     defaultSort: 'updated_at_db',
@@ -339,6 +372,7 @@ export const KOMMO_RESOURCES: KommoResourceDataConfig[] = [
   {
     key: 'sources',
     label: 'Sources',
+    group: 'relationships',
     table: 'kommo_sources',
     primaryKey: 'business_id',
     defaultSort: 'updated_at_db',
@@ -349,6 +383,7 @@ export const KOMMO_RESOURCES: KommoResourceDataConfig[] = [
   {
     key: 'tags',
     label: 'Tags',
+    group: 'relationships',
     table: 'kommo_tags',
     primaryKey: 'stable_id',
     defaultSort: 'business_id',
@@ -359,6 +394,7 @@ export const KOMMO_RESOURCES: KommoResourceDataConfig[] = [
   {
     key: 'custom_fields',
     label: 'Custom Fields',
+    group: 'metadata',
     table: 'kommo_custom_fields',
     primaryKey: 'stable_id',
     defaultSort: 'updated_at',
@@ -369,6 +405,7 @@ export const KOMMO_RESOURCES: KommoResourceDataConfig[] = [
   {
     key: 'custom_field_groups',
     label: 'Custom Field Groups',
+    group: 'metadata',
     table: 'kommo_custom_field_groups',
     primaryKey: 'stable_id',
     defaultSort: 'updated_at_db',
@@ -379,6 +416,7 @@ export const KOMMO_RESOURCES: KommoResourceDataConfig[] = [
   {
     key: 'links',
     label: 'Links',
+    group: 'relationships',
     table: 'kommo_links',
     primaryKey: 'stable_id',
     defaultSort: 'created_at',
@@ -403,6 +441,18 @@ export function getKommoColumnLabel(resourceKey: KommoResourceKey, column: strin
   const custom = resource?.columnLabels?.[column];
   if (custom) return custom;
   return DEFAULT_COLUMN_LABELS[column] ?? toLabelCase(column);
+}
+
+export function getKommoResourceGroupLabel(group: KommoResourceGroup) {
+  return KOMMO_RESOURCE_GROUP_LABELS[group];
+}
+
+export function getGroupedKommoResources(): KommoResourceGroupSection[] {
+  return KOMMO_RESOURCE_GROUP_ORDER.map((group) => ({
+    group,
+    label: getKommoResourceGroupLabel(group),
+    resources: KOMMO_RESOURCES.filter((resource) => resource.group === group),
+  })).filter((section) => section.resources.length > 0);
 }
 
 export function getKommoResource(key: string | undefined) {

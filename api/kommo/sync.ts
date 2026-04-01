@@ -14,8 +14,10 @@ const SYNC_SECRET_HEADER = 'x-kommo-sync-secret';
 const SYNC_SECRET_ENV = 'KOMMO_SYNC_SECRET';
 const STANDARD_CUSTOM_FIELD_ENTITY_TYPES = ['leads', 'contacts', 'companies'] as const;
 const CUSTOM_FIELD_ENTITY_TYPES = [...STANDARD_CUSTOM_FIELD_ENTITY_TYPES, 'catalogs'] as const;
+const LINK_ENTITY_TYPES = ['leads', 'contacts', 'companies'] as const;
 type StandardCustomFieldEntityType = typeof STANDARD_CUSTOM_FIELD_ENTITY_TYPES[number];
 type CustomFieldEntityType = typeof CUSTOM_FIELD_ENTITY_TYPES[number];
+type LinkEntityType = typeof LINK_ENTITY_TYPES[number];
 
 // Todos los recursos disponibles en Kommo API v4
 // Algunos necesitan manejo especial (tags, custom_fields, links, notes) porque no siguen el patrón estándar de endpoints o necesitan parámetros adicionales.
@@ -270,6 +272,10 @@ function isCustomFieldEntityType(value: string): value is CustomFieldEntityType 
 
 function isStandardCustomFieldEntityType(value: string): value is StandardCustomFieldEntityType {
   return (STANDARD_CUSTOM_FIELD_ENTITY_TYPES as readonly string[]).includes(value);
+}
+
+function isLinkEntityType(value: string): value is LinkEntityType {
+  return (LINK_ENTITY_TYPES as readonly string[]).includes(value);
 }
 
 function getCustomFieldDedupeVersion(item: Record<string, unknown>) {
@@ -1809,6 +1815,10 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
       cursorTo: string | null;
       hasMore?: boolean;
       truncated?: boolean;
+      truncationReason?: 'hasMore' | 'max_entities' | 'max_runtime' | null;
+      entitiesScanned?: number;
+      entitiesProcessed?: number;
+      linksFetched?: number;
     }> = [];
 
     // Manejo especial para recursos que requieren iteración por entity_type (tags, custom_fields, notes) o por entidad (links).
@@ -2005,12 +2015,68 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
 
     // Manejo especial para links, que requiere iteración por entidad. Para cada entidad actualizada (leads, contacts, companies).
     if (selectedResource === 'links') {
-      const entities = ['leads', 'contacts', 'companies'];
+      const requestedEntityTypeRaw = asSingleQueryParam(req.query.entity_type)?.trim().toLowerCase();
+      let requestedEntityType: LinkEntityType | null = null;
+      if (requestedEntityTypeRaw) {
+        if (!isLinkEntityType(requestedEntityTypeRaw)) {
+          return res.status(400).json({
+            error: 'El parámetro entity_type debe ser leads, contacts o companies para resource=links.',
+          });
+        }
+        requestedEntityType = requestedEntityTypeRaw;
+      }
+
+      const entities: LinkEntityType[] = requestedEntityType
+        ? [requestedEntityType]
+        : [...LINK_ENTITY_TYPES];
+
       const maxPagesParam = asSingleQueryParam(req.query.max_pages);
       const maxPages = maxPagesParam ? Math.min(50, parseInt(maxPagesParam, 10) || 5) : 5;
 
+      const maxEntitiesParam = asSingleQueryParam(req.query.max_entities)?.trim();
+      if (maxEntitiesParam !== undefined) {
+        const maxEntitiesNumber = Number(maxEntitiesParam);
+        if (!Number.isInteger(maxEntitiesNumber) || maxEntitiesNumber <= 0) {
+          return res.status(400).json({
+            error: 'El parámetro max_entities debe ser un número entero positivo para resource=links.',
+          });
+        }
+      }
+      const parsedMaxEntities = maxEntitiesParam !== undefined ? Number(maxEntitiesParam) : 100;
+      const maxEntities = Math.min(1000, parsedMaxEntities);
+
+      const queryMaxRuntimeMsParam = asSingleQueryParam(req.query.max_runtime_ms)?.trim();
+      if (queryMaxRuntimeMsParam !== undefined) {
+        const runtimeNumber = Number(queryMaxRuntimeMsParam);
+        if (!Number.isInteger(runtimeNumber) || runtimeNumber <= 0) {
+          return res.status(400).json({
+            error: 'El parámetro max_runtime_ms debe ser un número entero positivo para resource=links.',
+          });
+        }
+      }
+
+      const envMaxRuntimeMsRaw = (
+        process.env.KOMMO_SYNC_LINKS_MAX_RUNTIME_MS
+        ?? process.env.KOMMO_LINKS_MAX_RUNTIME_MS
+        ?? process.env.KOMMO_SYNC_MAX_RUNTIME_MS
+      )?.trim();
+      const envMaxRuntimeMs = envMaxRuntimeMsRaw && Number.isInteger(Number(envMaxRuntimeMsRaw)) && Number(envMaxRuntimeMsRaw) > 0
+        ? Number(envMaxRuntimeMsRaw)
+        : null;
+      const requestedRuntimeMs = queryMaxRuntimeMsParam !== undefined
+        ? Number(queryMaxRuntimeMsParam)
+        : envMaxRuntimeMs ?? 45_000;
+      const maxRuntimeMs = Math.min(120_000, requestedRuntimeMs);
+      const linksStartedAt = Date.now();
+      let budgetExceeded = false;
+
       // Iteramos por cada tipo de entidad para obtener sus links asociados.
       for (const entity of entities) {
+        if (Date.now() - linksStartedAt >= maxRuntimeMs) {
+          budgetExceeded = true;
+          break;
+        }
+
         // Obtenemos el cursor específico para los links de esta entidad, por ejemplo: links_leads, links_contacts, etc. 
         const cursorResource = `links_${entity}`;
         const { data: cursorRows, error: cursorError } = await supabase
@@ -2041,9 +2107,21 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
         const nextCursor = getMaxUpdatedAtIso(updatedEntities);
 
         let stagedLinks = 0;
+        let linksFetched = 0;
         const rows: WebhookEventInsert[] = [];
+        const entitiesToProcess = updatedEntities.slice(0, maxEntities);
+        const maxEntitiesReached = updatedEntities.length > entitiesToProcess.length;
+        let entitiesProcessed = 0;
+        let entityRuntimeExceeded = false;
 
-        for (const item of updatedEntities) {
+        for (const item of entitiesToProcess) {
+          if (Date.now() - linksStartedAt >= maxRuntimeMs) {
+            budgetExceeded = true;
+            entityRuntimeExceeded = true;
+            break;
+          }
+
+          entitiesProcessed++;
           const entityId = Number(item.id);
           if (!entityId) continue;
 
@@ -2055,6 +2133,7 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
               entityId,
               maxPages,
             );
+            linksFetched += linksResult.totalPulled;
 
             for (const link of linksResult.items) {
               const toEntityType = String(link.to_entity_type ?? link.to ?? '');
@@ -2096,8 +2175,10 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
           stagedLinks += await stageWebhookEvents(supabase, rows);
         }
 
-        // Actualizamos el cursor específico para los links de esta entidad. 
-        if (nextCursor) {
+        const shouldAdvanceCursor = !!nextCursor && !hasMore && !maxEntitiesReached && !entityRuntimeExceeded;
+
+        // Actualizamos el cursor específico para los links de esta entidad solo si procesamos completamente el lote sin truncamiento.
+        if (shouldAdvanceCursor) {
           const { error: upsertCursorError } = await supabase.from('kommo_sync_cursor' as never).upsert(
             {
               account_subdomain: freshConnection.account_subdomain,
@@ -2115,14 +2196,33 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
           }
         }
 
+        const truncationReason: 'hasMore' | 'max_entities' | 'max_runtime' | null = entityRuntimeExceeded
+          ? 'max_runtime'
+          : maxEntitiesReached
+            ? 'max_entities'
+            : hasMore
+              ? 'hasMore'
+              : null;
+
+        const truncated = truncationReason !== null;
+
         results.push({
           resource: cursorResource,
           pulled: totalPulled,
           staged: stagedLinks,
           cursorFrom: fromDateIso,
-          cursorTo: nextCursor,
+          cursorTo: shouldAdvanceCursor ? nextCursor : fromDateIso,
           hasMore,
+          truncated,
+          truncationReason,
+          entitiesScanned: updatedEntities.length,
+          entitiesProcessed,
+          linksFetched,
         });
+
+        if (budgetExceeded) {
+          break;
+        }
       }
 
       return res.status(200).json({
@@ -2131,6 +2231,7 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
         resources: results,
         totalPulled: results.reduce((sum, r) => sum + r.pulled, 0),
         totalStaged: results.reduce((sum, r) => sum + r.staged, 0),
+        truncated: budgetExceeded || results.some((r) => r.truncated === true),
         queueStats: includeQueueStats
           ? await getQueueStatsForAccountBaseUrl(supabase, freshConnection.account_base_url)
           : undefined,
