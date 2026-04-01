@@ -5,6 +5,7 @@ import {
   Activity,
   BarChart3,
   Clock3,
+  FileText,
   Layers,
   PieChart as PieChartIcon,
   Users,
@@ -163,17 +164,20 @@ function truncateLabel(value: string, maxLength = 24) {
 }
 
 export function KommoLeadsInsights() {
-  const [startDate, setStartDate] = useState<string | null>(null);
-  const [endDate, setEndDate] = useState<string | null>(null);
+  const [draftStartDate, setDraftStartDate] = useState<string | null>(null);
+  const [draftEndDate, setDraftEndDate] = useState<string | null>(null);
+  const [appliedStartDate, setAppliedStartDate] = useState<string | null>(null);
+  const [appliedEndDate, setAppliedEndDate] = useState<string | null>(null);
   const [pipelineAKey, setPipelineAKey] = useState<string>('');
   const [pipelineBKey, setPipelineBKey] = useState<string>('');
+  const [printTimestamp, setPrintTimestamp] = useState<string>('');
 
   const insightsQuery = useQuery({
-    queryKey: ['kommo-leads-insights', startDate, endDate],
+    queryKey: ['kommo-leads-insights', appliedStartDate, appliedEndDate],
     queryFn: async (): Promise<LeadsInsightsPayload> => {
       const queryParams = new URLSearchParams();
-      if (startDate) queryParams.set('start_date', startDate);
-      if (endDate) queryParams.set('end_date', endDate);
+      if (appliedStartDate) queryParams.set('start_date', appliedStartDate);
+      if (appliedEndDate) queryParams.set('end_date', appliedEndDate);
 
       const endpoint = queryParams.size > 0
         ? `/api/kommo/leads-insights?${queryParams.toString()}`
@@ -195,8 +199,8 @@ export function KommoLeadsInsights() {
           hourlyIncoming: [],
           owners: [],
           filters: {
-            start_date: startDate,
-            end_date: endDate,
+            start_date: appliedStartDate,
+            end_date: appliedEndDate,
           },
           pipelinePerformance: [],
           summary: {
@@ -266,25 +270,49 @@ export function KommoLeadsInsights() {
     const todayLima = getCurrentLimaDate();
 
     if (range === 'today') {
-      setStartDate(todayLima);
-      setEndDate(todayLima);
+      setDraftStartDate(todayLima);
+      setDraftEndDate(todayLima);
       return;
     }
 
     if (range === 'last7') {
-      setStartDate(shiftDate(todayLima, -6));
-      setEndDate(todayLima);
+      setDraftStartDate(shiftDate(todayLima, -6));
+      setDraftEndDate(todayLima);
       return;
     }
 
     if (range === 'last30') {
-      setStartDate(shiftDate(todayLima, -29));
-      setEndDate(todayLima);
+      setDraftStartDate(shiftDate(todayLima, -29));
+      setDraftEndDate(todayLima);
       return;
     }
 
-    setStartDate(null);
-    setEndDate(null);
+    setDraftStartDate(null);
+    setDraftEndDate(null);
+  };
+
+  const applyFilters = () => {
+    setAppliedStartDate(draftStartDate);
+    setAppliedEndDate(draftEndDate);
+  };
+
+  const clearFilters = () => {
+    setDraftStartDate(null);
+    setDraftEndDate(null);
+    setAppliedStartDate(null);
+    setAppliedEndDate(null);
+  };
+
+  const handleExportPdf = () => {
+    const generatedAt = new Intl.DateTimeFormat('es-PE', {
+      dateStyle: 'medium',
+      timeStyle: 'short',
+    }).format(new Date());
+
+    setPrintTimestamp(generatedAt);
+    window.setTimeout(() => {
+      window.print();
+    }, 0);
   };
 
   const statusByPipelineData = useMemo(() => {
@@ -339,6 +367,7 @@ export function KommoLeadsInsights() {
   }
 
   const data = insightsQuery.data;
+  const appliedRangeLabel = `${data.filters.start_date ?? 'sin inicio'} — ${data.filters.end_date ?? 'sin fin'}`;
 
   return (
     <div className="space-y-6">
@@ -350,13 +379,29 @@ export function KommoLeadsInsights() {
           </h1>
           <p className="text-sm text-gray-500 mt-1">Métricas ejecutivas de leads Kommo. Zona horaria de entrada: {data.timezone ?? 'America/Lima'}.</p>
         </div>
-        <Link
-          to="/kommo"
-          className="inline-flex items-center gap-2 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs font-semibold text-red-700 hover:bg-red-100"
-        >
-          Ver Explorer
-        </Link>
+        <div className="inline-flex items-center gap-2 print:hidden">
+          <button
+            type="button"
+            onClick={handleExportPdf}
+            className="inline-flex items-center gap-2 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs font-semibold text-red-700 hover:bg-red-100"
+          >
+            <FileText size={14} />
+            Exportar PDF
+          </button>
+          <Link
+            to="/kommo"
+            className="inline-flex items-center gap-2 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs font-semibold text-red-700 hover:bg-red-100"
+          >
+            Ver Explorer
+          </Link>
+        </div>
       </header>
+
+      <section className="hidden print:block rounded-xl border border-gray-200 bg-white px-4 py-3">
+        <h2 className="text-lg font-bold text-gray-900">Leads Insights — Exportación PDF</h2>
+        <p className="text-xs text-gray-600 mt-1">Rango aplicado: {appliedRangeLabel}</p>
+        <p className="text-xs text-gray-600">Generado: {printTimestamp || 'en este momento'}</p>
+      </section>
 
       <section className="rounded-2xl border border-gray-200 bg-white p-5 shadow-[0_20px_36px_-30px_rgba(15,23,42,0.8)] space-y-4">
         <div className="flex flex-wrap items-center gap-2">
@@ -373,8 +418,8 @@ export function KommoLeadsInsights() {
             <input
               type="date"
               className="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-red-200"
-              value={startDate ?? ''}
-              onChange={(event) => setStartDate(event.target.value || null)}
+              value={draftStartDate ?? ''}
+              onChange={(event) => setDraftStartDate(event.target.value || null)}
             />
           </label>
           <label className="text-xs font-semibold text-gray-600 uppercase tracking-wide space-y-1">
@@ -382,14 +427,31 @@ export function KommoLeadsInsights() {
             <input
               type="date"
               className="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-red-200"
-              value={endDate ?? ''}
-              onChange={(event) => setEndDate(event.target.value || null)}
+              value={draftEndDate ?? ''}
+              onChange={(event) => setDraftEndDate(event.target.value || null)}
             />
           </label>
         </div>
 
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={applyFilters}
+            className="inline-flex items-center rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs font-semibold text-red-700 hover:bg-red-100"
+          >
+            Aplicar filtros
+          </button>
+          <button
+            type="button"
+            onClick={clearFilters}
+            className="inline-flex items-center rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-50"
+          >
+            Limpiar
+          </button>
+        </div>
+
         <p className="text-xs text-gray-500">
-          Filtro aplicado: {data.filters.start_date ?? 'sin inicio'} — {data.filters.end_date ?? 'sin fin'}
+          Filtro aplicado: {appliedRangeLabel}
         </p>
       </section>
 

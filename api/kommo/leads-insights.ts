@@ -121,6 +121,21 @@ function normalizeText(value: string) {
     .trim();
 }
 
+function normalizeStatusGroupingKey(value: string) {
+  return value
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
+}
+
+function isMostlyUppercase(value: string) {
+  const lettersOnly = value.replace(/[^\p{L}]+/gu, '');
+  if (!lettersOnly) return false;
+  return lettersOnly === lettersOnly.toUpperCase();
+}
+
 function isLikelyWonStatus(statusName: string) {
   const normalized = normalizeText(statusName);
   return (
@@ -458,10 +473,17 @@ export default async function kommoLeadsInsightsHandler(req: VercelRequest, res:
     const statusesResult = Array.from(statusCounter.values()).sort((a, b) => b.total_leads - a.total_leads);
     const statusesByNameMap = new Map<string, StatusByNameInsight>();
     for (const status of statusesResult) {
-      const statusName = status.status_name;
-      const existing = statusesByNameMap.get(statusName) ?? { status_name: statusName, total_leads: 0 };
+      const statusName = status.status_name.trim();
+      const statusDisplayName = statusName || 'Sin estado';
+      const groupingKey = normalizeStatusGroupingKey(statusDisplayName);
+      const existing = statusesByNameMap.get(groupingKey) ?? { status_name: statusDisplayName, total_leads: 0 };
       existing.total_leads += status.total_leads;
-      statusesByNameMap.set(statusName, existing);
+
+      if (isMostlyUppercase(existing.status_name) && !isMostlyUppercase(statusDisplayName)) {
+        existing.status_name = statusDisplayName;
+      }
+
+      statusesByNameMap.set(groupingKey, existing);
     }
     const statusesByNameResult = Array.from(statusesByNameMap.values()).sort((a, b) => b.total_leads - a.total_leads);
     const ownersResult = Array.from(ownerCounter.values()).sort((a, b) => b.total_leads - a.total_leads);
@@ -486,7 +508,14 @@ export default async function kommoLeadsInsightsHandler(req: VercelRequest, res:
     const avgPrice = toNumericAverage(validPrices);
     const topPipeline = pipelinesResult[0] ?? null;
     const busiestHour = [...hourlyIncomingResult].sort((a, b) => b.total_incoming - a.total_incoming)[0] ?? null;
-    const topStatus = statusesResult[0] ?? null;
+    const rawTopStatus = statusesResult[0] ?? null;
+    const topStatus = rawTopStatus
+      ? {
+        ...rawTopStatus,
+        status_name: statusesByNameMap.get(normalizeStatusGroupingKey(rawTopStatus.status_name.trim() || 'Sin estado'))?.status_name
+          ?? rawTopStatus.status_name,
+      }
+      : null;
     const topOwner = ownersResult[0] ?? null;
     const wonRateOverClosed = totalClosed > 0 ? Number(((totalWon / totalClosed) * 100).toFixed(2)) : null;
 
