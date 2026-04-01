@@ -39,6 +39,11 @@ type StatusInsight = {
   total_leads: number;
 };
 
+type StatusByNameInsight = {
+  status_name: string;
+  total_leads: number;
+};
+
 type HourlyIncomingInsight = {
   hour: number;
   total_incoming: number;
@@ -56,6 +61,7 @@ type LeadsInsightsPayload = {
   timezone?: string;
   pipelines: PipelineInsight[];
   statuses: StatusInsight[];
+  statusesByName: StatusByNameInsight[];
   hourlyIncoming: HourlyIncomingInsight[];
   owners: OwnerInsight[];
   filters: {
@@ -110,13 +116,27 @@ function formatHour(hour: number) {
   return `${String(hour).padStart(2, '0')}:00`;
 }
 
-function getCurrentLimaDate() {
-  return new Intl.DateTimeFormat('en-CA', {
+function getLimaDateFormatter() {
+  return new Intl.DateTimeFormat('en-US', {
     timeZone: 'America/Lima',
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
-  }).format(new Date());
+  });
+}
+
+function toLimaDateString(date: Date) {
+  const parts = getLimaDateFormatter().formatToParts(date);
+  const year = parts.find((part) => part.type === 'year')?.value;
+  const month = parts.find((part) => part.type === 'month')?.value;
+  const day = parts.find((part) => part.type === 'day')?.value;
+
+  if (!year || !month || !day) return null;
+  return `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
+}
+
+function getCurrentLimaDate() {
+  return toLimaDateString(new Date()) ?? '1970-01-01';
 }
 
 function shiftDate(dateString: string, days: number) {
@@ -135,6 +155,11 @@ function asChartNumber(value: unknown) {
   if (typeof value === 'number' && Number.isFinite(value)) return value;
   const parsed = Number(value ?? 0);
   return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function truncateLabel(value: string, maxLength = 24) {
+  if (value.length <= maxLength) return value;
+  return `${value.slice(0, maxLength - 1)}…`;
 }
 
 export function KommoLeadsInsights() {
@@ -166,6 +191,7 @@ export function KommoLeadsInsights() {
           error: payload.error ?? 'No se pudo cargar insights de leads',
           pipelines: [],
           statuses: [],
+          statusesByName: [],
           hourlyIncoming: [],
           owners: [],
           filters: {
@@ -290,6 +316,11 @@ export function KommoLeadsInsights() {
       ),
     };
   }, [insightsQuery.data?.statuses]);
+
+  const statusesByNameForPie = useMemo(
+    () => (insightsQuery.data?.statusesByName ?? []).slice(0, 8),
+    [insightsQuery.data?.statusesByName],
+  );
 
   if (insightsQuery.isLoading) {
     return (
@@ -451,11 +482,19 @@ export function KommoLeadsInsights() {
       </section>
 
       <section className="grid grid-cols-1 xl:grid-cols-2 gap-4">
-        <ChartCard title="Leads según pipeline" icon={<Layers size={16} className="text-red-600" />}>
+        <ChartCard title="Leads según encargado (pipeline)" icon={<Layers size={16} className="text-red-600" />}>
           <ResponsiveContainer width="100%" height={300}>
             <BarChart data={data.pipelines}>
               <CartesianGrid strokeDasharray="3 3" vertical={false} />
-              <XAxis dataKey="pipeline_name" tick={{ fontSize: 12 }} interval={0} angle={-10} textAnchor="end" height={52} />
+              <XAxis
+                dataKey="pipeline_name"
+                tick={{ fontSize: 12 }}
+                tickFormatter={(value) => truncateLabel(String(value), 22)}
+                interval={0}
+                angle={-20}
+                textAnchor="end"
+                height={58}
+              />
               <YAxis tick={{ fontSize: 12 }} />
               <Tooltip formatter={(value) => formatNumber(asChartNumber(value))} />
               <Bar dataKey="total_leads" name="Leads" radius={[8, 8, 0, 0]} fill="#dc2626" />
@@ -480,25 +519,44 @@ export function KommoLeadsInsights() {
         <ChartCard title="Leads según estado" icon={<PieChartIcon size={16} className="text-red-600" />}>
           <ResponsiveContainer width="100%" height={300}>
             <PieChart>
-              <Pie data={data.statuses.slice(0, 8)} dataKey="total_leads" nameKey="status_name" cx="50%" cy="50%" outerRadius={105} label>
-                {data.statuses.slice(0, 8).map((entry, index) => (
-                  <Cell key={`${entry.status_id ?? 'null'}-${entry.pipeline_id ?? 'null'}`} fill={COLORS[index % COLORS.length]} />
+              <Pie
+                data={statusesByNameForPie}
+                dataKey="total_leads"
+                nameKey="status_name"
+                cx="50%"
+                cy="50%"
+                outerRadius={105}
+                label={(entry) => truncateLabel(String(entry.name ?? ''), 18)}
+              >
+                {statusesByNameForPie.map((entry, index) => (
+                  <Cell key={`${entry.status_name}-${index}`} fill={COLORS[index % COLORS.length]} />
                 ))}
               </Pie>
-              <Tooltip formatter={(value) => formatNumber(asChartNumber(value))} />
-              <Legend verticalAlign="bottom" height={32} />
+              <Tooltip
+                formatter={(value) => formatNumber(asChartNumber(value))}
+                labelFormatter={(label) => String(label)}
+              />
+              <Legend verticalAlign="bottom" height={40} formatter={(value) => truncateLabel(String(value), 24)} />
             </PieChart>
           </ResponsiveContainer>
         </ChartCard>
 
-        <ChartCard title="Leads por estado + pipeline" icon={<BarChart3 size={16} className="text-red-600" />}>
+        <ChartCard title="Leads por estado + encargado" icon={<BarChart3 size={16} className="text-red-600" />}>
           <ResponsiveContainer width="100%" height={300}>
             <BarChart data={statusByPipelineData.rows}>
               <CartesianGrid strokeDasharray="3 3" vertical={false} />
-              <XAxis dataKey="pipeline_name" tick={{ fontSize: 12 }} interval={0} angle={-10} textAnchor="end" height={52} />
+              <XAxis
+                dataKey="pipeline_name"
+                tick={{ fontSize: 12 }}
+                tickFormatter={(value) => truncateLabel(String(value), 22)}
+                interval={0}
+                angle={-20}
+                textAnchor="end"
+                height={58}
+              />
               <YAxis tick={{ fontSize: 12 }} />
               <Tooltip formatter={(value) => formatNumber(asChartNumber(value))} />
-              <Legend />
+              <Legend formatter={(value) => truncateLabel(String(value), 24)} />
               {statusByPipelineData.stackKeys.map((key, index) => (
                 <Bar key={key} dataKey={key} stackId="statuses" fill={COLORS[index % COLORS.length]} radius={index === statusByPipelineData.stackKeys.length - 1 ? [8, 8, 0, 0] : [0, 0, 0, 0]} />
               ))}
@@ -516,7 +574,7 @@ export function KommoLeadsInsights() {
           <ul className="mt-4 space-y-2 text-sm text-gray-700">
             {data.owners.slice(0, 5).map((owner) => (
               <li key={String(owner.responsible_user_id ?? 'null')} className="flex items-center justify-between rounded-lg border border-gray-100 px-3 py-2 bg-gray-50/70">
-                <span>{owner.responsible_user_name}</span>
+                <span className="truncate pr-3">{owner.responsible_user_name}</span>
                 <span className="font-semibold text-gray-900">{formatNumber(owner.total_leads)}</span>
               </li>
             ))}
@@ -527,7 +585,7 @@ export function KommoLeadsInsights() {
           <h3 className="text-sm font-semibold text-gray-800">Insights extra</h3>
           <ul className="mt-4 space-y-2 text-sm text-gray-700">
             <li className="rounded-lg border border-gray-100 px-3 py-2 bg-gray-50/70">
-              Pipeline top: <span className="font-semibold text-gray-900">{data.summary.top_pipeline?.pipeline_name ?? 'N/D'}</span>
+              Encargado top (pipeline): <span className="font-semibold text-gray-900">{data.summary.top_pipeline?.pipeline_name ?? 'N/D'}</span>
             </li>
             <li className="rounded-lg border border-gray-100 px-3 py-2 bg-gray-50/70">
               Hora pico incoming: <span className="font-semibold text-gray-900">{data.insights.busiest_hour ? formatHour(data.insights.busiest_hour.hour) : 'N/D'}</span>

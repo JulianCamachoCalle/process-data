@@ -54,6 +54,11 @@ type StatusInsight = {
   total_leads: number;
 };
 
+type StatusByNameInsight = {
+  status_name: string;
+  total_leads: number;
+};
+
 type HourlyIncomingInsight = {
   hour: number;
   total_incoming: number;
@@ -68,6 +73,7 @@ type OwnerInsight = {
 type LeadsInsightsResponse = {
   pipelines: PipelineInsight[];
   statuses: StatusInsight[];
+  statusesByName: StatusByNameInsight[];
   hourlyIncoming: HourlyIncomingInsight[];
   owners: OwnerInsight[];
   filters: {
@@ -136,21 +142,50 @@ function isLikelyLostStatus(statusName: string) {
   );
 }
 
-async function safeSelect<T extends Record<string, unknown>>(
+async function safeSelectPaginated<T extends Record<string, unknown>>(
   table: string,
   columns: string,
+  batchSize = 1000,
 ): Promise<T[]> {
   try {
     const supabase = getSupabaseAdminClient();
-    const { data, error } = await supabase.from(table as never).select(columns as never);
-    if (error || !Array.isArray(data)) {
-      return [];
+    const rows: T[] = [];
+    let from = 0;
+
+    while (true) {
+      const to = from + batchSize - 1;
+      const { data, error } = await supabase
+        .from(table as never)
+        .select(columns as never)
+        .range(from, to);
+
+      if (error || !Array.isArray(data)) {
+        return [];
+      }
+
+      const chunk = data as unknown as T[];
+      rows.push(...chunk);
+
+      if (chunk.length < batchSize) {
+        break;
+      }
+
+      from += batchSize;
     }
 
-    return data as unknown as T[];
+    return rows;
   } catch {
     return [];
   }
+}
+
+function getLimaDateFormatter() {
+  return new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/Lima',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  });
 }
 
 function toNumericAverage(items: number[]) {
@@ -199,12 +234,14 @@ function parseDateInput(value: string | undefined) {
 function toLimaDateString(dateLike: string) {
   const parsedDate = new Date(dateLike);
   if (Number.isNaN(parsedDate.getTime())) return null;
-  return new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'America/Lima',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).format(parsedDate);
+
+  const dateParts = getLimaDateFormatter().formatToParts(parsedDate);
+  const year = dateParts.find((part) => part.type === 'year')?.value;
+  const month = dateParts.find((part) => part.type === 'month')?.value;
+  const day = dateParts.find((part) => part.type === 'day')?.value;
+
+  if (!year || !month || !day) return null;
+  return `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
 }
 
 function isDateWithinRange(dateLike: string | null, startDate: string | null, endDate: string | null) {
@@ -270,11 +307,11 @@ export default async function kommoLeadsInsightsHandler(req: VercelRequest, res:
       unsortedLeads,
       users,
     ] = await Promise.all([
-      safeSelect<LeadRow>('kommo_leads', 'pipeline_id,status_id,price,is_deleted,closed_at,created_at,responsible_user_id'),
-      safeSelect<PipelineRow>('kommo_pipelines', 'business_id,name'),
-      safeSelect<PipelineStatusRow>('kommo_pipeline_statuses', 'business_id,pipeline_id,name,type'),
-      safeSelect<UnsortedLeadRow>('kommo_unsorted_leads', 'created_at'),
-      safeSelect<UserRow>('kommo_users', 'business_id,name'),
+      safeSelectPaginated<LeadRow>('kommo_leads', 'pipeline_id,status_id,price,is_deleted,closed_at,created_at,responsible_user_id'),
+      safeSelectPaginated<PipelineRow>('kommo_pipelines', 'business_id,name'),
+      safeSelectPaginated<PipelineStatusRow>('kommo_pipeline_statuses', 'business_id,pipeline_id,name,type'),
+      safeSelectPaginated<UnsortedLeadRow>('kommo_unsorted_leads', 'created_at'),
+      safeSelectPaginated<UserRow>('kommo_users', 'business_id,name'),
     ]);
 
     const filteredLeads = leads.filter((lead) => isDateWithinRange(lead.created_at, startDate, endDate));
@@ -419,6 +456,14 @@ export default async function kommoLeadsInsightsHandler(req: VercelRequest, res:
 
     const pipelinesResult = Array.from(pipelineCounter.values()).sort((a, b) => b.total_leads - a.total_leads);
     const statusesResult = Array.from(statusCounter.values()).sort((a, b) => b.total_leads - a.total_leads);
+    const statusesByNameMap = new Map<string, StatusByNameInsight>();
+    for (const status of statusesResult) {
+      const statusName = status.status_name;
+      const existing = statusesByNameMap.get(statusName) ?? { status_name: statusName, total_leads: 0 };
+      existing.total_leads += status.total_leads;
+      statusesByNameMap.set(statusName, existing);
+    }
+    const statusesByNameResult = Array.from(statusesByNameMap.values()).sort((a, b) => b.total_leads - a.total_leads);
     const ownersResult = Array.from(ownerCounter.values()).sort((a, b) => b.total_leads - a.total_leads);
     const pipelinePerformanceResult = Array.from(pipelinePerformanceMap.values())
       .map((entry) => ({
@@ -448,6 +493,7 @@ export default async function kommoLeadsInsightsHandler(req: VercelRequest, res:
     const response: LeadsInsightsResponse = {
       pipelines: pipelinesResult,
       statuses: statusesResult,
+      statusesByName: statusesByNameResult,
       hourlyIncoming: hourlyIncomingResult,
       owners: ownersResult,
       filters: {
@@ -486,6 +532,7 @@ export default async function kommoLeadsInsightsHandler(req: VercelRequest, res:
       error: message,
       pipelines: [],
       statuses: [],
+      statusesByName: [],
       hourlyIncoming: [],
       owners: [],
       filters: {
