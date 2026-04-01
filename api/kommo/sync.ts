@@ -12,6 +12,8 @@ import {
 
 const SYNC_SECRET_HEADER = 'x-kommo-sync-secret';
 const SYNC_SECRET_ENV = 'KOMMO_SYNC_SECRET';
+const CUSTOM_FIELD_ENTITY_TYPES = ['leads', 'contacts', 'companies'] as const;
+type CustomFieldEntityType = typeof CUSTOM_FIELD_ENTITY_TYPES[number];
 
 // Todos los recursos disponibles en Kommo API v4
 // Algunos necesitan manejo especial (tags, custom_fields, links, notes) porque no siguen el patrón estándar de endpoints o necesitan parámetros adicionales.
@@ -249,6 +251,25 @@ function getPipelineStatusDedupeVersion(item: Record<string, unknown>) {
     description: item.description ?? null,
   });
 
+  return createHash('sha256').update(stableSeed).digest('hex');
+}
+
+function isCustomFieldEntityType(value: string): value is CustomFieldEntityType {
+  return (CUSTOM_FIELD_ENTITY_TYPES as readonly string[]).includes(value);
+}
+
+function getCustomFieldDedupeVersion(item: Record<string, unknown>) {
+  const updatedAt = item.updated_at;
+  if (updatedAt !== undefined && updatedAt !== null && String(updatedAt) !== '') {
+    return String(updatedAt);
+  }
+
+  const createdAt = item.created_at;
+  if (createdAt !== undefined && createdAt !== null && String(createdAt) !== '') {
+    return String(createdAt);
+  }
+
+  const stableSeed = JSON.stringify(item);
   return createHash('sha256').update(stableSeed).digest('hex');
 }
 
@@ -1094,6 +1115,92 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
       }
     }
 
+    if (selectedResource === 'custom_fields') {
+      const entityTypeParam = asSingleQueryParam(req.query.entity_type);
+      const customFieldIdParam = asSingleQueryParam(req.query.id);
+
+      if (entityTypeParam !== undefined && customFieldIdParam !== undefined) {
+        const entityTypeRaw = entityTypeParam.trim().toLowerCase();
+        const customFieldIdRaw = customFieldIdParam.trim();
+        const customFieldId = Number(customFieldIdRaw);
+
+        if (!isCustomFieldEntityType(entityTypeRaw)) {
+          return res.status(400).json({
+            error: 'El parámetro entity_type debe ser leads, contacts o companies para resource=custom_fields.',
+          });
+        }
+
+        if (!customFieldIdRaw || !Number.isInteger(customFieldId) || customFieldId <= 0) {
+          return res.status(400).json({
+            error: 'El parámetro id debe ser un número entero positivo para resource=custom_fields.',
+          });
+        }
+
+        const endpoint = `/api/v4/${entityTypeRaw}/custom_fields/${encodeURIComponent(String(customFieldId))}`;
+        const response = await fetch(`${freshConnection.account_base_url}${endpoint}`, {
+          method: 'GET',
+          headers: {
+            Authorization: `Bearer ${freshConnection.access_token}`,
+            'Content-Type': 'application/json',
+          },
+        });
+
+        if (response.status === 404) {
+          const raw = await response.text();
+          return res.status(404).json({
+            error: `Kommo custom_fields entity_type ${entityTypeRaw} id ${customFieldId} no encontrado (404).`,
+            resource: 'custom_fields',
+            entity_type: entityTypeRaw,
+            id: customFieldId,
+            details: raw,
+          });
+        }
+
+        if (!response.ok) {
+          const raw = await response.text();
+          throw new Error(`Kommo custom_field entity_type ${entityTypeRaw} id ${customFieldId} error (${response.status}): ${raw}`);
+        }
+
+        const customField = (await response.json()) as Record<string, unknown>;
+        const customFieldWithEntityType: Record<string, unknown> = {
+          ...customField,
+          entity_type: entityTypeRaw,
+        };
+
+        const dedupeVersion = getCustomFieldDedupeVersion(customFieldWithEntityType);
+        const dedupeKey = `custom_field:${entityTypeRaw}:${customFieldId}:${dedupeVersion}`;
+
+        const staged = await stageWebhookEvents(supabase, [
+          {
+            account_base_url: freshConnection.account_base_url,
+            event_type: RESOURCE_EVENT_TYPES.custom_fields,
+            payload: customFieldWithEntityType,
+            dedupe_key: dedupeKey,
+            status: 'pending',
+          },
+        ]);
+
+        const resources = [
+          {
+            resource: 'custom_fields',
+            pulled: 1,
+            staged,
+            cursorFrom: null,
+            cursorTo: null,
+            hasMore: false,
+          },
+        ];
+
+        return res.status(200).json({
+          success: true,
+          account: freshConnection.account_subdomain,
+          resources,
+          totalPulled: 1,
+          totalStaged: staged,
+        });
+      }
+    }
+
     const results: Array<{
       resource: string;
       pulled: number;
@@ -1105,7 +1212,18 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
 
     // Manejo especial para recursos que requieren iteración por entity_type (tags, custom_fields, notes) o por entidad (links).
     if (selectedResource === 'tags' || selectedResource === 'custom_fields' || selectedResource === 'notes') {
-      const entityTypes = ['leads', 'contacts', 'companies'];
+      const requestedEntityType = asSingleQueryParam(req.query.entity_type)?.trim().toLowerCase();
+      let entityTypes: string[] = ['leads', 'contacts', 'companies'];
+
+      if (selectedResource === 'custom_fields' && requestedEntityType) {
+        if (!isCustomFieldEntityType(requestedEntityType)) {
+          return res.status(400).json({
+            error: 'El parámetro entity_type debe ser leads, contacts o companies para resource=custom_fields.',
+          });
+        }
+        entityTypes = [requestedEntityType];
+      }
+
       const maxPagesParam = asSingleQueryParam(req.query.max_pages);
       const maxPages = maxPagesParam ? Math.min(50, parseInt(maxPagesParam, 10) || 5) : 5;
 
@@ -1143,7 +1261,11 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
         const rows: WebhookEventInsert[] = [];
         for (const item of items) {
           const itemWithEntityType = { ...item, entity_type: entityType };
-          const dedupeKey = `${selectedResource}:${entityType}:${String(item.id ?? '')}`;
+          const dedupeIdentity = String(item.id ?? '');
+          const dedupeVersion = selectedResource === 'custom_fields'
+            ? getCustomFieldDedupeVersion(itemWithEntityType)
+            : String(item.updated_at ?? item.created_at ?? createHash('sha256').update(JSON.stringify(itemWithEntityType)).digest('hex'));
+          const dedupeKey = `${selectedResource}:${entityType}:${dedupeIdentity}:${dedupeVersion}`;
           rows.push({
             account_base_url: freshConnection.account_base_url,
             event_type: eventType,

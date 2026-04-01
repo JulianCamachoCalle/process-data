@@ -426,17 +426,18 @@ function mapKommoCustomFieldToTable(payload: Record<string, unknown>) {
     entity_type: entityType,
     name: payload.name ?? null,
     code: payload.code ?? null,
-    field_type: payload.field_type ?? null,
+    type: payload.type ?? payload.field_type ?? null,
     sort: asNumber(payload.sort, 0) || null,
     is_predefined: payload.is_predefined ?? false,
-    is_required: payload.is_required ?? false,
     is_deletable: payload.is_deletable ?? true,
-    is_filter_enabled: payload.is_filter_enabled ?? false,
-    default_value: payload.default ?? null,
-    values: payload.values ?? null,
-    checkboxes: payload.checkboxes ?? null,
+    remind: payload.remind ?? null,
+    enums: payload.enums ?? null,
+    is_api_only: payload.is_api_only ?? null,
+    group_id: payload.group_id ?? null,
+    required_statuses: payload.required_statuses ?? null,
     created_at: createdAtTs ? new Date(createdAtTs * 1000).toISOString() : null,
     updated_at: updatedAtTs ? new Date(updatedAtTs * 1000).toISOString() : null,
+    raw_payload: payload,
   };
 }
 
@@ -994,7 +995,7 @@ async function processEvent(event: KommoEventRow) {
     const { error: upsertError } = await supabase.from('kommo_custom_fields' as never).upsert(
       mapped as never,
       {
-        onConflict: 'business_id',
+        onConflict: 'business_id,entity_type',
       },
     );
 
@@ -1310,7 +1311,7 @@ export default async function kommoProcessEventsHandler(req: VercelRequest, res:
           } else if (eventType === 'link.pull') {
             await processMapped('kommo_links', 'stable_id', mapKommoLinkToTable);
           } else if (eventType === 'custom_field.pull') {
-            await processMapped('kommo_custom_fields', 'business_id', mapKommoCustomFieldToTable);
+            await processMapped('kommo_custom_fields', 'business_id,entity_type', mapKommoCustomFieldToTable);
           } else if (eventType === 'webhook.pull') {
             await processMapped('kommo_webhooks', 'business_id', mapKommoWebhookConfigToTable);
           } else if (eventType === 'talk.pull') {
