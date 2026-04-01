@@ -1,6 +1,8 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createRequire } from 'node:module';
 import { z, ZodError } from 'zod';
+import { getSupabaseAdminClient } from './kommo/_shared.js';
+import { KOMMO_RESOURCE_CONFIG, type KommoResourceKey } from '../src/features/kommo/kommoResourceConfig.js';
 
 const require = createRequire(import.meta.url);
 const jwt = require('jsonwebtoken') as typeof import('jsonwebtoken');
@@ -15,6 +17,8 @@ import {
 const querySchema = z.object({
   name: z.string().min(1, 'El nombre de la hoja es obligatorio'),
 });
+
+type SortOrder = 'asc' | 'desc';
 
 const stableIdHeaderReadyBySheet = new Map<string, true>();
 const nextBusinessIdBySheet = new Map<string, number>();
@@ -131,6 +135,448 @@ function parseRowNumberHint(value: unknown): number | null {
 
   const parsed = Number(trimmed);
   return Number.isInteger(parsed) && parsed >= 2 ? parsed : null;
+}
+
+function asSingleQueryParam(value: string | string[] | undefined) {
+  return Array.isArray(value) ? value[0] : value;
+}
+
+function clampInt(value: unknown, fallback: number, min: number, max: number) {
+  const parsed = typeof value === 'string' ? Number.parseInt(value, 10) : typeof value === 'number' ? value : NaN;
+  const safe = Number.isFinite(parsed) ? parsed : fallback;
+  return Math.min(max, Math.max(min, safe));
+}
+
+function normalizeSortOrder(value: unknown): SortOrder {
+  return value === 'asc' ? 'asc' : 'desc';
+}
+
+function escapeOrValue(raw: string) {
+  return raw.replaceAll(',', ' ').trim();
+}
+
+function escapeLike(raw: string) {
+  return escapeOrValue(raw).replaceAll('\\', '\\\\');
+}
+
+function uniqueStrings(items: string[]) {
+  return Array.from(new Set(items.filter(Boolean)));
+}
+
+function hasColumn(config: (typeof KOMMO_RESOURCE_CONFIG)[KommoResourceKey], column: string) {
+  return uniqueStrings([config.primaryKey, ...config.listColumns, ...config.searchColumns]).includes(column);
+}
+
+type KommoRow = Record<string, unknown>;
+
+function toBusinessId(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return Math.trunc(value);
+  }
+
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  if (!/^\d+$/.test(trimmed)) return null;
+
+  const parsed = Number(trimmed);
+  return Number.isFinite(parsed) ? Math.trunc(parsed) : null;
+}
+
+function getStringField(row: KommoRow, key: string): string | null {
+  const value = row[key];
+  return typeof value === 'string' && value.trim() ? value : null;
+}
+
+async function fetchNameMapByBusinessId(
+  supabase: ReturnType<typeof getSupabaseAdminClient>,
+  table: string,
+  ids: Set<number>,
+) {
+  if (ids.size === 0) return new Map<number, string>();
+
+  const { data, error } = await supabase
+    .from(table as never)
+    .select('business_id,name' as never)
+    .in('business_id' as never, Array.from(ids) as never);
+
+  if (error || !Array.isArray(data)) {
+    return new Map<number, string>();
+  }
+
+  const map = new Map<number, string>();
+
+  for (const item of data as unknown[]) {
+    if (!item || typeof item !== 'object') continue;
+    const row = item as Record<string, unknown>;
+    const businessId = toBusinessId(row.business_id);
+    const name = getStringField(row, 'name');
+    if (businessId !== null && name) {
+      map.set(businessId, name);
+    }
+  }
+
+  return map;
+}
+
+function normalizeStatusEntries(rawStatuses: unknown): Array<{ id: number; name: string }> {
+  if (!Array.isArray(rawStatuses)) return [];
+
+  const normalized: Array<{ id: number; name: string }> = [];
+
+  for (const status of rawStatuses) {
+    if (!status || typeof status !== 'object') continue;
+    const row = status as Record<string, unknown>;
+    const statusId = toBusinessId(row.id ?? row.status_id);
+    const statusName = getStringField(row, 'name');
+
+    if (statusId !== null && statusName) {
+      normalized.push({ id: statusId, name: statusName });
+    }
+  }
+
+  return normalized;
+}
+
+async function fetchPipelineStatusMap(
+  supabase: ReturnType<typeof getSupabaseAdminClient>,
+  pipelineIds: Set<number>,
+) {
+  if (pipelineIds.size === 0) return new Map<string, string>();
+
+  const normalizedStatusMap = await fetchPipelineStatusMapFromNormalizedTable(supabase, pipelineIds);
+  const fallbackStatusMap = await fetchPipelineStatusMapFromPipelinesJson(supabase, pipelineIds);
+
+  const map = new Map<string, string>();
+
+  for (const [key, value] of fallbackStatusMap.entries()) {
+    map.set(key, value);
+  }
+
+  // Prefer normalized resource first; overwrite fallback when present.
+  for (const [key, value] of normalizedStatusMap.entries()) {
+    map.set(key, value);
+  }
+
+  return map;
+}
+
+async function fetchPipelineStatusMapFromNormalizedTable(
+  supabase: ReturnType<typeof getSupabaseAdminClient>,
+  pipelineIds: Set<number>,
+) {
+  const { data, error } = await supabase
+    .from('kommo_pipeline_statuses' as never)
+    .select('business_id,pipeline_id,name' as never)
+    .in('pipeline_id' as never, Array.from(pipelineIds) as never);
+
+  if (error || !Array.isArray(data)) {
+    return new Map<string, string>();
+  }
+
+  const map = new Map<string, string>();
+
+  for (const item of data as unknown[]) {
+    if (!item || typeof item !== 'object') continue;
+    const row = item as Record<string, unknown>;
+    const pipelineId = toBusinessId(row.pipeline_id);
+    const statusId = toBusinessId(row.business_id);
+    const statusName = getStringField(row, 'name');
+
+    if (pipelineId !== null && statusId !== null && statusName) {
+      map.set(`${pipelineId}:${statusId}`, statusName);
+    }
+  }
+
+  return map;
+}
+
+async function fetchPipelineStatusMapFromPipelinesJson(
+  supabase: ReturnType<typeof getSupabaseAdminClient>,
+  pipelineIds: Set<number>,
+) {
+  const { data, error } = await supabase
+    .from('kommo_pipelines' as never)
+    .select('business_id,statuses' as never)
+    .in('business_id' as never, Array.from(pipelineIds) as never);
+
+  if (error || !Array.isArray(data)) {
+    return new Map<string, string>();
+  }
+
+  const map = new Map<string, string>();
+
+  for (const item of data as unknown[]) {
+    if (!item || typeof item !== 'object') continue;
+    const row = item as Record<string, unknown>;
+    const pipelineId = toBusinessId(row.business_id);
+    if (pipelineId === null) continue;
+
+    for (const status of normalizeStatusEntries(row.statuses)) {
+      map.set(`${pipelineId}:${status.id}`, status.name);
+    }
+  }
+
+  return map;
+}
+
+const genericLeadNameRegex = /^Lead\s*#\d+$/i;
+
+function withFriendlyLeadName(row: KommoRow): KommoRow {
+  if (typeof row.name === 'string' && genericLeadNameRegex.test(row.name.trim())) {
+    return { ...row, name: 'Lead sin nombre' };
+  }
+  return row;
+}
+
+function getKommoListColumns(config: (typeof KOMMO_RESOURCE_CONFIG)[KommoResourceKey]): string[] {
+  switch (config.key) {
+    case 'leads':
+      return [
+        'name',
+        'price',
+        'status_name',
+        'pipeline_name',
+        'responsible_user_name',
+        'closed_at',
+        'closest_task_at',
+        'is_deleted',
+        'updated_at_db',
+      ];
+    case 'contacts':
+    case 'companies':
+    case 'tasks':
+      return config.listColumns.map((column) =>
+        column === 'responsible_user_id' ? 'responsible_user_name' : column,
+      );
+    case 'unsorted':
+      return config.listColumns
+        .map((column) => {
+          if (column === 'pipeline_id') return 'pipeline_name';
+          if (column === 'status_id') return 'status_name';
+          if (column === 'source_id') return 'source_name';
+          if (column === 'lead_id') return 'lead_name';
+          if (column === 'contact_id') return 'contact_name';
+          if (column === 'company_id') return 'company_name';
+          if (column === 'responsible_user_id') return 'responsible_user_name';
+          return column;
+        })
+        .filter((column, index, all) => all.indexOf(column) === index);
+    case 'sources':
+      return config.listColumns.map((column) => (column === 'pipeline_id' ? 'pipeline_name' : column));
+    default:
+      return uniqueStrings([config.primaryKey, ...config.listColumns]);
+  }
+}
+
+async function enrichKommoRows(
+  supabase: ReturnType<typeof getSupabaseAdminClient>,
+  rows: KommoRow[],
+  options?: { normalizeLeadName?: boolean },
+) {
+  if (rows.length === 0) return rows;
+
+  const responsibleUserIds = new Set<number>();
+  const pipelineIds = new Set<number>();
+  const sourceIds = new Set<number>();
+  const leadIds = new Set<number>();
+  const contactIds = new Set<number>();
+  const companyIds = new Set<number>();
+
+  for (const row of rows) {
+    const responsibleUserId = toBusinessId(row.responsible_user_id);
+    const pipelineId = toBusinessId(row.pipeline_id);
+    const sourceId = toBusinessId(row.source_id);
+    const leadId = toBusinessId(row.lead_id);
+    const contactId = toBusinessId(row.contact_id);
+    const companyId = toBusinessId(row.company_id);
+
+    if (responsibleUserId !== null) responsibleUserIds.add(responsibleUserId);
+    if (pipelineId !== null) pipelineIds.add(pipelineId);
+    if (sourceId !== null) sourceIds.add(sourceId);
+    if (leadId !== null) leadIds.add(leadId);
+    if (contactId !== null) contactIds.add(contactId);
+    if (companyId !== null) companyIds.add(companyId);
+  }
+
+  const [userNames, pipelineNames, sourceNames, statusNames, leadNames, contactNames, companyNames] = await Promise.all([
+    fetchNameMapByBusinessId(supabase, 'kommo_users', responsibleUserIds),
+    fetchNameMapByBusinessId(supabase, 'kommo_pipelines', pipelineIds),
+    fetchNameMapByBusinessId(supabase, 'kommo_sources', sourceIds),
+    fetchPipelineStatusMap(supabase, pipelineIds),
+    fetchNameMapByBusinessId(supabase, 'kommo_leads', leadIds),
+    fetchNameMapByBusinessId(supabase, 'kommo_contacts', contactIds),
+    fetchNameMapByBusinessId(supabase, 'kommo_companies', companyIds),
+  ]);
+
+  return rows.map((row) => {
+    const enriched: KommoRow = { ...row };
+
+    const responsibleUserId = toBusinessId(row.responsible_user_id);
+    if (responsibleUserId !== null) {
+      enriched.responsible_user_name = userNames.get(responsibleUserId) ?? null;
+    }
+
+    const pipelineId = toBusinessId(row.pipeline_id);
+    if (pipelineId !== null) {
+      enriched.pipeline_name = pipelineNames.get(pipelineId) ?? null;
+    }
+
+    const sourceId = toBusinessId(row.source_id);
+    if (sourceId !== null) {
+      enriched.source_name = sourceNames.get(sourceId) ?? null;
+    }
+
+    const statusId = toBusinessId(row.status_id);
+    if (pipelineId !== null && statusId !== null) {
+      enriched.status_name = statusNames.get(`${pipelineId}:${statusId}`) ?? null;
+    }
+
+    const leadId = toBusinessId(row.lead_id);
+    if (leadId !== null) {
+      enriched.lead_name = leadNames.get(leadId) ?? null;
+    }
+
+    const contactId = toBusinessId(row.contact_id);
+    if (contactId !== null) {
+      enriched.contact_name = contactNames.get(contactId) ?? null;
+    }
+
+    const companyId = toBusinessId(row.company_id);
+    if (companyId !== null) {
+      enriched.company_name = companyNames.get(companyId) ?? null;
+    }
+
+    return options?.normalizeLeadName ? withFriendlyLeadName(enriched) : enriched;
+  });
+}
+
+async function handleKommoGet(req: VercelRequest, res: VercelResponse) {
+  const resourceParam = asSingleQueryParam(req.query.resource);
+  const resourceKey = resourceParam?.trim().toLowerCase() as KommoResourceKey | undefined;
+  const config = resourceKey ? KOMMO_RESOURCE_CONFIG[resourceKey] : undefined;
+
+  if (!resourceKey || !config) {
+    return res.status(400).json({
+      success: false,
+      error: 'Parámetro resource inválido',
+      page: 1,
+      pageSize: 0,
+      total: 0,
+      rows: [],
+      columns: [],
+    });
+  }
+
+  const page = clampInt(asSingleQueryParam(req.query.page), 1, 1, 1_000_000);
+  const pageSize = clampInt(asSingleQueryParam(req.query.pageSize), 50, 1, 200);
+  const order = normalizeSortOrder(asSingleQueryParam(req.query.order));
+
+  const sortParam = asSingleQueryParam(req.query.sort);
+  const sortCandidate = typeof sortParam === 'string' && sortParam.trim() ? sortParam.trim() : config.defaultSort;
+  const sort = config.sortColumns.includes(sortCandidate) ? sortCandidate : config.defaultSort;
+
+  const qParam = asSingleQueryParam(req.query.q);
+  const qRaw = typeof qParam === 'string' ? qParam.trim() : '';
+  const q = qRaw ? escapeLike(qRaw) : '';
+
+  const fullParam = asSingleQueryParam(req.query.full);
+  const full = fullParam === 'true' || fullParam === '1';
+
+  const idParam = asSingleQueryParam(req.query.id);
+  const businessIdParam = asSingleQueryParam(req.query.business_id);
+  const stableIdParam = asSingleQueryParam(req.query.stable_id);
+  const primaryKeyValue =
+    (config.primaryKey === 'business_id' ? (businessIdParam ?? idParam) : (stableIdParam ?? idParam)) ?? null;
+
+  try {
+    const supabase = getSupabaseAdminClient();
+
+    if (primaryKeyValue !== null && String(primaryKeyValue).trim()) {
+      const keyValue = String(primaryKeyValue).trim();
+      const selectColumns = full ? '*' : uniqueStrings([config.primaryKey, ...config.listColumns]).join(',');
+      const { data, error } = await supabase
+        .from(config.table as never)
+        .select(selectColumns as never)
+        .eq(config.primaryKey as never, keyValue as never)
+        .limit(1);
+
+      if (error) {
+        return res.status(500).json({ success: false, error: error.message || 'Error consultando datos' });
+      }
+
+      const row = (data as unknown[] | null)?.[0] ?? null;
+      const enrichedRows = row && typeof row === 'object' ? await enrichKommoRows(supabase, [row as KommoRow]) : [];
+      const enrichedRow = enrichedRows[0] ?? null;
+      const columns =
+        enrichedRow && typeof enrichedRow === 'object' ? Object.keys(enrichedRow as Record<string, unknown>) : [];
+
+      return res.status(200).json({
+        success: true,
+        resource: config.key,
+        page: 1,
+        pageSize: 1,
+        total: enrichedRow ? 1 : 0,
+        rows: enrichedRow ? [enrichedRow] : [],
+        columns,
+      });
+    }
+
+    const from = (page - 1) * pageSize;
+    const to = from + pageSize - 1;
+    const listSelect = uniqueStrings([config.primaryKey, ...config.listColumns]).join(',');
+
+    let query = supabase
+      .from(config.table as never)
+      .select(listSelect as never, { count: 'exact' })
+      .order(sort as never, { ascending: order === 'asc' })
+      .range(from, to);
+
+    if (q) {
+      const filters: string[] = [];
+      const asNumber = Number(qRaw);
+      if (Number.isFinite(asNumber) && Number.isInteger(asNumber)) {
+        if (hasColumn(config, 'business_id')) filters.push(`business_id.eq.${asNumber}`);
+        if (hasColumn(config, 'from_entity_id')) filters.push(`from_entity_id.eq.${asNumber}`);
+        if (hasColumn(config, 'to_entity_id')) filters.push(`to_entity_id.eq.${asNumber}`);
+        if (hasColumn(config, 'entity_id')) filters.push(`entity_id.eq.${asNumber}`);
+        if (hasColumn(config, 'element_id')) filters.push(`element_id.eq.${asNumber}`);
+      }
+
+      for (const col of config.searchColumns) {
+        filters.push(`${col}.ilike.%${q}%`);
+      }
+
+      if (filters.length) {
+        query = query.or(filters.join(','));
+      }
+    }
+
+    const { data, error, count } = await query;
+    if (error) {
+      return res.status(500).json({ success: false, error: error.message || 'Error consultando datos' });
+    }
+
+    const rows = await enrichKommoRows(
+      supabase,
+      ((data ?? []) as unknown[]).filter((row): row is KommoRow => !!row && typeof row === 'object'),
+      { normalizeLeadName: config.key === 'leads' },
+    );
+
+    return res.status(200).json({
+      success: true,
+      resource: config.key,
+      page,
+      pageSize,
+      total: count ?? 0,
+      rows,
+      columns: getKommoListColumns(config),
+    });
+  } catch (error: unknown) {
+    return res.status(500).json({
+      success: false,
+      error: error instanceof Error ? error.message : 'Error interno del servidor',
+    });
+  }
 }
 
 async function ensureStableIdHeader(
@@ -282,6 +728,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     if (req.method === 'GET') {
+      if (name.trim().toUpperCase() === 'KOMMO') {
+        return handleKommoGet(req, res);
+      }
+
       const startedAt = Date.now();
       const data = await getGoogleSheet(name);
       console.debug('[sheet:get] ok', {

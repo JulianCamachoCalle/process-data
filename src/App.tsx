@@ -1,11 +1,13 @@
 import { Routes, Route, Navigate, useNavigate, useParams } from 'react-router-dom';
 import { useEffect, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
+import { Menu } from 'lucide-react';
 import { Sidebar } from './components/Sidebar';
 import { SheetView } from './components/SheetView';
 import { DashboardOverview } from './features/dashboard/DashboardOverview';
 import { Login } from './features/auth/Login';
-import { KommoSyncPanel } from './features/kommo/KommoSyncPanel';
+import { KommoSyncPanel } from './features/kommo/sync/KommoSyncPanel';
+import { KommoExplorer } from './features/kommo/explorer/KommoExplorer';
 import { prefetchSheetData } from './hooks/useSheetData';
 import { isSupabaseConfigured, supabase } from './lib/supabase';
 
@@ -72,6 +74,28 @@ function Layout() {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const [showSecretPanel, setShowSecretPanel] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const persisted = window.localStorage.getItem('sidebarCollapsed');
+    setSidebarCollapsed(persisted === 'true');
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    window.localStorage.setItem('sidebarCollapsed', String(sidebarCollapsed));
+  }, [sidebarCollapsed]);
+
+  useEffect(() => {
+    if (!mobileSidebarOpen) return;
+    const originalOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = originalOverflow;
+    };
+  }, [mobileSidebarOpen]);
 
   const prefetchSheet = (sheetName: string) => {
     void prefetchSheetData(queryClient, sheetName);
@@ -94,6 +118,14 @@ function Layout() {
 
   return (
     <div className="flex h-screen bg-transparent overflow-hidden text-gray-900 font-sans selection:bg-red-100 selection:text-red-900">
+      {mobileSidebarOpen && (
+        <button
+          aria-label="Cerrar menú lateral"
+          className="fixed inset-0 z-30 bg-black/45 md:hidden"
+          onClick={() => setMobileSidebarOpen(false)}
+        />
+      )}
+
       <Sidebar
         sheets={SHEETS}
         prefetchHandlers={{
@@ -101,12 +133,26 @@ function Layout() {
           onSheetFocus: prefetchSheet,
         }}
         onSecretClick={() => setShowSecretPanel(true)}
+        collapsed={sidebarCollapsed}
+        isMobileOpen={mobileSidebarOpen}
+        onToggleCollapsed={() => setSidebarCollapsed((prev) => !prev)}
+        onCloseMobile={() => setMobileSidebarOpen(false)}
+        onNavigate={() => setMobileSidebarOpen(false)}
       />
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden bg-gradient-to-b from-white/90 via-white/75 to-white/95 z-10 relative backdrop-blur-sm">
         <header className="h-20 border-b border-gray-200/80 flex items-center justify-between px-8 bg-white/75 backdrop-blur-md sticky top-0 z-20 shadow-[0_10px_30px_-20px_rgba(15,23,42,0.45)]">
-          <div>
-            <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-[0.16em]">Centro de Control</h2>
-            <p className="text-xs text-gray-400 mt-1">Panel administrativo logístico</p>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => setMobileSidebarOpen((prev) => !prev)}
+              className="md:hidden inline-flex items-center justify-center h-10 w-10 rounded-xl border border-gray-300 bg-white/90 text-gray-700 hover:bg-gray-100"
+              aria-label="Abrir menú lateral"
+            >
+              <Menu size={18} />
+            </button>
+            <div>
+              <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-[0.16em]">Centro de Control</h2>
+              <p className="text-xs text-gray-400 mt-1">Panel administrativo logístico</p>
+            </div>
           </div>
           <button 
             onClick={handleLogout}
@@ -120,6 +166,8 @@ function Layout() {
             <Routes>
               <Route path="/" element={<DashboardOverview />} />
               <Route path="/sheet/:sheetName" element={<SheetRouteWrapper />} />
+              <Route path="/kommo" element={<KommoExplorer />} />
+              <Route path="/kommo/:resource" element={<KommoExplorer />} />
             </Routes>
           </div>
         </main>
