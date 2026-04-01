@@ -351,17 +351,27 @@ function mapKommoCallToTable(payload: Record<string, unknown>) {
 
 // INSERT MISSING FUNCTIONS HERE
 function mapKommoUnsortedLeadToTable(payload: Record<string, unknown>) {
-  const leadId = asNumber(payload.id, 0);
+  // Unsorted lead payloads can come in different shapes:
+  // - Some responses include an `id` directly
+  // - Others use `uid` and embed the linked lead id under `_embedded.leads[0].id`
+  const embedded = payload._embedded as { leads?: Array<Record<string, unknown>> } | undefined;
+  const embeddedLeadId = asNumber(embedded?.leads?.[0]?.id, 0);
+
+  const leadId = asNumber(payload.id, 0) || embeddedLeadId;
   if (!leadId) {
     return null;
   }
 
-  const originalCreationTs = asNumber(payload.original_creation_date, 0);
-  const createdAtTs = asNumber(payload.created_at, 0);
-  const updatedAtTs = asNumber(payload.updated_at, 0);
+  const uid = String(payload.uid ?? '');
+
+  const originalCreationTs = asUnixSeconds(
+    payload.original_creation_date ?? (payload.metadata as Record<string, unknown> | undefined)?.received_at,
+  );
+  const createdAtTs = asUnixSeconds(payload.created_at);
+  const updatedAtTs = asUnixSeconds(payload.updated_at);
 
   return {
-    stable_id: `kommo-unsorted-${leadId}`,
+    stable_id: `kommo-unsorted-${uid || leadId}`,
     business_id: leadId,
     name: payload.name ?? null,
     price: asNumber(payload.price, 0) || null,
@@ -373,7 +383,8 @@ function mapKommoUnsortedLeadToTable(payload: Record<string, unknown>) {
     original_creation_date: originalCreationTs ? new Date(originalCreationTs * 1000).toISOString() : null,
     created_at: createdAtTs ? new Date(createdAtTs * 1000).toISOString() : null,
     updated_at: updatedAtTs ? new Date(updatedAtTs * 1000).toISOString() : null,
-    custom_fields_values: payload.custom_fields_values ?? null,
+    // Keep raw payload for analysis/debugging since unsorted objects include rich metadata.
+    custom_fields_values: payload.custom_fields_values ?? payload ?? null,
   };
 }
 
