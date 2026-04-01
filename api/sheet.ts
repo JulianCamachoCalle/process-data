@@ -2,7 +2,7 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createRequire } from 'node:module';
 import { z, ZodError } from 'zod';
 import { getSupabaseAdminClient } from './kommo/_shared.js';
-import { KOMMO_RESOURCE_CONFIG, type KommoResourceKey } from '../src/features/kommo/kommoResourceConfig.js';
+import { KOMMO_RESOURCE_CONFIG, type KommoResourceKey } from '../src/features/kommo/config/kommoResourceConfig.js';
 
 const require = createRequire(import.meta.url);
 const jwt = require('jsonwebtoken') as typeof import('jsonwebtoken');
