@@ -617,7 +617,7 @@ function mapKommoCustomFieldToTable(payload: Record<string, unknown>) {
 }
 
 function mapKommoCustomFieldGroupToTable(payload: Record<string, unknown>) {
-  const groupId = asNumber(payload.id, 0);
+  const groupId = asNullableText(payload.id);
   if (!groupId) {
     return null;
   }

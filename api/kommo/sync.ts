@@ -266,6 +266,30 @@ function getPipelineStatusDedupeVersion(item: Record<string, unknown>) {
   return createHash('sha256').update(stableSeed).digest('hex');
 }
 
+async function parseJsonResponseSafe(
+  response: Response,
+  context: string,
+): Promise<Record<string, unknown>> {
+  const raw = await response.text();
+
+  if (response.status === 204 || raw.trim().length === 0) {
+    return {};
+  }
+
+  try {
+    return JSON.parse(raw) as Record<string, unknown>;
+  } catch (error) {
+    const previewLimit = 500;
+    const preview = raw.length > previewLimit
+      ? `${raw.slice(0, previewLimit)}...`
+      : raw;
+    const reason = error instanceof Error ? error.message : String(error);
+    throw new Error(
+      `Kommo ${context} returned invalid JSON (${response.status}): ${reason}. Body preview: ${preview}`,
+    );
+  }
+}
+
 function isCustomFieldEntityType(value: string): value is CustomFieldEntityType {
   return (CUSTOM_FIELD_ENTITY_TYPES as readonly string[]).includes(value);
 }
@@ -478,7 +502,7 @@ async function fetchAllPages(
       throw new Error(`Kommo ${resource} page ${page} error (${response.status}): ${raw}`);
     }
 
-    const payload = (await response.json()) as Record<string, unknown>;
+    const payload = await parseJsonResponseSafe(response, `${resource} page ${page}`);
     const items = ((payload._embedded as Record<string, unknown> | undefined)?.[embeddedKey] as Array<Record<string, unknown>>) ?? [];
 
     allItems.push(...items);
@@ -521,7 +545,7 @@ async function fetchEntityTypeTags(
       throw new Error(`Kommo tags (${entityType}) page ${page} error (${response.status}): ${raw}`);
     }
 
-    const payload = (await response.json()) as Record<string, unknown>;
+    const payload = await parseJsonResponseSafe(response, `tags (${entityType}) page ${page}`);
     const items = (payload._embedded as Record<string, unknown> | undefined)?.tags as Array<Record<string, unknown>> ?? [];
     allItems.push(...items);
 
@@ -562,7 +586,7 @@ async function fetchEntityTypeCustomFields(
       throw new Error(`Kommo custom_fields (${entityType}) page ${page} error (${response.status}): ${raw}`);
     }
 
-    const payload = (await response.json()) as Record<string, unknown>;
+    const payload = await parseJsonResponseSafe(response, `custom_fields (${entityType}) page ${page}`);
     const items = (payload._embedded as Record<string, unknown> | undefined)?.custom_fields as Array<Record<string, unknown>> ?? [];
     allItems.push(...items);
 
@@ -602,7 +626,7 @@ async function fetchEntityTypeCustomFieldGroups(
       throw new Error(`Kommo custom_field_groups (${entityType}) page ${page} error (${response.status}): ${raw}`);
     }
 
-    const payload = (await response.json()) as Record<string, unknown>;
+    const payload = await parseJsonResponseSafe(response, `custom_field_groups (${entityType}) page ${page}`);
     const items = (payload._embedded as Record<string, unknown> | undefined)?.custom_field_groups as Array<Record<string, unknown>> ?? [];
     allItems.push(...items);
 
@@ -642,7 +666,7 @@ async function fetchCatalogCustomFields(
       throw new Error(`Kommo custom_fields (catalogs/${listId}) page ${page} error (${response.status}): ${raw}`);
     }
 
-    const payload = (await response.json()) as Record<string, unknown>;
+    const payload = await parseJsonResponseSafe(response, `custom_fields (catalogs/${listId}) page ${page}`);
     const items = (payload._embedded as Record<string, unknown> | undefined)?.custom_fields as Array<Record<string, unknown>> ?? [];
     allItems.push(...items);
 
@@ -683,7 +707,7 @@ async function fetchEntityNotes(
       throw new Error(`Kommo notes (${entityType}) page ${page} error (${response.status}): ${raw}`);
     }
 
-    const payload = (await response.json()) as Record<string, unknown>;
+    const payload = await parseJsonResponseSafe(response, `notes (${entityType}) page ${page}`);
     const items = (payload._embedded as Record<string, unknown> | undefined)?.notes as Array<Record<string, unknown>> ?? [];
     allItems.push(...items);
 
@@ -725,7 +749,7 @@ async function fetchEntityLinks(
       throw new Error(`Kommo links (${entity}/${entityId}) page ${page} error (${response.status}): ${raw}`);
     }
 
-    const payload = (await response.json()) as Record<string, unknown>;
+    const payload = await parseJsonResponseSafe(response, `links (${entity}/${entityId}) page ${page}`);
     const items = (payload._embedded as Record<string, unknown> | undefined)?.links as Array<Record<string, unknown>> ?? [];
     allItems.push(...items);
 
@@ -771,7 +795,7 @@ async function fetchPipelineStatusesPages(
       throw new Error(`Kommo pipeline_statuses (${pipelineId}) page ${page} error (${response.status}): ${raw}`);
     }
 
-    const payload = (await response.json()) as Record<string, unknown>;
+    const payload = await parseJsonResponseSafe(response, `pipeline_statuses (${pipelineId}) page ${page}`);
     const items = (payload._embedded as Record<string, unknown> | undefined)?.statuses as Array<Record<string, unknown>> ?? [];
     allItems.push(...items);
 
@@ -812,7 +836,7 @@ async function fetchCatalogElementsPages(
       throw new Error(`Kommo catalog_elements (${catalogId}) page ${page} error (${response.status}): ${raw}`);
     }
 
-    const payload = (await response.json()) as Record<string, unknown>;
+    const payload = await parseJsonResponseSafe(response, `catalog_elements (${catalogId}) page ${page}`);
     const items = (payload._embedded as Record<string, unknown> | undefined)?.elements as Array<Record<string, unknown>> ?? [];
     allItems.push(...items);
 
@@ -899,7 +923,7 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
           throw new Error(`Kommo lead id ${leadId} error (${response.status}): ${raw}`);
         }
 
-        const lead = (await response.json()) as Record<string, unknown>;
+        const lead = await parseJsonResponseSafe(response, `lead id ${leadId}`);
         const dedupeVersion = String(lead.updated_at ?? lead.created_at ?? '');
         const dedupeKey = `lead:${leadId}:${dedupeVersion}`;
 
@@ -979,7 +1003,7 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
           throw new Error(`Kommo user id ${userId} error (${response.status}): ${raw}`);
         }
 
-        const user = (await response.json()) as Record<string, unknown>;
+        const user = await parseJsonResponseSafe(response, `user id ${userId}`);
         const dedupeVersion = getUserDedupeVersion(user);
         const dedupeKey = `user:${userId}:${dedupeVersion}`;
 
@@ -1059,7 +1083,7 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
           throw new Error(`Kommo role id ${roleId} error (${response.status}): ${raw}`);
         }
 
-        const role = (await response.json()) as Record<string, unknown>;
+        const role = await parseJsonResponseSafe(response, `role id ${roleId}`);
         const dedupeVersion = getRoleDedupeVersion(role);
         const dedupeKey = `role:${roleId}:${dedupeVersion}`;
 
@@ -1134,7 +1158,7 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
           throw new Error(`Kommo task id ${taskId} error (${response.status}): ${raw}`);
         }
 
-        const task = (await response.json()) as Record<string, unknown>;
+        const task = await parseJsonResponseSafe(response, `task id ${taskId}`);
         const dedupeVersion = getTaskDedupeVersion(task);
         const dedupeKey = `task:${taskId}:${dedupeVersion}`;
 
@@ -1209,7 +1233,7 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
           throw new Error(`Kommo catalog id ${catalogId} error (${response.status}): ${raw}`);
         }
 
-        const catalog = (await response.json()) as Record<string, unknown>;
+        const catalog = await parseJsonResponseSafe(response, `catalog id ${catalogId}`);
         const dedupeVersion = String(catalog.updated_at ?? catalog.created_at ?? '');
         const dedupeKey = `catalog:${catalogId}:${dedupeVersion}`;
 
@@ -1289,7 +1313,7 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
           throw new Error(`Kommo contact id ${contactId} error (${response.status}): ${raw}`);
         }
 
-        const contact = (await response.json()) as Record<string, unknown>;
+        const contact = await parseJsonResponseSafe(response, `contact id ${contactId}`);
         const dedupeVersion = String(contact.updated_at ?? contact.created_at ?? '');
         const dedupeKey = `contact:${contactId}:${dedupeVersion}`;
 
@@ -1369,7 +1393,7 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
           throw new Error(`Kommo company id ${companyId} error (${response.status}): ${raw}`);
         }
 
-        const company = (await response.json()) as Record<string, unknown>;
+        const company = await parseJsonResponseSafe(response, `company id ${companyId}`);
         const dedupeVersion = String(company.updated_at ?? company.created_at ?? '');
         const dedupeKey = `company:${companyId}:${dedupeVersion}`;
 
@@ -1444,7 +1468,7 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
           throw new Error(`Kommo loss_reason id ${lossReasonId} error (${response.status}): ${raw}`);
         }
 
-        const lossReason = (await response.json()) as Record<string, unknown>;
+        const lossReason = await parseJsonResponseSafe(response, `loss_reason id ${lossReasonId}`);
         const dedupeVersion = String(lossReason.updated_at ?? lossReason.created_at ?? '');
         const dedupeKey = `loss_reason:${lossReasonId}:${dedupeVersion}`;
 
@@ -1509,7 +1533,7 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
           throw new Error(`Kommo pipeline id ${pipelineId} error (${response.status}): ${raw}`);
         }
 
-        const pipeline = (await response.json()) as Record<string, unknown>;
+        const pipeline = await parseJsonResponseSafe(response, `pipeline id ${pipelineId}`);
         const dedupeVersion = getPipelineDedupeVersion(pipeline);
         const dedupeKey = `pipeline:${pipelineId}:${dedupeVersion}`;
 
@@ -1592,7 +1616,7 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
           throw new Error(`Kommo custom_field catalogs list_id ${listId} id ${customFieldId} error (${response.status}): ${raw}`);
         }
 
-        const customField = (await response.json()) as Record<string, unknown>;
+        const customField = await parseJsonResponseSafe(response, `custom_field catalogs list_id ${listId} id ${customFieldId}`);
         const customFieldWithContext: Record<string, unknown> = {
           ...customField,
           entity_type: 'catalogs',
@@ -1675,7 +1699,7 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
           throw new Error(`Kommo custom_field entity_type ${entityTypeRaw} id ${customFieldId} error (${response.status}): ${raw}`);
         }
 
-        const customField = (await response.json()) as Record<string, unknown>;
+        const customField = await parseJsonResponseSafe(response, `custom_field entity_type ${entityTypeRaw} id ${customFieldId}`);
         const customFieldWithEntityType: Record<string, unknown> = {
           ...customField,
           entity_type: entityTypeRaw,
@@ -1767,7 +1791,7 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
           throw new Error(`Kommo custom_field_group entity_type ${entityTypeRaw} id ${groupId} error (${response.status}): ${raw}`);
         }
 
-        const group = (await response.json()) as Record<string, unknown>;
+        const group = await parseJsonResponseSafe(response, `custom_field_group entity_type ${entityTypeRaw} id ${groupId}`);
         const groupWithEntityType: Record<string, unknown> = {
           ...group,
           entity_type: entityTypeRaw,
@@ -2297,7 +2321,7 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
           throw new Error(`Kommo pipeline_status pipeline_id ${pipelineId} id ${statusId} error (${response.status}): ${raw}`);
         }
 
-        const status = (await response.json()) as Record<string, unknown>;
+        const status = await parseJsonResponseSafe(response, `pipeline_status pipeline_id ${pipelineId} id ${statusId}`);
         const statusWithPipeline: Record<string, unknown> = {
           ...status,
           pipeline_id: Number(status.pipeline_id ?? pipelineId) || pipelineId,
@@ -2470,7 +2494,7 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
           throw new Error(`Kommo catalog_elements (${listId}/${elementId}) error (${response.status}): ${raw}`);
         }
 
-        const item = (await response.json()) as Record<string, unknown>;
+        const item = await parseJsonResponseSafe(response, `catalog_elements (${listId}/${elementId})`);
         const normalizedElement: Record<string, unknown> = {
           ...item,
           catalog_id: Number(item.catalog_id ?? listId) || listId,
@@ -2624,7 +2648,7 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
           throw new Error(`Kommo unsorted uid ${uid} error (${response.status}): ${raw}`);
         }
 
-        const item = (await response.json()) as Record<string, unknown>;
+        const item = await parseJsonResponseSafe(response, `unsorted uid ${uid}`);
         const dedupeIdentity = String(item.uid ?? uid);
         const dedupeVersion = String(item.created_at ?? item.updated_at ?? '');
         const dedupeKey = `unsorted:${dedupeIdentity}:${dedupeVersion}`;
@@ -2723,7 +2747,7 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
         throw new Error(`Kommo unsorted summary error (${response.status}): ${raw}`);
       }
 
-      const summaryPayload = (await response.json()) as Record<string, unknown>;
+      const summaryPayload = await parseJsonResponseSafe(response, 'unsorted summary');
 
       const scopeSeed = JSON.stringify({
         account_base_url: freshConnection.account_base_url,
