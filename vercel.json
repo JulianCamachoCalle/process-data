@@ -9,11 +9,6 @@
       "schedule": "0 2 * * *"
     },
     {
-      "path": "/api/cron/kommo-process-events?loop=1&limit=120",
-      "schedule": "*/5 2-5 * * *"
-    },
-
-    {
       "path": "/api/cron/kommo-sync?resource=leads&max_pages=20",
       "schedule": "5 2 * * *"
     },
@@ -103,6 +98,10 @@
     {
       "path": "/api/cron/kommo-sync?resource=sources&max_pages=5",
       "schedule": "55 5 * * *"
+    },
+    {
+      "path": "/api/cron/kommo-process-events?loop=1&limit=120",
+      "schedule": "58 5 * * *"
     }
   ]
 }
