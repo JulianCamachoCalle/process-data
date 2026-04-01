@@ -1,6 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createHash } from 'node:crypto';
-import { getSupabaseAdminClient, isSecretAuthorized } from './_shared';
+import { getSupabaseAdminClient, isSecretAuthorized } from './_shared.js';
 
 const HEADER_SECRET = 'x-kommo-webhook-secret';
 const ENV_SECRET = 'KOMMO_WEBHOOK_SECRET';

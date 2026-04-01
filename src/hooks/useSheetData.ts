@@ -571,6 +571,10 @@ function getTextValueFromRowData(rowData: Record<string, unknown>, config: BaseS
 }
 
 function triggerOutboxSyncBestEffort() {
+  if (import.meta.env.DEV && import.meta.env.VITE_ENABLE_OUTBOX_SYNC_IN_DEV !== 'true') {
+    return;
+  }
+
   const now = Date.now();
 
   // Evita disparar demasiados POST seguidos en operaciones encadenadas.

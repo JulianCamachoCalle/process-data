@@ -5,6 +5,7 @@ import { formatCurrencyPen, formatNumberEs, normalizeText, parseDateValue, parse
 
 type Row = Record<string, unknown>;
 
+// Función para encontrar la primera columna que coincida con alguna de las opciones dadas, ignorando mayúsculas, espacios y caracteres especiales.
 function getColumnByCandidates(columns: string[], candidates: string[]) {
   return (
     columns.find((column) => {
@@ -14,16 +15,19 @@ function getColumnByCandidates(columns: string[], candidates: string[]) {
   );
 }
 
+// Función para obtener un valor de una fila y columna dada, devolviendo una cadena vacía si la columna no existe o el valor es nulo/indefinido.
 function getStringValue(row: Row, column: string | null) {
   if (!column) return '';
   return String(row[column] ?? '').trim();
 }
 
+// Función para obtener un valor numérico de una fila y columna dada, devolviendo 0 si la columna no existe o el valor no es un número válido.
 function getNumericValue(row: Row, column: string | null) {
   if (!column) return 0;
   return parseNumericValue(row[column]) ?? 0;
 }
 
+// Función para filtrar filas por un rango de fechas en una columna específica. Si no se proporciona una columna de fecha o ambos límites del rango están vacíos, devuelve las filas sin filtrar.
 function filterRowsByRange(rows: Row[], dateColumn: string | null, from: string, to: string) {
   if (!dateColumn || (!from && !to)) return rows;
 
@@ -47,11 +51,13 @@ function filterRowsByRange(rows: Row[], dateColumn: string | null, from: string,
   });
 }
 
+// Función para realizar una división segura, devolviendo 0 si el denominador es 0 o no es un número válido.
 function safeDivide(numerator: number, denominator: number) {
   if (!denominator) return 0;
   return numerator / denominator;
 }
 
+// Función para encontrar el valor más frecuente en un array de strings, ignorando mayúsculas, espacios y caracteres especiales. Devuelve una cadena vacía si no hay valores válidos.
 function getMostFrequent(values: string[]) {
   const count = new Map<string, number>();
 
@@ -73,6 +79,7 @@ function getMostFrequent(values: string[]) {
   return winner;
 }
 
+// Función para encontrar el ID de negocio de tipo de recojo basado en etiquetas candidatas, buscando en las filas de la hoja de "TIPO DE RECOJO". Devuelve null si no encuentra una coincidencia o si no puede determinar las columnas relevantes.
 function findTipoRecojoBusinessId(rows: Row[], labelCandidates: string[]) {
   if (!rows.length) return null;
   const columns = Object.keys(rows[0]);
@@ -90,6 +97,7 @@ function findTipoRecojoBusinessId(rows: Row[], labelCandidates: string[]) {
   return null;
 }
 
+// Componente principal del dashboard que muestra un resumen general de KPIs y métricas operativas, con la capacidad de filtrar por rango de fechas. Utiliza datos de varias hojas (envíos, recojos, leads, tipo de recojo) para calcular las métricas y mostrarlas en tarjetas.
 export function DashboardOverview() {
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
@@ -327,6 +335,7 @@ export function DashboardOverview() {
   );
 }
 
+// Sección genérica con título y contenido, utilizada para organizar el dashboard en bloques temáticos.
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <div className="space-y-3">
@@ -336,10 +345,12 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   );
 }
 
+// Componente para mostrar una cuadrícula de tarjetas de KPI, adaptándose a diferentes tamaños de pantalla.
 function KpiGrid({ children }: { children: React.ReactNode }) {
   return <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">{children}</div>;
 }
 
+// Componente para mostrar una tarjeta de KPI con título y valor, formateando el valor según corresponda (número o moneda) y aplicando estilos visuales.
 function KpiCard({ title, value }: { title: string; value: string }) {
   return (
     <div className="bg-white p-4 rounded-2xl shadow-[0_20px_42px_-34px_rgba(15,23,42,0.9)] border border-gray-200">
