@@ -671,6 +671,71 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
       }
     }
 
+    // Manejo especial para pipeline puntual por ID.
+    // Si viene id con resource=pipelines, usamos GET /api/v4/leads/pipelines/{id}
+    // y stageamos un único evento pipeline.pull.
+    if (selectedResource === 'pipelines') {
+      const pipelineIdParam = asSingleQueryParam(req.query.id);
+
+      if (pipelineIdParam !== undefined) {
+        const pipelineIdRaw = pipelineIdParam.trim();
+        const pipelineId = Number(pipelineIdRaw);
+
+        if (!pipelineIdRaw || !Number.isInteger(pipelineId) || pipelineId <= 0) {
+          return res.status(400).json({
+            error: 'El parámetro id debe ser un número entero positivo para resource=pipelines.',
+          });
+        }
+
+        const endpoint = `/api/v4/leads/pipelines/${encodeURIComponent(String(pipelineId))}`;
+        const response = await fetch(`${freshConnection.account_base_url}${endpoint}`, {
+          method: 'GET',
+          headers: {
+            Authorization: `Bearer ${freshConnection.access_token}`,
+            'Content-Type': 'application/json',
+          },
+        });
+
+        if (!response.ok) {
+          const raw = await response.text();
+          throw new Error(`Kommo pipeline id ${pipelineId} error (${response.status}): ${raw}`);
+        }
+
+        const pipeline = (await response.json()) as Record<string, unknown>;
+        const dedupeVersion = getPipelineDedupeVersion(pipeline);
+        const dedupeKey = `pipeline:${pipelineId}:${dedupeVersion}`;
+
+        const staged = await stageWebhookEvents(supabase, [
+          {
+            account_base_url: freshConnection.account_base_url,
+            event_type: RESOURCE_EVENT_TYPES.pipelines,
+            payload: pipeline,
+            dedupe_key: dedupeKey,
+            status: 'pending',
+          },
+        ]);
+
+        const resources = [
+          {
+            resource: 'pipelines',
+            pulled: 1,
+            staged,
+            cursorFrom: null,
+            cursorTo: null,
+            hasMore: false,
+          },
+        ];
+
+        return res.status(200).json({
+          success: true,
+          account: freshConnection.account_subdomain,
+          resources,
+          totalPulled: 1,
+          totalStaged: staged,
+        });
+      }
+    }
+
     const results: Array<{
       resource: string;
       pulled: number;
