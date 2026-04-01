@@ -192,6 +192,32 @@ function chunkArray<T>(items: T[], chunkSize: number) {
   return chunks;
 }
 
+function getPipelineDedupeVersion(item: Record<string, unknown>) {
+  const updatedAt = item.updated_at;
+  if (updatedAt !== undefined && updatedAt !== null && String(updatedAt) !== '') {
+    return String(updatedAt);
+  }
+
+  const createdAt = item.created_at;
+  if (createdAt !== undefined && createdAt !== null && String(createdAt) !== '') {
+    return String(createdAt);
+  }
+
+  const embedded = item._embedded as Record<string, unknown> | undefined;
+  const stableSeed = JSON.stringify({
+    id: item.id ?? null,
+    name: item.name ?? null,
+    sort: item.sort ?? null,
+    is_main: item.is_main ?? null,
+    is_unsorted_on: item.is_unsorted_on ?? null,
+    is_archive: item.is_archive ?? null,
+    account_id: item.account_id ?? null,
+    statuses: embedded?.statuses ?? null,
+  });
+
+  return createHash('sha256').update(stableSeed).digest('hex');
+}
+
 // Dado un array de eventos a insertar, los inserta en la tabla kommo_webhook_events y evita los errores por duplicados. Si hay un error, divide el batch y reintenta para aislar filas problemáticas.
 type WebhookEventInsert = {
   account_base_url: string;
@@ -1082,7 +1108,9 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
         const dedupeVersion =
           resource === 'unsorted'
             ? String(item.created_at ?? item.updated_at ?? '')
-            : String(item.updated_at ?? '');
+            : resource === 'pipelines'
+              ? getPipelineDedupeVersion(item)
+              : String(item.updated_at ?? '');
         const dedupeKey = `${resource}:${dedupeIdentity}:${dedupeVersion}`;
         stageRows.push({
           account_base_url: freshConnection.account_base_url,

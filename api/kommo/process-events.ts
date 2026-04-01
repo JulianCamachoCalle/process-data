@@ -48,6 +48,42 @@ function asNumber(value: unknown, fallback = 0) {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
+function asNullableText(value: unknown) {
+  if (value === undefined || value === null) {
+    return null;
+  }
+
+  const parsed = String(value).trim();
+  return parsed.length > 0 ? parsed : null;
+}
+
+function asNullableBoolean(value: unknown, hasField: boolean) {
+  if (!hasField) {
+    return null;
+  }
+
+  if (typeof value === 'boolean') {
+    return value;
+  }
+
+  if (typeof value === 'number') {
+    return value !== 0;
+  }
+
+  if (typeof value === 'string') {
+    const normalized = value.trim().toLowerCase();
+    if (normalized === 'true' || normalized === '1') {
+      return true;
+    }
+
+    if (normalized === 'false' || normalized === '0' || normalized === '') {
+      return false;
+    }
+  }
+
+  return Boolean(value);
+}
+
 // Convierte un valor a segundos Unix, aceptando tanto números como strings (que pueden ser timestamps o fechas parseables).
 function asUnixSeconds(value: unknown) {
   if (typeof value === 'number') {
@@ -491,10 +527,10 @@ function mapKommoPipelineToTable(payload: Record<string, unknown>) {
     business_id: pipelineId,
     name: payload.name ?? null,
     sort: asNumber(payload.sort, 0) || null,
-    is_main: payload.is_main ?? null,
-    is_archive: payload.is_archive ?? null,
-    is_unsorted_on: payload.is_unsorted_on ?? null,
-    is_deleted: payload.is_deleted ?? false,
+    is_main: asNullableBoolean(payload.is_main, Object.prototype.hasOwnProperty.call(payload, 'is_main')),
+    is_archive: asNullableBoolean(payload.is_archive, Object.prototype.hasOwnProperty.call(payload, 'is_archive')),
+    is_unsorted_on: asNullableBoolean(payload.is_unsorted_on, Object.prototype.hasOwnProperty.call(payload, 'is_unsorted_on')),
+    account_id: asNullableText(payload.account_id),
     statuses: embedded?.statuses ?? null,
     raw_payload: payload,
   };
