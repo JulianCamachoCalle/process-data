@@ -6,15 +6,103 @@
   "crons": [
     {
       "path": "/api/cron/sync-outbox",
-      "schedule": "0 3 * * *"
+      "schedule": "0 2 * * *"
     },
     {
-      "path": "/api/cron/kommo-sync",
-      "schedule": "10 3 * * *"
+      "path": "/api/cron/kommo-process-events?loop=1&limit=120",
+      "schedule": "*/5 2-5 * * *"
+    },
+
+    {
+      "path": "/api/cron/kommo-sync?resource=leads&max_pages=20",
+      "schedule": "5 2 * * *"
     },
     {
-      "path": "/api/cron/kommo-process-events",
-      "schedule": "20 3 * * *"
+      "path": "/api/cron/kommo-sync?resource=contacts&max_pages=20",
+      "schedule": "15 2 * * *"
+    },
+    {
+      "path": "/api/cron/kommo-sync?resource=tasks&max_pages=15",
+      "schedule": "25 2 * * *"
+    },
+    {
+      "path": "/api/cron/kommo-sync?resource=companies&max_pages=10",
+      "schedule": "35 2 * * *"
+    },
+    {
+      "path": "/api/cron/kommo-sync?resource=notes&max_pages=10",
+      "schedule": "45 2 * * *"
+    },
+    {
+      "path": "/api/cron/kommo-sync?resource=events&max_pages=10",
+      "schedule": "55 2 * * *"
+    },
+
+    {
+      "path": "/api/cron/kommo-sync?resource=links&entity_type=leads&max_pages=3&max_entities=200&max_runtime_ms=45000",
+      "schedule": "5 3 * * *"
+    },
+    {
+      "path": "/api/cron/kommo-sync?resource=links&entity_type=contacts&max_pages=3&max_entities=200&max_runtime_ms=45000",
+      "schedule": "15 3 * * *"
+    },
+    {
+      "path": "/api/cron/kommo-sync?resource=links&entity_type=companies&max_pages=3&max_entities=200&max_runtime_ms=45000",
+      "schedule": "25 3 * * *"
+    },
+    {
+      "path": "/api/cron/kommo-sync?resource=unsorted&max_pages=5",
+      "schedule": "35 3 * * *"
+    },
+    {
+      "path": "/api/cron/kommo-sync?resource=unsorted_summary",
+      "schedule": "45 3 * * *"
+    },
+
+    {
+      "path": "/api/cron/kommo-sync?resource=catalogs&max_pages=5",
+      "schedule": "5 4 * * *"
+    },
+    {
+      "path": "/api/cron/kommo-sync?resource=catalog_elements&max_pages=10&max_runtime_ms=45000",
+      "schedule": "15 4 * * *"
+    },
+    {
+      "path": "/api/cron/kommo-sync?resource=custom_fields&max_pages=10",
+      "schedule": "25 4 * * *"
+    },
+    {
+      "path": "/api/cron/kommo-sync?resource=custom_field_groups&max_pages=5",
+      "schedule": "35 4 * * *"
+    },
+    {
+      "path": "/api/cron/kommo-sync?resource=tags&max_pages=10",
+      "schedule": "45 4 * * *"
+    },
+
+    {
+      "path": "/api/cron/kommo-sync?resource=pipelines&max_pages=5",
+      "schedule": "5 5 * * *"
+    },
+    {
+      "path": "/api/cron/kommo-sync?resource=pipeline_statuses&max_pages=5",
+      "schedule": "15 5 * * *"
+    },
+    {
+      "path": "/api/cron/kommo-sync?resource=users&max_pages=5&with=role,group,uuid,amojo_id,user_rank,phone_number",
+      "schedule": "25 5 * * *"
+    },
+    {
+      "path": "/api/cron/kommo-sync?resource=roles&max_pages=5&with=users",
+      "schedule": "35 5 * * *"
+    },
+    {
+      "path": "/api/cron/kommo-sync?resource=loss_reasons&max_pages=5",
+      "schedule": "45 5 * * *"
+    },
+    {
+      "path": "/api/cron/kommo-sync?resource=sources&max_pages=5",
+      "schedule": "55 5 * * *"
     }
   ]
 }
