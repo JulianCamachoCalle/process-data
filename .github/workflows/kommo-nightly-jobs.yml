@@ -1,0 +1,60 @@
+name: Kommo Nightly Jobs
+
+on:
+  schedule:
+    # 02:00-05:55 America/Lima ~= 07:00-10:55 UTC
+    - cron: '*/5 7-10 * * *'
+  workflow_dispatch:
+
+jobs:
+  kommo-sync-and-process:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Compute Lima hour
+        id: lima_time
+        run: |
+          echo "lima_hour=$(TZ=America/Lima date +%H)" >> $GITHUB_OUTPUT
+          echo "lima_minute=$(TZ=America/Lima date +%M)" >> $GITHUB_OUTPUT
+
+      - name: Trigger process-events
+        env:
+          BASE_URL: ${{ secrets.APP_BASE_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          set -euo pipefail
+          curl -fsS -X POST \
+            -H "Authorization: Bearer ${CRON_SECRET}" \
+            "${BASE_URL}/api/kommo/process-events?loop=1&limit=120"
+
+      - name: Trigger links leads sync at 03:05 Lima
+        if: steps.lima_time.outputs.lima_hour == '03' && steps.lima_time.outputs.lima_minute == '05'
+        env:
+          BASE_URL: ${{ secrets.APP_BASE_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          set -euo pipefail
+          curl -fsS \
+            -H "Authorization: Bearer ${CRON_SECRET}" \
+            "${BASE_URL}/api/kommo/sync?resource=links&entity_type=leads&max_pages=3&max_entities=200&max_runtime_ms=45000"
+
+      - name: Trigger links contacts sync at 03:15 Lima
+        if: steps.lima_time.outputs.lima_hour == '03' && steps.lima_time.outputs.lima_minute == '15'
+        env:
+          BASE_URL: ${{ secrets.APP_BASE_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          set -euo pipefail
+          curl -fsS \
+            -H "Authorization: Bearer ${CRON_SECRET}" \
+            "${BASE_URL}/api/kommo/sync?resource=links&entity_type=contacts&max_pages=3&max_entities=200&max_runtime_ms=45000"
+
+      - name: Trigger links companies sync at 03:25 Lima
+        if: steps.lima_time.outputs.lima_hour == '03' && steps.lima_time.outputs.lima_minute == '25'
+        env:
+          BASE_URL: ${{ secrets.APP_BASE_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          set -euo pipefail
+          curl -fsS \
+            -H "Authorization: Bearer ${CRON_SECRET}" \
+            "${BASE_URL}/api/kommo/sync?resource=links&entity_type=companies&max_pages=3&max_entities=200&max_runtime_ms=45000"

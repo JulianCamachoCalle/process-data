@@ -32,7 +32,8 @@ export function Sidebar({
   const location = useLocation();
   const groupedSheets = groupSheetsByDomain(sheets);
 
-  const isKommoActive = location.pathname === '/kommo' || location.pathname.startsWith('/kommo/');
+  const isKommoExplorerActive = location.pathname === '/kommo' || (location.pathname.startsWith('/kommo/') && !location.pathname.startsWith('/kommo/leads-insights'));
+  const isKommoInsightsActive = location.pathname === '/kommo/leads-insights';
 
   const renderGroup = (groupName: string, icon: ReactNode, groupSheets: string[]) => {
     if (!groupSheets.length) return null;
@@ -81,7 +82,7 @@ export function Sidebar({
         bg-gradient-to-b from-[#101218] via-[#0f1219] to-[#0a0c12] shadow-[8px_0_30px_-14px_rgba(0,0,0,0.75)]
         backdrop-blur-xl relative overflow-hidden transition-all duration-300 transform
         ${isMobileOpen ? 'translate-x-0' : '-translate-x-full'}
-        md:static md:translate-x-0 md:z-10 ${collapsed ? 'md:w-20' : 'md:w-72'} w-72
+        md:static md:translate-x-0 md:z-10 ${collapsed ? 'md:w-20' : 'md:w-72'} w-72 print:hidden
       `}
     >
       <div className="pointer-events-none absolute -top-14 -right-12 h-36 w-36 rounded-full bg-red-500/20 blur-3xl" />
@@ -159,15 +160,29 @@ export function Sidebar({
           <Link
             to="/kommo"
             onClick={() => onNavigate?.()}
-            title={collapsed ? 'Kommo' : undefined}
+            title={collapsed ? 'Kommo Explorer' : undefined}
             className={`group flex items-center w-full text-left px-4 py-2.5 rounded-xl border transition-all duration-200 ${
-              isKommoActive
+              isKommoExplorerActive
                 ? 'bg-white/10 text-white font-semibold border-red-500/70 shadow-[0_8px_24px_-18px_rgba(255,255,255,0.8)]'
                 : 'text-gray-400 border-transparent hover:bg-white/5 hover:text-gray-100 hover:border-white/10'
             } ${collapsed ? 'md:justify-center md:px-2' : 'gap-3'}`}
           >
-            <Database size={16} className={isKommoActive ? 'text-red-300' : 'text-gray-500 group-hover:text-red-200'} />
-            <span className={`truncate text-sm ${collapsed ? 'md:hidden' : ''}`}>Kommo</span>
+            <Database size={16} className={isKommoExplorerActive ? 'text-red-300' : 'text-gray-500 group-hover:text-red-200'} />
+            <span className={`truncate text-sm ${collapsed ? 'md:hidden' : ''}`}>Kommo Explorer</span>
+          </Link>
+
+          <Link
+            to="/kommo/leads-insights"
+            onClick={() => onNavigate?.()}
+            title={collapsed ? 'Leads Insights' : undefined}
+            className={`group flex items-center w-full text-left px-4 py-2.5 rounded-xl border transition-all duration-200 ${
+              isKommoInsightsActive
+                ? 'bg-white/10 text-white font-semibold border-red-500/70 shadow-[0_8px_24px_-18px_rgba(255,255,255,0.8)]'
+                : 'text-gray-400 border-transparent hover:bg-white/5 hover:text-gray-100 hover:border-white/10'
+            } ${collapsed ? 'md:justify-center md:px-2' : 'gap-3'}`}
+          >
+            <Database size={16} className={isKommoInsightsActive ? 'text-red-300' : 'text-gray-500 group-hover:text-red-200'} />
+            <span className={`truncate text-sm ${collapsed ? 'md:hidden' : ''}`}>Leads Insights</span>
           </Link>
         </div>
       </nav>

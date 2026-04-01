@@ -81,12 +81,112 @@ function formatCellValue(value: unknown) {
   return String(value);
 }
 
-function safeJson(value: unknown) {
-  try {
-    return JSON.stringify(value, null, 2);
-  } catch {
-    return String(value);
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function getOrderedKeys(detail: Record<string, unknown>, preferredKeys: string[]) {
+  const preferred = Array.from(new Set(preferredKeys)).filter((key) => key in detail);
+  const preferredSet = new Set(preferred);
+  const remaining = Object.keys(detail)
+    .filter((key) => !preferredSet.has(key))
+    .sort((a, b) => a.localeCompare(b, 'es'));
+
+  return [...preferred, ...remaining];
+}
+
+function renderPrimitiveValue(value: unknown) {
+  const rendered = formatCellValue(value);
+  return typeof rendered === 'string' ? rendered : String(rendered);
+}
+
+function DetailValueContent({
+  resource,
+  value,
+  depth = 0,
+}: {
+  resource: KommoResourceKey;
+  value: unknown;
+  depth?: number;
+}) {
+  if (value === null || value === undefined || value === '') {
+    return <span className="text-sm text-gray-400">-</span>;
   }
+
+  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+    return <span className="text-sm text-gray-800 break-words">{renderPrimitiveValue(value)}</span>;
+  }
+
+  if (Array.isArray(value)) {
+    if (value.length === 0) {
+      return <span className="text-sm text-gray-400">-</span>;
+    }
+
+    const allObjects = value.every((item) => isRecord(item));
+
+    if (allObjects) {
+      return (
+        <div className="space-y-2">
+          {value.map((item, index) => {
+            const itemObj = item as Record<string, unknown>;
+            const itemKeys = Object.keys(itemObj).sort((a, b) => a.localeCompare(b, 'es'));
+
+            return (
+              <div key={`obj-item-${index}`} className="rounded-lg border border-gray-200 bg-gray-50/70 overflow-hidden">
+                <div className="px-3 py-2 border-b border-gray-200 text-xs font-semibold text-gray-500 uppercase tracking-wide">
+                  Ítem {index + 1}
+                </div>
+                <div className="divide-y divide-gray-100">
+                  {itemKeys.map((key) => (
+                    <div key={`${index}-${key}`} className="grid grid-cols-1 md:grid-cols-[220px_minmax(0,1fr)] gap-2 px-3 py-2">
+                      <span className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+                        {getKommoColumnLabel(resource, key)}
+                      </span>
+                      <DetailValueContent resource={resource} value={itemObj[key]} depth={depth + 1} />
+                    </div>
+                  ))}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      );
+    }
+
+    return (
+      <ul className="list-disc list-inside space-y-1 text-sm text-gray-800">
+        {value.map((item, index) => (
+          <li key={`primitive-item-${index}`} className="break-words">
+            {renderPrimitiveValue(item)}
+          </li>
+        ))}
+      </ul>
+    );
+  }
+
+  if (isRecord(value)) {
+    const nestedKeys = Object.keys(value).sort((a, b) => a.localeCompare(b, 'es'));
+
+    return (
+      <details className="rounded-lg border border-gray-200 bg-gray-50/80" open={depth === 0}>
+        <summary className="cursor-pointer px-3 py-2 text-xs font-semibold uppercase tracking-wide text-gray-600">
+          Ver campos ({nestedKeys.length})
+        </summary>
+        <div className="border-t border-gray-200 divide-y divide-gray-100">
+          {nestedKeys.map((key) => (
+            <div key={key} className="grid grid-cols-1 md:grid-cols-[220px_minmax(0,1fr)] gap-2 px-3 py-2">
+              <span className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+                {getKommoColumnLabel(resource, key)}
+              </span>
+              <DetailValueContent resource={resource} value={value[key]} depth={depth + 1} />
+            </div>
+          ))}
+        </div>
+      </details>
+    );
+  }
+
+  return <span className="text-sm text-gray-800 break-words">{String(value)}</span>;
 }
 
 export function KommoExplorer() {
@@ -146,6 +246,7 @@ function KommoExplorerView({ resource }: { resource: KommoResourceKey }) {
   const safePage = Math.min(page, totalPages);
   const rows = listQuery.data?.rows ?? [];
   const columns = listQuery.data?.columns ?? [];
+  const detailPreferredKeys = columns.length > 0 ? columns : uiConfig.listColumns;
 
   const [detailOpen, setDetailOpen] = useState(false);
   const [detailId, setDetailId] = useState<string | null>(null);
@@ -410,9 +511,34 @@ function KommoExplorerView({ resource }: { resource: KommoResourceKey }) {
               ) : detailQuery.data?.success === false ? (
                 <div className="text-sm text-red-700">{detailQuery.data.error || 'Error consultando detalle'}</div>
               ) : (
-                <pre className="text-xs bg-gray-950 text-gray-100 rounded-xl p-4 overflow-auto border border-gray-800">
-                  {safeJson(detailQuery.data?.rows?.[0] ?? null)}
-                </pre>
+                (() => {
+                  const detail = detailQuery.data?.rows?.[0];
+
+                  if (!isRecord(detail)) {
+                    return (
+                      <div className="rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-600">
+                        -
+                      </div>
+                    );
+                  }
+
+                  const orderedKeys = getOrderedKeys(detail, detailPreferredKeys);
+
+                  return (
+                    <div className="rounded-xl border border-gray-200 bg-white overflow-hidden">
+                      <div className="divide-y divide-gray-100">
+                        {orderedKeys.map((key) => (
+                          <div key={key} className="grid grid-cols-1 md:grid-cols-[240px_minmax(0,1fr)] gap-3 px-4 py-3">
+                            <span className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+                              {getKommoColumnLabel(resource, key)}
+                            </span>
+                            <DetailValueContent resource={resource} value={detail[key]} />
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })()
               )}
             </div>
           </div>

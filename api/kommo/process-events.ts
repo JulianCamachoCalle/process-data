@@ -617,12 +617,29 @@ function mapKommoCustomFieldToTable(payload: Record<string, unknown>) {
 }
 
 function mapKommoCustomFieldGroupToTable(payload: Record<string, unknown>) {
-  const groupId = asNumber(payload.id, 0);
+  const linkSelfHref = (payload._links as Record<string, unknown> | undefined)?.self as Record<string, unknown> | undefined;
+  const href = asNullableText(linkSelfHref?.href);
+
+  const groupIdFromHref = (() => {
+    if (!href) return null;
+    // Example: /api/v4/contacts/custom_fields/groups/files?limit=250&page=1
+    const withoutQuery = href.split('?')[0] ?? href;
+    const parts = withoutQuery.split('/').filter(Boolean);
+    return parts.length > 0 ? asNullableText(parts[parts.length - 1]) : null;
+  })();
+
+  const groupId = asNullableText(payload.id) ?? groupIdFromHref;
   if (!groupId) {
     return null;
   }
 
-  const entityType = String(payload.entity_type ?? '').trim();
+  const entityTypeFromHref = (() => {
+    if (!href) return null;
+    const match = href.match(/\/api\/v4\/(leads|contacts|companies)\/custom_fields\/groups\//i);
+    return match?.[1]?.toLowerCase() ?? null;
+  })();
+
+  const entityType = String(payload.entity_type ?? entityTypeFromHref ?? '').trim();
   if (!entityType) {
     return null;
   }

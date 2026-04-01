@@ -4,7 +4,7 @@
 create table if not exists public.kommo_custom_field_groups (
   id uuid primary key default gen_random_uuid(),
   stable_id text not null unique,
-  business_id bigint not null,
+  business_id text not null,
   entity_type text not null,
   name text,
   sort text,

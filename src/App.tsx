@@ -8,6 +8,7 @@ import { DashboardOverview } from './features/dashboard/DashboardOverview';
 import { Login } from './features/auth/Login';
 import { KommoSyncPanel } from './features/kommo/sync/KommoSyncPanel';
 import { KommoExplorer } from './features/kommo/explorer/KommoExplorer';
+import { KommoLeadsInsights } from './features/kommo/insights/KommoLeadsInsights';
 import { prefetchSheetData } from './hooks/useSheetData';
 import { isSupabaseConfigured, supabase } from './lib/supabase';
 
@@ -117,7 +118,7 @@ function Layout() {
   };
 
   return (
-    <div className="flex h-screen bg-transparent overflow-hidden text-gray-900 font-sans selection:bg-red-100 selection:text-red-900">
+    <div className="flex h-screen overflow-hidden bg-transparent text-gray-900 font-sans selection:bg-red-100 selection:text-red-900 print:h-auto print:overflow-visible">
       {mobileSidebarOpen && (
         <button
           aria-label="Cerrar menú lateral"
@@ -139,8 +140,8 @@ function Layout() {
         onCloseMobile={() => setMobileSidebarOpen(false)}
         onNavigate={() => setMobileSidebarOpen(false)}
       />
-      <div className="flex-1 flex flex-col min-w-0 overflow-hidden bg-gradient-to-b from-white/90 via-white/75 to-white/95 z-10 relative backdrop-blur-sm">
-        <header className="h-20 border-b border-gray-200/80 flex items-center justify-between px-8 bg-white/75 backdrop-blur-md sticky top-0 z-20 shadow-[0_10px_30px_-20px_rgba(15,23,42,0.45)]">
+      <div className="relative z-10 flex min-w-0 flex-1 flex-col overflow-hidden bg-gradient-to-b from-white/90 via-white/75 to-white/95 backdrop-blur-sm print:overflow-visible">
+        <header className="sticky top-0 z-20 flex h-20 items-center justify-between border-b border-gray-200/80 bg-white/75 px-8 shadow-[0_10px_30px_-20px_rgba(15,23,42,0.45)] backdrop-blur-md print:hidden">
           <div className="flex items-center gap-3">
             <button
               onClick={() => setMobileSidebarOpen((prev) => !prev)}
@@ -161,12 +162,13 @@ function Layout() {
             Cerrar sesión
           </button>
         </header>
-        <main className="flex-1 overflow-y-auto p-8 md:p-10 relative">
-          <div className="max-w-7xl mx-auto">
+        <main className="relative flex-1 overflow-y-auto p-8 md:p-10 print:overflow-visible print:p-0">
+          <div className="mx-auto max-w-7xl print:max-w-none">
             <Routes>
               <Route path="/" element={<DashboardOverview />} />
               <Route path="/sheet/:sheetName" element={<SheetRouteWrapper />} />
               <Route path="/kommo" element={<KommoExplorer />} />
+              <Route path="/kommo/leads-insights" element={<KommoLeadsInsights />} />
               <Route path="/kommo/:resource" element={<KommoExplorer />} />
             </Routes>
           </div>
