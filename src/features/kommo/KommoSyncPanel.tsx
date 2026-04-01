@@ -23,6 +23,7 @@ const RESOURCES = [
   'notes',
   'events',
   'catalogs',
+  'catalog_elements',
   'unsorted',
   'unsorted_summary',
   'sources',

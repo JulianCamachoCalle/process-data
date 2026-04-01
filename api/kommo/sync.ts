@@ -27,6 +27,7 @@ const ALL_RESOURCES = [
   // pueden existir subtipos
   'events',
   'catalogs',
+  'catalog_elements',
   'unsorted',
   'unsorted_summary',
   'sources',
@@ -52,6 +53,7 @@ const RESOURCE_ENDPOINTS: Record<KommoResource, string> = {
   // notes, tags, custom_fields y links se manejan por separado debido a sus particularidades en la API
   events: '/api/v4/events',
   catalogs: '/api/v4/catalogs',
+  catalog_elements: '',
   unsorted: '/api/v4/leads/unsorted',
   unsorted_summary: '/api/v4/leads/unsorted/summary',
   sources: '/api/v4/sources',
@@ -75,6 +77,7 @@ const RESOURCE_EVENT_TYPES: Record<string, string> = {
   notes: 'note.pull',
   events: 'event.pull',
   catalogs: 'catalog.pull',
+  catalog_elements: 'catalog_element.pull',
   unsorted: 'unsorted.pull',
   unsorted_summary: 'unsorted.summary.pull',
   sources: 'source.pull',
@@ -87,6 +90,7 @@ const RESOURCE_EVENT_TYPES: Record<string, string> = {
 const EMBEDDED_KEY_MAP: Record<string, string> = {
   events: 'items',  // Usa items en lugar de events
   catalogs: 'catalogs',
+  catalog_elements: 'elements',
   leads: 'leads',
   loss_reasons: 'loss_reasons',
   contacts: 'contacts',
@@ -568,6 +572,47 @@ async function fetchPipelineStatusesPages(
   return { items: allItems, totalPulled: allItems.length, hasMore };
 }
 
+async function fetchCatalogElementsPages(
+  baseUrl: string,
+  accessToken: string,
+  catalogId: number,
+  maxPages: number,
+): Promise<{ items: Array<Record<string, unknown>>; totalPulled: number; hasMore: boolean }> {
+  const allItems: Array<Record<string, unknown>> = [];
+  let page = 1;
+  let hasMore = true;
+
+  while (hasMore && page <= maxPages) {
+    const endpoint = `/api/v4/catalogs/${encodeURIComponent(String(catalogId))}/elements`;
+    const url = new URL(`${baseUrl}${endpoint}`);
+    url.searchParams.set('limit', '250');
+    url.searchParams.set('page', String(page));
+
+    const response = await fetch(url.toString(), {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+    });
+
+    if (!response.ok) {
+      const raw = await response.text();
+      throw new Error(`Kommo catalog_elements (${catalogId}) page ${page} error (${response.status}): ${raw}`);
+    }
+
+    const payload = (await response.json()) as Record<string, unknown>;
+    const items = (payload._embedded as Record<string, unknown> | undefined)?.elements as Array<Record<string, unknown>> ?? [];
+    allItems.push(...items);
+
+    const nextLink = (payload._links as Record<string, unknown> | undefined)?.next;
+    hasMore = !!nextLink;
+    page++;
+  }
+
+  return { items: allItems, totalPulled: allItems.length, hasMore };
+}
+
 // Handler principal para sincronización. Soporta sincronización incremental basada en un cursor de updated_at almacenado en la base de datos.
 export default async function kommoSyncHandler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST' && req.method !== 'GET') {
@@ -656,6 +701,81 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
         const resources = [
           {
             resource: 'leads',
+            pulled: 1,
+            staged,
+            cursorFrom: null,
+            cursorTo: null,
+            hasMore: false,
+          },
+        ];
+
+        return res.status(200).json({
+          success: true,
+          account: freshConnection.account_subdomain,
+          resources,
+          totalPulled: 1,
+          totalStaged: staged,
+        });
+      }
+    }
+
+    // Manejo especial para catalog puntual por ID.
+    // Si viene id con resource=catalogs, usamos GET /api/v4/catalogs/{id}
+    // y stageamos un único evento catalog.pull.
+    if (selectedResource === 'catalogs') {
+      const catalogIdParam = asSingleQueryParam(req.query.id);
+
+      if (catalogIdParam !== undefined) {
+        const catalogIdRaw = catalogIdParam.trim();
+        const catalogId = Number(catalogIdRaw);
+
+        if (!catalogIdRaw || !Number.isInteger(catalogId) || catalogId <= 0) {
+          return res.status(400).json({
+            error: 'El parámetro id debe ser un número entero positivo para resource=catalogs.',
+          });
+        }
+
+        const endpoint = `/api/v4/catalogs/${encodeURIComponent(String(catalogId))}`;
+        const response = await fetch(`${freshConnection.account_base_url}${endpoint}`, {
+          method: 'GET',
+          headers: {
+            Authorization: `Bearer ${freshConnection.access_token}`,
+            'Content-Type': 'application/json',
+          },
+        });
+
+        if (response.status === 404) {
+          const raw = await response.text();
+          return res.status(404).json({
+            error: `Kommo catalogs id ${catalogId} no encontrado (404).`,
+            resource: 'catalogs',
+            id: catalogId,
+            details: raw,
+          });
+        }
+
+        if (!response.ok) {
+          const raw = await response.text();
+          throw new Error(`Kommo catalog id ${catalogId} error (${response.status}): ${raw}`);
+        }
+
+        const catalog = (await response.json()) as Record<string, unknown>;
+        const dedupeVersion = String(catalog.updated_at ?? catalog.created_at ?? '');
+        const dedupeKey = `catalog:${catalogId}:${dedupeVersion}`;
+
+        const staged = await stageWebhookEvents(supabase, [
+          {
+            account_base_url: freshConnection.account_base_url,
+            event_type: RESOURCE_EVENT_TYPES.catalogs,
+            payload: catalog,
+            dedupe_key: dedupeKey,
+            status: 'pending',
+          },
+        ]);
+
+        const resources = [
+          {
+            resource: 'catalogs',
             pulled: 1,
             staged,
             cursorFrom: null,
@@ -1354,6 +1474,180 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
       const resources = [
         {
           resource: 'pipeline_statuses',
+          pulled,
+          staged,
+          cursorFrom: null,
+          cursorTo: null,
+          hasMore,
+        },
+      ];
+
+      return res.status(200).json({
+        success: true,
+        account: freshConnection.account_subdomain,
+        resources,
+        totalPulled: pulled,
+        totalStaged: staged,
+      });
+    }
+
+    // Manejo especial para catalog_elements, ya que el endpoint requiere list_id como path param.
+    if (selectedResource === 'catalog_elements') {
+      const maxPagesParam = asSingleQueryParam(req.query.max_pages);
+      const maxPages = maxPagesParam ? Math.min(50, parseInt(maxPagesParam, 10) || 5) : 5;
+
+      const listIdParam = asSingleQueryParam(req.query.list_id);
+      const elementIdParam = asSingleQueryParam(req.query.element_id);
+
+      if (listIdParam !== undefined && elementIdParam !== undefined) {
+        const listIdRaw = listIdParam.trim();
+        const elementIdRaw = elementIdParam.trim();
+        const listId = Number(listIdRaw);
+        const elementId = Number(elementIdRaw);
+
+        if (!listIdRaw || !Number.isInteger(listId) || listId <= 0 || !elementIdRaw || !Number.isInteger(elementId) || elementId <= 0) {
+          return res.status(400).json({
+            error: 'Los parámetros list_id y element_id deben ser números enteros positivos para resource=catalog_elements.',
+          });
+        }
+
+        const endpoint = `/api/v4/catalogs/${encodeURIComponent(String(listId))}/elements/${encodeURIComponent(String(elementId))}`;
+        const response = await fetch(`${freshConnection.account_base_url}${endpoint}`, {
+          method: 'GET',
+          headers: {
+            Authorization: `Bearer ${freshConnection.access_token}`,
+            'Content-Type': 'application/json',
+          },
+        });
+
+        if (!response.ok) {
+          const raw = await response.text();
+
+          if (response.status === 404) {
+            return res.status(404).json({
+              error: 'Elemento de catálogo no encontrado en Kommo.',
+              resource: 'catalog_elements',
+              list_id: listId,
+              element_id: elementId,
+              details: raw,
+            });
+          }
+
+          throw new Error(`Kommo catalog_elements (${listId}/${elementId}) error (${response.status}): ${raw}`);
+        }
+
+        const item = (await response.json()) as Record<string, unknown>;
+        const normalizedElement: Record<string, unknown> = {
+          ...item,
+          catalog_id: Number(item.catalog_id ?? listId) || listId,
+          id: Number(item.id ?? item.element_id ?? elementId) || elementId,
+        };
+
+        const dedupeVersion = String(normalizedElement.updated_at ?? normalizedElement.created_at ?? '');
+        const dedupeKey = `catalog_element:${normalizedElement.catalog_id}:${normalizedElement.id}:${dedupeVersion}`;
+
+        const staged = await stageWebhookEvents(supabase, [
+          {
+            account_base_url: freshConnection.account_base_url,
+            event_type: RESOURCE_EVENT_TYPES.catalog_elements,
+            payload: normalizedElement,
+            dedupe_key: dedupeKey,
+            status: 'pending',
+          },
+        ]);
+
+        const resources = [
+          {
+            resource: 'catalog_elements',
+            pulled: 1,
+            staged,
+            cursorFrom: null,
+            cursorTo: null,
+            hasMore: false,
+          },
+        ];
+
+        return res.status(200).json({
+          success: true,
+          account: freshConnection.account_subdomain,
+          resources,
+          totalPulled: 1,
+          totalStaged: staged,
+        });
+      }
+
+      let catalogIds: number[] = [];
+
+      if (listIdParam !== undefined) {
+        const listIdRaw = listIdParam.trim();
+        const listId = Number(listIdRaw);
+
+        if (!listIdRaw || !Number.isInteger(listId) || listId <= 0) {
+          return res.status(400).json({
+            error: 'El parámetro list_id debe ser un número entero positivo para resource=catalog_elements.',
+          });
+        }
+
+        catalogIds = [listId];
+      } else {
+        const catalogsResult = await fetchAllPages(
+          freshConnection.account_base_url,
+          RESOURCE_ENDPOINTS.catalogs,
+          freshConnection.access_token,
+          'catalogs',
+          null,
+          undefined,
+          maxPages,
+        );
+
+        catalogIds = uniquePipelineIdsFromItems(catalogsResult.items);
+      }
+
+      const stageRows: WebhookEventInsert[] = [];
+      let pulled = 0;
+      let hasMore = false;
+
+      for (const catalogId of catalogIds) {
+        const elementsResult = await fetchCatalogElementsPages(
+          freshConnection.account_base_url,
+          freshConnection.access_token,
+          catalogId,
+          maxPages,
+        );
+
+        pulled += elementsResult.totalPulled;
+        hasMore = hasMore || elementsResult.hasMore;
+
+        for (const element of elementsResult.items) {
+          const normalizedElement: Record<string, unknown> = {
+            ...element,
+            catalog_id: Number(element.catalog_id ?? catalogId) || catalogId,
+          };
+
+          const catalogIdentity = String(normalizedElement.catalog_id ?? catalogId);
+          const elementIdentity = String(
+            normalizedElement.id
+            ?? normalizedElement.element_id
+            ?? createHash('sha256').update(JSON.stringify(normalizedElement)).digest('hex'),
+          );
+          const dedupeVersion = String(normalizedElement.updated_at ?? normalizedElement.created_at ?? '');
+          const dedupeKey = `catalog_element:${catalogIdentity}:${elementIdentity}:${dedupeVersion}`;
+
+          stageRows.push({
+            account_base_url: freshConnection.account_base_url,
+            event_type: RESOURCE_EVENT_TYPES.catalog_elements,
+            payload: normalizedElement,
+            dedupe_key: dedupeKey,
+            status: 'pending',
+          });
+        }
+      }
+
+      const staged = await stageWebhookEvents(supabase, stageRows);
+
+      const resources = [
+        {
+          resource: 'catalog_elements',
           pulled,
           staged,
           cursorFrom: null,

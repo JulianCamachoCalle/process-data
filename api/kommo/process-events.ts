@@ -471,18 +471,48 @@ function mapKommoCatalogToTable(payload: Record<string, unknown>) {
 
   const createdAtTs = asNumber(payload.created_at, 0);
   const updatedAtTs = asNumber(payload.updated_at, 0);
+  const type = payload.type ?? payload.catalog_type ?? null;
 
   return {
     stable_id: `kommo-catalog-${catalogId}`,
     business_id: catalogId,
     name: payload.name ?? null,
-    catalog_type: payload.catalog_type ?? null,
-    has_products: payload.has_products ?? false,
-    can_show_in_menu: payload.can_show_in_menu ?? false,
-    sort_by: asNumber(payload.sort, 0) || null,
-    custom_fields: payload.custom_fields ?? null,
+    created_by: asNumber(payload.created_by, 0) || null,
+    updated_by: asNumber(payload.updated_by, 0) || null,
     created_at: createdAtTs ? new Date(createdAtTs * 1000).toISOString() : null,
     updated_at: updatedAtTs ? new Date(updatedAtTs * 1000).toISOString() : null,
+    sort: asNumber(payload.sort, 0) || null,
+    type,
+    can_link_multiple: asNullableBoolean(payload.can_link_multiple, Object.prototype.hasOwnProperty.call(payload, 'can_link_multiple')),
+    can_be_deleted: asNullableBoolean(payload.can_be_deleted, Object.prototype.hasOwnProperty.call(payload, 'can_be_deleted')),
+    account_id: asNumber(payload.account_id, 0) || null,
+    raw_payload: payload,
+  };
+}
+
+function mapKommoCatalogElementToTable(payload: Record<string, unknown>) {
+  const elementId = asNumber(payload.id ?? payload.element_id, 0);
+  const catalogId = asNumber(payload.catalog_id ?? payload.list_id, 0);
+  if (!elementId || !catalogId) {
+    return null;
+  }
+
+  const createdAtTs = asNumber(payload.created_at, 0);
+  const updatedAtTs = asNumber(payload.updated_at, 0);
+
+  return {
+    stable_id: `kommo-catalog-element-${catalogId}-${elementId}`,
+    business_id: elementId,
+    catalog_id: catalogId,
+    name: payload.name ?? null,
+    created_by: asNumber(payload.created_by, 0) || null,
+    updated_by: asNumber(payload.updated_by, 0) || null,
+    created_at: createdAtTs ? new Date(createdAtTs * 1000).toISOString() : null,
+    updated_at: updatedAtTs ? new Date(updatedAtTs * 1000).toISOString() : null,
+    is_deleted: asNullableBoolean(payload.is_deleted, Object.prototype.hasOwnProperty.call(payload, 'is_deleted')),
+    custom_fields_values: payload.custom_fields_values ?? null,
+    account_id: asNumber(payload.account_id, 0) || null,
+    raw_payload: payload,
   };
 }
 
@@ -1050,6 +1080,25 @@ async function processEvent(event: KommoEventRow) {
     return;
   }
 
+  if (event.event_type === 'catalog_element.pull') {
+    const mapped = mapKommoCatalogElementToTable(event.payload);
+    if (!mapped) {
+      throw new Error('No se pudo derivar catalog element desde payload de Kommo');
+    }
+
+    const { error: upsertError } = await supabase.from('kommo_catalog_elements' as never).upsert(
+      mapped as never,
+      {
+        onConflict: 'business_id,catalog_id',
+      },
+    );
+
+    if (upsertError) {
+      throw new Error(upsertError.message || 'No se pudo upsert a kommo_catalog_elements');
+    }
+    return;
+  }
+
   if (event.event_type === 'pipeline_status.pull') {
     const mapped = mapKommoPipelineStatusToTable(event.payload);
     if (!mapped) {
@@ -1254,6 +1303,8 @@ export default async function kommoProcessEventsHandler(req: VercelRequest, res:
             await processMapped('kommo_events', 'business_id', mapKommoEventToTable);
           } else if (eventType === 'catalog.pull') {
             await processMapped('kommo_catalogs', 'business_id', mapKommoCatalogToTable);
+          } else if (eventType === 'catalog_element.pull') {
+            await processMapped('kommo_catalog_elements', 'business_id,catalog_id', mapKommoCatalogElementToTable);
           } else if (eventType === 'unsorted.pull') {
             await processMapped('kommo_unsorted_leads', 'uid', mapKommoUnsortedLeadToTable);
           } else if (eventType === 'link.pull') {

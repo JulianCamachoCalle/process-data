@@ -10,6 +10,7 @@ export type KommoResourceKey =
   | 'notes'
   | 'events'
   | 'catalogs'
+  | 'catalog_elements'
   | 'unsorted'
   | 'unsorted_summary'
   | 'sources'
@@ -55,6 +56,8 @@ const DEFAULT_COLUMN_LABELS: Record<string, string> = {
   link_type: 'Tipo de vínculo',
   type: 'Tipo',
   catalog_type: 'Tipo de catálogo',
+  can_link_multiple: 'Permite múltiples vínculos',
+  can_be_deleted: 'Se puede eliminar',
   field_type: 'Tipo de campo',
   code: 'Código',
   color: 'Color',
@@ -72,6 +75,7 @@ const DEFAULT_COLUMN_LABELS: Record<string, string> = {
   is_completed: 'Completada',
   is_default: 'Por defecto',
   pipeline_id: 'ID Pipeline',
+  catalog_id: 'ID Lista',
   pipeline_name: 'Pipeline',
   source_id: 'ID Fuente',
   source_uid: 'UID Fuente',
@@ -253,10 +257,20 @@ export const KOMMO_RESOURCES: KommoResourceDataConfig[] = [
     label: 'Catalogs',
     table: 'kommo_catalogs',
     primaryKey: 'business_id',
-    defaultSort: 'updated_at_db',
-    listColumns: ['business_id', 'name', 'catalog_type', 'sort_by', 'created_at', 'updated_at_db'],
-    sortColumns: ['updated_at_db', 'business_id', 'name', 'sort_by'],
-    searchColumns: ['name', 'catalog_type'],
+    defaultSort: 'updated_at',
+    listColumns: ['business_id', 'name', 'type', 'sort', 'can_link_multiple', 'can_be_deleted', 'updated_at'],
+    sortColumns: ['updated_at', 'business_id', 'name', 'sort'],
+    searchColumns: ['name', 'type'],
+  },
+  {
+    key: 'catalog_elements',
+    label: 'Catalog Elements',
+    table: 'kommo_catalog_elements',
+    primaryKey: 'stable_id',
+    defaultSort: 'updated_at',
+    listColumns: ['catalog_id', 'business_id', 'name', 'is_deleted', 'updated_at', 'updated_at_db'],
+    sortColumns: ['updated_at', 'catalog_id', 'business_id', 'name'],
+    searchColumns: ['name', 'catalog_id', 'business_id'],
   },
   {
     key: 'unsorted',
