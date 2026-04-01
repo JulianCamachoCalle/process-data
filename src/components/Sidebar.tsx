@@ -82,7 +82,7 @@ export function Sidebar({
         bg-gradient-to-b from-[#101218] via-[#0f1219] to-[#0a0c12] shadow-[8px_0_30px_-14px_rgba(0,0,0,0.75)]
         backdrop-blur-xl relative overflow-hidden transition-all duration-300 transform
         ${isMobileOpen ? 'translate-x-0' : '-translate-x-full'}
-        md:static md:translate-x-0 md:z-10 ${collapsed ? 'md:w-20' : 'md:w-72'} w-72
+        md:static md:translate-x-0 md:z-10 ${collapsed ? 'md:w-20' : 'md:w-72'} w-72 print:hidden
       `}
     >
       <div className="pointer-events-none absolute -top-14 -right-12 h-36 w-36 rounded-full bg-red-500/20 blur-3xl" />

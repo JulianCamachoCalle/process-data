@@ -15,7 +15,6 @@ import {
   BarChart,
   CartesianGrid,
   Cell,
-  Legend,
   Line,
   LineChart,
   Pie,
@@ -370,7 +369,46 @@ export function KommoLeadsInsights() {
   const appliedRangeLabel = `${data.filters.start_date ?? 'sin inicio'} — ${data.filters.end_date ?? 'sin fin'}`;
 
   return (
-    <div className="space-y-6">
+    <div className="leads-insights-print-scope space-y-6">
+      <style>{`
+        @media print {
+          @page {
+            size: A4 landscape;
+            margin: 10mm;
+          }
+
+          body * {
+            visibility: hidden;
+          }
+
+          .leads-insights-print-scope,
+          .leads-insights-print-scope * {
+            visibility: visible;
+          }
+
+          .leads-insights-print-scope {
+            position: absolute;
+            inset: 0;
+            width: 100% !important;
+            max-width: none !important;
+            overflow: visible !important;
+            color: #111827 !important;
+            background: #ffffff !important;
+            -webkit-print-color-adjust: exact;
+            print-color-adjust: exact;
+          }
+
+          .leads-insights-print-scope .recharts-wrapper,
+          .leads-insights-print-scope .recharts-surface,
+          .leads-insights-print-scope .recharts-responsive-container {
+            overflow: visible !important;
+          }
+
+          .leads-insights-print-scope .recharts-text {
+            fill: #111827 !important;
+          }
+        }
+      `}</style>
       <header className="rounded-2xl border border-gray-200 bg-white px-6 py-5 shadow-[0_24px_44px_-30px_rgba(15,23,42,0.65)] flex items-center justify-between gap-4 flex-wrap">
         <div>
           <h1 className="text-2xl font-extrabold text-gray-900 inline-flex items-center gap-2">
@@ -532,7 +570,6 @@ export function KommoLeadsInsights() {
                 <XAxis dataKey="metric" tick={{ fontSize: 12 }} />
                 <YAxis tick={{ fontSize: 12 }} />
                 <Tooltip formatter={(value) => formatNumber(asChartNumber(value))} />
-                <Legend />
                 <Bar dataKey="pipelineA" name={selectedPipelineA.pipeline_name} fill="#dc2626" radius={[6, 6, 0, 0]} />
                 <Bar dataKey="pipelineB" name={selectedPipelineB.pipeline_name} fill="#f97316" radius={[6, 6, 0, 0]} />
               </BarChart>
@@ -598,7 +635,6 @@ export function KommoLeadsInsights() {
                 formatter={(value) => formatNumber(asChartNumber(value))}
                 labelFormatter={(label) => String(label)}
               />
-              <Legend verticalAlign="bottom" height={40} formatter={(value) => truncateLabel(String(value), 24)} />
             </PieChart>
           </ResponsiveContainer>
         </ChartCard>
@@ -618,7 +654,6 @@ export function KommoLeadsInsights() {
               />
               <YAxis tick={{ fontSize: 12 }} />
               <Tooltip formatter={(value) => formatNumber(asChartNumber(value))} />
-              <Legend formatter={(value) => truncateLabel(String(value), 24)} />
               {statusByPipelineData.stackKeys.map((key, index) => (
                 <Bar key={key} dataKey={key} stackId="statuses" fill={COLORS[index % COLORS.length]} radius={index === statusByPipelineData.stackKeys.length - 1 ? [8, 8, 0, 0] : [0, 0, 0, 0]} />
               ))}
