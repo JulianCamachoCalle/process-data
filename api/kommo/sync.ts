@@ -22,6 +22,7 @@ const ALL_RESOURCES = [
   'companies',
   'users',
   'pipelines',
+  'pipeline_statuses',
   'tasks',
   // pueden existir subtipos
   'events',
@@ -46,6 +47,7 @@ const RESOURCE_ENDPOINTS: Record<KommoResource, string> = {
   companies: '/api/v4/companies',
   users: '/api/v4/users',
   pipelines: '/api/v4/leads/pipelines',
+  pipeline_statuses: '',
   tasks: '/api/v4/tasks',
   // notes, tags, custom_fields y links se manejan por separado debido a sus particularidades en la API
   events: '/api/v4/events',
@@ -68,6 +70,7 @@ const RESOURCE_EVENT_TYPES: Record<string, string> = {
   companies: 'companie.pull',
   users: 'user.pull',
   pipelines: 'pipeline.pull',
+  pipeline_statuses: 'pipeline_status.pull',
   tasks: 'task.pull',
   notes: 'note.pull',
   events: 'event.pull',
@@ -90,6 +93,7 @@ const EMBEDDED_KEY_MAP: Record<string, string> = {
   companies: 'companies',
   users: 'users',
   pipelines: 'pipelines',
+  pipeline_statuses: 'statuses',
   tasks: 'tasks',
   notes: 'notes',
   tags: 'tags',
@@ -213,6 +217,32 @@ function getPipelineDedupeVersion(item: Record<string, unknown>) {
     is_archive: item.is_archive ?? null,
     account_id: item.account_id ?? null,
     statuses: embedded?.statuses ?? null,
+  });
+
+  return createHash('sha256').update(stableSeed).digest('hex');
+}
+
+function getPipelineStatusDedupeVersion(item: Record<string, unknown>) {
+  const updatedAt = item.updated_at;
+  if (updatedAt !== undefined && updatedAt !== null && String(updatedAt) !== '') {
+    return String(updatedAt);
+  }
+
+  const createdAt = item.created_at;
+  if (createdAt !== undefined && createdAt !== null && String(createdAt) !== '') {
+    return String(createdAt);
+  }
+
+  const stableSeed = JSON.stringify({
+    id: item.id ?? item.status_id ?? null,
+    pipeline_id: item.pipeline_id ?? null,
+    name: item.name ?? null,
+    sort: item.sort ?? null,
+    is_editable: item.is_editable ?? null,
+    color: item.color ?? null,
+    type: item.type ?? null,
+    account_id: item.account_id ?? null,
+    description: item.description ?? null,
   });
 
   return createHash('sha256').update(stableSeed).digest('hex');
@@ -490,6 +520,52 @@ async function fetchEntityLinks(
   }
 
   return { items: allItems, totalPulled: allItems.length };
+}
+
+async function fetchPipelineStatusesPages(
+  baseUrl: string,
+  accessToken: string,
+  pipelineId: number,
+  withValue: string | undefined,
+  maxPages: number,
+): Promise<{ items: Array<Record<string, unknown>>; totalPulled: number; hasMore: boolean }> {
+  const allItems: Array<Record<string, unknown>> = [];
+  let page = 1;
+  let hasMore = true;
+
+  while (hasMore && page <= maxPages) {
+    const endpoint = `/api/v4/leads/pipelines/${encodeURIComponent(String(pipelineId))}/statuses`;
+    const url = new URL(`${baseUrl}${endpoint}`);
+    url.searchParams.set('limit', '250');
+    url.searchParams.set('page', String(page));
+
+    if (withValue) {
+      url.searchParams.set('with', withValue);
+    }
+
+    const response = await fetch(url.toString(), {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+    });
+
+    if (!response.ok) {
+      const raw = await response.text();
+      throw new Error(`Kommo pipeline_statuses (${pipelineId}) page ${page} error (${response.status}): ${raw}`);
+    }
+
+    const payload = (await response.json()) as Record<string, unknown>;
+    const items = (payload._embedded as Record<string, unknown> | undefined)?.statuses as Array<Record<string, unknown>> ?? [];
+    allItems.push(...items);
+
+    const nextLink = (payload._links as Record<string, unknown> | undefined)?.next;
+    hasMore = !!nextLink;
+    page++;
+  }
+
+  return { items: allItems, totalPulled: allItems.length, hasMore };
 }
 
 // Handler principal para sincronización. Soporta sincronización incremental basada en un cursor de updated_at almacenado en la base de datos.
@@ -946,6 +1022,193 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
       });
     }
 
+    // Manejo especial para pipeline_statuses, ya que el endpoint requiere pipeline_id como path param.
+    if (selectedResource === 'pipeline_statuses') {
+      const maxPagesParam = asSingleQueryParam(req.query.max_pages);
+      const maxPages = maxPagesParam ? Math.min(50, parseInt(maxPagesParam, 10) || 5) : 5;
+
+      const pipelineIdParam = asSingleQueryParam(req.query.pipeline_id);
+      const statusIdParam = asSingleQueryParam(req.query.id);
+      let pipelineIds: number[] = [];
+
+      // Si vienen pipeline_id e id, hacemos fetch puntual de un stage:
+      // GET /api/v4/leads/pipelines/{pipeline_id}/statuses/{id}
+      if (pipelineIdParam !== undefined && statusIdParam !== undefined) {
+        const pipelineIdRaw = pipelineIdParam.trim();
+        const statusIdRaw = statusIdParam.trim();
+        const pipelineId = Number(pipelineIdRaw);
+        const statusId = Number(statusIdRaw);
+
+        if (!pipelineIdRaw || !Number.isInteger(pipelineId) || pipelineId <= 0) {
+          return res.status(400).json({
+            error: 'El parámetro pipeline_id debe ser un número entero positivo para resource=pipeline_statuses.',
+          });
+        }
+
+        if (!statusIdRaw || !Number.isInteger(statusId) || statusId <= 0) {
+          return res.status(400).json({
+            error: 'El parámetro id debe ser un número entero positivo para resource=pipeline_statuses.',
+          });
+        }
+
+        const endpoint = `/api/v4/leads/pipelines/${encodeURIComponent(String(pipelineId))}/statuses/${encodeURIComponent(String(statusId))}`;
+        const url = new URL(`${freshConnection.account_base_url}${endpoint}`);
+        if (requestedWith) {
+          url.searchParams.set('with', requestedWith);
+        }
+
+        const response = await fetch(url.toString(), {
+          method: 'GET',
+          headers: {
+            Authorization: `Bearer ${freshConnection.access_token}`,
+            'Content-Type': 'application/json',
+          },
+        });
+
+        if (response.status === 404) {
+          const raw = await response.text();
+          return res.status(404).json({
+            error: `Kommo pipeline_statuses pipeline_id ${pipelineId} id ${statusId} no encontrado (404).`,
+            resource: 'pipeline_statuses',
+            pipeline_id: pipelineId,
+            id: statusId,
+            details: raw,
+          });
+        }
+
+        if (!response.ok) {
+          const raw = await response.text();
+          throw new Error(`Kommo pipeline_status pipeline_id ${pipelineId} id ${statusId} error (${response.status}): ${raw}`);
+        }
+
+        const status = (await response.json()) as Record<string, unknown>;
+        const statusWithPipeline: Record<string, unknown> = {
+          ...status,
+          pipeline_id: Number(status.pipeline_id ?? pipelineId) || pipelineId,
+          id: Number(status.id ?? status.status_id ?? statusId) || statusId,
+        };
+
+        const statusIdentity = String(statusWithPipeline.id ?? statusId);
+        const dedupeVersion = getPipelineStatusDedupeVersion(statusWithPipeline);
+        const dedupeKey = `pipeline_status:${pipelineId}:${statusIdentity}:${dedupeVersion}`;
+
+        const staged = await stageWebhookEvents(supabase, [
+          {
+            account_base_url: freshConnection.account_base_url,
+            event_type: RESOURCE_EVENT_TYPES.pipeline_statuses,
+            payload: statusWithPipeline,
+            dedupe_key: dedupeKey,
+            status: 'pending',
+          },
+        ]);
+
+        const resources = [
+          {
+            resource: 'pipeline_statuses',
+            pulled: 1,
+            staged,
+            cursorFrom: null,
+            cursorTo: null,
+            hasMore: false,
+          },
+        ];
+
+        return res.status(200).json({
+          success: true,
+          account: freshConnection.account_subdomain,
+          resources,
+          totalPulled: 1,
+          totalStaged: staged,
+        });
+      }
+
+      if (pipelineIdParam !== undefined) {
+        const pipelineIdRaw = pipelineIdParam.trim();
+        const pipelineId = Number(pipelineIdRaw);
+
+        if (!pipelineIdRaw || !Number.isInteger(pipelineId) || pipelineId <= 0) {
+          return res.status(400).json({
+            error: 'El parámetro pipeline_id debe ser un número entero positivo para resource=pipeline_statuses.',
+          });
+        }
+
+        pipelineIds = [pipelineId];
+      } else {
+        const pipelinesResult = await fetchAllPages(
+          freshConnection.account_base_url,
+          RESOURCE_ENDPOINTS.pipelines,
+          freshConnection.access_token,
+          'pipelines',
+          null,
+          undefined,
+          maxPages,
+        );
+
+        pipelineIds = uniquePipelineIdsFromItems(pipelinesResult.items);
+      }
+
+      const stageRows: WebhookEventInsert[] = [];
+      let pulled = 0;
+      let hasMore = false;
+
+      for (const pipelineId of pipelineIds) {
+        const statusesResult = await fetchPipelineStatusesPages(
+          freshConnection.account_base_url,
+          freshConnection.access_token,
+          pipelineId,
+          requestedWith,
+          maxPages,
+        );
+
+        pulled += statusesResult.totalPulled;
+        hasMore = hasMore || statusesResult.hasMore;
+
+        for (const status of statusesResult.items) {
+          const statusWithPipeline: Record<string, unknown> = {
+            ...status,
+            pipeline_id: Number(status.pipeline_id ?? pipelineId) || pipelineId,
+          };
+
+          const statusIdentity = String(
+            statusWithPipeline.id
+            ?? statusWithPipeline.status_id
+            ?? createHash('sha256').update(JSON.stringify(statusWithPipeline)).digest('hex'),
+          );
+          const dedupeVersion = getPipelineStatusDedupeVersion(statusWithPipeline);
+          const dedupeKey = `pipeline_status:${pipelineId}:${statusIdentity}:${dedupeVersion}`;
+
+          stageRows.push({
+            account_base_url: freshConnection.account_base_url,
+            event_type: RESOURCE_EVENT_TYPES.pipeline_statuses,
+            payload: statusWithPipeline,
+            dedupe_key: dedupeKey,
+            status: 'pending',
+          });
+        }
+      }
+
+      const staged = await stageWebhookEvents(supabase, stageRows);
+
+      const resources = [
+        {
+          resource: 'pipeline_statuses',
+          pulled,
+          staged,
+          cursorFrom: null,
+          cursorTo: null,
+          hasMore,
+        },
+      ];
+
+      return res.status(200).json({
+        success: true,
+        account: freshConnection.account_subdomain,
+        resources,
+        totalPulled: pulled,
+        totalStaged: staged,
+      });
+    }
+
     // Manejo especial para unsorted por UID puntual.
     // Si viene uid, usamos GET /api/v4/leads/unsorted/{uid} y mantenemos el modelo UID-céntrico.
     if (selectedResource === 'unsorted') {
@@ -1230,4 +1493,15 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
       error: error instanceof Error ? error.message : 'Error interno del servidor',
     });
   }
+}
+
+function uniquePipelineIdsFromItems(items: Array<Record<string, unknown>>) {
+  const ids = new Set<number>();
+  for (const item of items) {
+    const id = Number(item.id);
+    if (Number.isInteger(id) && id > 0) {
+      ids.add(id);
+    }
+  }
+  return Array.from(ids);
 }

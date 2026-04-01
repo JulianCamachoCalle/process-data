@@ -18,6 +18,7 @@ const RESOURCES = [
   'companies',
   'users',
   'pipelines',
+  'pipeline_statuses',
   'tasks',
   'notes',
   'events',

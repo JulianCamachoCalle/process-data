@@ -5,6 +5,7 @@ export type KommoResourceKey =
   | 'companies'
   | 'users'
   | 'pipelines'
+  | 'pipeline_statuses'
   | 'tasks'
   | 'notes'
   | 'events'
@@ -108,6 +109,7 @@ const DEFAULT_COLUMN_LABELS: Record<string, string> = {
   text: 'Texto',
   origin_code: 'Origen',
   external_id: 'ID externo',
+  description: 'Descripción',
 };
 
 export const KOMMO_RESOURCES: KommoResourceDataConfig[] = [
@@ -193,6 +195,16 @@ export const KOMMO_RESOURCES: KommoResourceDataConfig[] = [
     listColumns: ['business_id', 'name', 'sort', 'is_main', 'is_unsorted_on', 'is_archive', 'updated_at_db'],
     sortColumns: ['updated_at_db', 'business_id', 'name', 'sort'],
     searchColumns: ['name'],
+  },
+  {
+    key: 'pipeline_statuses',
+    label: 'Pipeline Statuses',
+    table: 'kommo_pipeline_statuses',
+    primaryKey: 'stable_id',
+    defaultSort: 'updated_at_db',
+    listColumns: ['pipeline_id', 'business_id', 'name', 'sort', 'is_editable', 'color', 'type', 'updated_at_db'],
+    sortColumns: ['updated_at_db', 'pipeline_id', 'sort', 'business_id'],
+    searchColumns: ['name', 'color', 'pipeline_id', 'business_id'],
   },
   {
     key: 'tasks',

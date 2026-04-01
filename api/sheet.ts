@@ -243,6 +243,57 @@ async function fetchPipelineStatusMap(
 ) {
   if (pipelineIds.size === 0) return new Map<string, string>();
 
+  const normalizedStatusMap = await fetchPipelineStatusMapFromNormalizedTable(supabase, pipelineIds);
+  const fallbackStatusMap = await fetchPipelineStatusMapFromPipelinesJson(supabase, pipelineIds);
+
+  const map = new Map<string, string>();
+
+  for (const [key, value] of fallbackStatusMap.entries()) {
+    map.set(key, value);
+  }
+
+  // Prefer normalized resource first; overwrite fallback when present.
+  for (const [key, value] of normalizedStatusMap.entries()) {
+    map.set(key, value);
+  }
+
+  return map;
+}
+
+async function fetchPipelineStatusMapFromNormalizedTable(
+  supabase: ReturnType<typeof getSupabaseAdminClient>,
+  pipelineIds: Set<number>,
+) {
+  const { data, error } = await supabase
+    .from('kommo_pipeline_statuses' as never)
+    .select('business_id,pipeline_id,name' as never)
+    .in('pipeline_id' as never, Array.from(pipelineIds) as never);
+
+  if (error || !Array.isArray(data)) {
+    return new Map<string, string>();
+  }
+
+  const map = new Map<string, string>();
+
+  for (const item of data as unknown[]) {
+    if (!item || typeof item !== 'object') continue;
+    const row = item as Record<string, unknown>;
+    const pipelineId = toBusinessId(row.pipeline_id);
+    const statusId = toBusinessId(row.business_id);
+    const statusName = getStringField(row, 'name');
+
+    if (pipelineId !== null && statusId !== null && statusName) {
+      map.set(`${pipelineId}:${statusId}`, statusName);
+    }
+  }
+
+  return map;
+}
+
+async function fetchPipelineStatusMapFromPipelinesJson(
+  supabase: ReturnType<typeof getSupabaseAdminClient>,
+  pipelineIds: Set<number>,
+) {
   const { data, error } = await supabase
     .from('kommo_pipelines' as never)
     .select('business_id,statuses' as never)
