@@ -1,5 +1,6 @@
 export type KommoResourceKey =
   | 'leads'
+  | 'loss_reasons'
   | 'contacts'
   | 'companies'
   | 'users'
@@ -130,6 +131,16 @@ export const KOMMO_RESOURCES: KommoResourceDataConfig[] = [
     ],
     sortColumns: ['updated_at_db', 'business_id', 'closed_at', 'price'],
     searchColumns: ['name'],
+  },
+  {
+    key: 'loss_reasons',
+    label: 'Loss Reasons',
+    table: 'kommo_loss_reasons',
+    primaryKey: 'business_id',
+    defaultSort: 'updated_at_db',
+    listColumns: ['business_id', 'name', 'sort', 'updated_at', 'updated_at_db'],
+    sortColumns: ['updated_at_db', 'updated_at', 'created_at', 'sort', 'business_id'],
+    searchColumns: ['name', 'business_id'],
   },
   {
     key: 'contacts',

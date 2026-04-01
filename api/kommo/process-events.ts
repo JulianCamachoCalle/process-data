@@ -524,6 +524,26 @@ function mapKommoUnsortedSummaryToTable(payload: Record<string, unknown>) {
   };
 }
 
+function mapKommoLossReasonToTable(payload: Record<string, unknown>) {
+  const lossReasonId = asNumber(payload.id, 0);
+  if (!lossReasonId) {
+    return null;
+  }
+
+  const createdAtTs = asNumber(payload.created_at, 0);
+  const updatedAtTs = asNumber(payload.updated_at, 0);
+
+  return {
+    stable_id: `kommo-loss-reason-${lossReasonId}`,
+    business_id: lossReasonId,
+    name: payload.name ?? null,
+    sort: asNumber(payload.sort, 0) || null,
+    created_at: createdAtTs ? new Date(createdAtTs * 1000).toISOString() : null,
+    updated_at: updatedAtTs ? new Date(updatedAtTs * 1000).toISOString() : null,
+    raw_payload: payload,
+  };
+}
+
 type WorkItem<T extends Record<string, unknown>> = {
   eventId: string;
   attempts: number;
@@ -960,6 +980,25 @@ async function processEvent(event: KommoEventRow) {
     return;
   }
 
+  if (event.event_type === 'loss_reason.pull') {
+    const mapped = mapKommoLossReasonToTable(event.payload);
+    if (!mapped) {
+      throw new Error('No se pudo derivar loss_reason_id desde payload de Kommo');
+    }
+
+    const { error: upsertError } = await supabase.from('kommo_loss_reasons' as never).upsert(
+      mapped as never,
+      {
+        onConflict: 'business_id',
+      },
+    );
+
+    if (upsertError) {
+      throw new Error(upsertError.message || 'No se pudo upsert a kommo_loss_reasons');
+    }
+    return;
+  }
+
   if (event.event_type === 'unsorted.summary.pull') {
     const mapped = mapKommoUnsortedSummaryToTable(event.payload);
     if (!mapped) {
@@ -1138,6 +1177,8 @@ export default async function kommoProcessEventsHandler(req: VercelRequest, res:
             await processMapped('kommo_talks', 'business_id', mapKommoTalkToTable);
           } else if (eventType === 'source.pull') {
             await processMapped('kommo_sources', 'business_id', mapKommoSourceToTable);
+          } else if (eventType === 'loss_reason.pull') {
+            await processMapped('kommo_loss_reasons', 'business_id', mapKommoLossReasonToTable);
           } else if (eventType === 'pipeline.pull') {
             await processMapped('kommo_pipelines', 'business_id', mapKommoPipelineToTable);
           } else if (eventType === 'unsorted.summary.pull') {

@@ -17,6 +17,7 @@ const SYNC_SECRET_ENV = 'KOMMO_SYNC_SECRET';
 // Algunos necesitan manejo especial (tags, custom_fields, links, notes) porque no siguen el patrón estándar de endpoints o necesitan parámetros adicionales.
 const ALL_RESOURCES = [
   'leads',
+  'loss_reasons',
   'contacts', 
   'companies',
   'users',
@@ -40,6 +41,7 @@ type KommoResource = typeof ALL_RESOURCES[number];
 // Mapeo de recursos a sus endpoints correspondientes
 const RESOURCE_ENDPOINTS: Record<KommoResource, string> = {
   leads: '/api/v4/leads',
+  loss_reasons: '/api/v4/leads/loss_reasons',
   contacts: '/api/v4/contacts',
   companies: '/api/v4/companies',
   users: '/api/v4/users',
@@ -61,6 +63,7 @@ const RESOURCE_ENDPOINTS: Record<KommoResource, string> = {
 // Tipos de eventos para cada recurso
 const RESOURCE_EVENT_TYPES: Record<string, string> = {
   leads: 'lead.pull',
+  loss_reasons: 'loss_reason.pull',
   contacts: 'contact.pull',
   companies: 'companie.pull',
   users: 'user.pull',
@@ -82,6 +85,7 @@ const EMBEDDED_KEY_MAP: Record<string, string> = {
   events: 'items',  // Usa items en lugar de events
   catalogs: 'catalogs',
   leads: 'leads',
+  loss_reasons: 'loss_reasons',
   contacts: 'contacts',
   companies: 'companies',
   users: 'users',
@@ -498,6 +502,148 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
     const resourcesToSync: KommoResource[] = [selectedResource];
     const requestedWith = asSingleQueryParam(req.query.with)?.trim();
     const leadsWith = requestedWith || 'contacts,loss_reason,is_price_modified_by_robot,catalog_elements,source_id,source';
+
+    // Manejo especial para lead puntual por ID.
+    // Si viene id con resource=leads, usamos GET /api/v4/leads/{id} y stageamos un único evento lead.pull.
+    if (selectedResource === 'leads') {
+      const leadIdParam = asSingleQueryParam(req.query.id);
+
+      if (leadIdParam !== undefined) {
+        const leadIdRaw = leadIdParam.trim();
+        const leadId = Number(leadIdRaw);
+
+        if (!leadIdRaw || !Number.isInteger(leadId) || leadId <= 0) {
+          return res.status(400).json({ error: 'El parámetro id debe ser un número entero positivo para resource=leads.' });
+        }
+
+        const endpoint = `/api/v4/leads/${encodeURIComponent(String(leadId))}`;
+        const url = new URL(`${freshConnection.account_base_url}${endpoint}`);
+        if (leadsWith) {
+          url.searchParams.set('with', leadsWith);
+        }
+
+        const response = await fetch(url.toString(), {
+          method: 'GET',
+          headers: {
+            Authorization: `Bearer ${freshConnection.access_token}`,
+            'Content-Type': 'application/json',
+          },
+        });
+
+        if (!response.ok) {
+          const raw = await response.text();
+          throw new Error(`Kommo lead id ${leadId} error (${response.status}): ${raw}`);
+        }
+
+        const lead = (await response.json()) as Record<string, unknown>;
+        const dedupeVersion = String(lead.updated_at ?? lead.created_at ?? '');
+        const dedupeKey = `lead:${leadId}:${dedupeVersion}`;
+
+        const staged = await stageWebhookEvents(supabase, [
+          {
+            account_base_url: freshConnection.account_base_url,
+            event_type: RESOURCE_EVENT_TYPES.leads,
+            payload: lead,
+            dedupe_key: dedupeKey,
+            status: 'pending',
+          },
+        ]);
+
+        const resources = [
+          {
+            resource: 'leads',
+            pulled: 1,
+            staged,
+            cursorFrom: null,
+            cursorTo: null,
+            hasMore: false,
+          },
+        ];
+
+        return res.status(200).json({
+          success: true,
+          account: freshConnection.account_subdomain,
+          resources,
+          totalPulled: 1,
+          totalStaged: staged,
+        });
+      }
+    }
+
+    // Manejo especial para loss_reason puntual por ID.
+    // Si viene id con resource=loss_reasons, usamos GET /api/v4/leads/loss_reasons/{id}
+    // y stageamos un único evento loss_reason.pull.
+    if (selectedResource === 'loss_reasons') {
+      const lossReasonIdParam = asSingleQueryParam(req.query.id);
+
+      if (lossReasonIdParam !== undefined) {
+        const lossReasonIdRaw = lossReasonIdParam.trim();
+        const lossReasonId = Number(lossReasonIdRaw);
+
+        if (!lossReasonIdRaw || !Number.isInteger(lossReasonId) || lossReasonId <= 0) {
+          return res.status(400).json({
+            error: 'El parámetro id debe ser un número entero positivo para resource=loss_reasons.',
+          });
+        }
+
+        const endpoint = `/api/v4/leads/loss_reasons/${encodeURIComponent(String(lossReasonId))}`;
+        const response = await fetch(`${freshConnection.account_base_url}${endpoint}`, {
+          method: 'GET',
+          headers: {
+            Authorization: `Bearer ${freshConnection.access_token}`,
+            'Content-Type': 'application/json',
+          },
+        });
+
+        if (response.status === 404) {
+          const raw = await response.text();
+          return res.status(404).json({
+            error: `Kommo loss_reasons id ${lossReasonId} no encontrado (404).`,
+            resource: 'loss_reasons',
+            id: lossReasonId,
+            details: raw,
+          });
+        }
+
+        if (!response.ok) {
+          const raw = await response.text();
+          throw new Error(`Kommo loss_reason id ${lossReasonId} error (${response.status}): ${raw}`);
+        }
+
+        const lossReason = (await response.json()) as Record<string, unknown>;
+        const dedupeVersion = String(lossReason.updated_at ?? lossReason.created_at ?? '');
+        const dedupeKey = `loss_reason:${lossReasonId}:${dedupeVersion}`;
+
+        const staged = await stageWebhookEvents(supabase, [
+          {
+            account_base_url: freshConnection.account_base_url,
+            event_type: RESOURCE_EVENT_TYPES.loss_reasons,
+            payload: lossReason,
+            dedupe_key: dedupeKey,
+            status: 'pending',
+          },
+        ]);
+
+        const resources = [
+          {
+            resource: 'loss_reasons',
+            pulled: 1,
+            staged,
+            cursorFrom: null,
+            cursorTo: null,
+            hasMore: false,
+          },
+        ];
+
+        return res.status(200).json({
+          success: true,
+          account: freshConnection.account_subdomain,
+          resources,
+          totalPulled: 1,
+          totalStaged: staged,
+        });
+      }
+    }
 
     const results: Array<{
       resource: string;

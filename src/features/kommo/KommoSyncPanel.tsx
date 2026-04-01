@@ -13,6 +13,7 @@ interface KommoSyncPanelProps {
 
 const RESOURCES = [
   'leads',
+  'loss_reasons',
   'contacts', 
   'companies',
   'users',
