@@ -322,6 +322,21 @@ function getRoleDedupeVersion(item: Record<string, unknown>) {
   return createHash('sha256').update(stableSeed).digest('hex');
 }
 
+function getTaskDedupeVersion(item: Record<string, unknown>) {
+  const updatedAt = item.updated_at;
+  if (updatedAt !== undefined && updatedAt !== null && String(updatedAt) !== '') {
+    return String(updatedAt);
+  }
+
+  const createdAt = item.created_at;
+  if (createdAt !== undefined && createdAt !== null && String(createdAt) !== '') {
+    return String(createdAt);
+  }
+
+  const stableSeed = JSON.stringify(item);
+  return createHash('sha256').update(stableSeed).digest('hex');
+}
+
 // Dado un array de eventos a insertar, los inserta en la tabla kommo_webhook_events y evita los errores por duplicados. Si hay un error, divide el batch y reintenta para aislar filas problemáticas.
 type WebhookEventInsert = {
   account_base_url: string;
@@ -1013,6 +1028,81 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
         const resources = [
           {
             resource: 'roles',
+            pulled: 1,
+            staged,
+            cursorFrom: null,
+            cursorTo: null,
+            hasMore: false,
+          },
+        ];
+
+        return res.status(200).json({
+          success: true,
+          account: freshConnection.account_subdomain,
+          resources,
+          totalPulled: 1,
+          totalStaged: staged,
+        });
+      }
+    }
+
+    // Manejo especial para task puntual por ID.
+    // Si viene id con resource=tasks, usamos GET /api/v4/tasks/{id}
+    // y stageamos un único evento task.pull.
+    if (selectedResource === 'tasks') {
+      const taskIdParam = asSingleQueryParam(req.query.id);
+
+      if (taskIdParam !== undefined) {
+        const taskIdRaw = taskIdParam.trim();
+        const taskId = Number(taskIdRaw);
+
+        if (!taskIdRaw || !Number.isInteger(taskId) || taskId <= 0) {
+          return res.status(400).json({
+            error: 'El parámetro id debe ser un número entero positivo para resource=tasks.',
+          });
+        }
+
+        const endpoint = `/api/v4/tasks/${encodeURIComponent(String(taskId))}`;
+        const response = await fetch(`${freshConnection.account_base_url}${endpoint}`, {
+          method: 'GET',
+          headers: {
+            Authorization: `Bearer ${freshConnection.access_token}`,
+            'Content-Type': 'application/json',
+          },
+        });
+
+        if (response.status === 404) {
+          const raw = await response.text();
+          return res.status(404).json({
+            error: `Kommo tasks id ${taskId} no encontrado (404).`,
+            resource: 'tasks',
+            id: taskId,
+            details: raw,
+          });
+        }
+
+        if (!response.ok) {
+          const raw = await response.text();
+          throw new Error(`Kommo task id ${taskId} error (${response.status}): ${raw}`);
+        }
+
+        const task = (await response.json()) as Record<string, unknown>;
+        const dedupeVersion = getTaskDedupeVersion(task);
+        const dedupeKey = `task:${taskId}:${dedupeVersion}`;
+
+        const staged = await stageWebhookEvents(supabase, [
+          {
+            account_base_url: freshConnection.account_base_url,
+            event_type: RESOURCE_EVENT_TYPES.tasks,
+            payload: task,
+            dedupe_key: dedupeKey,
+            status: 'pending',
+          },
+        ]);
+
+        const resources = [
+          {
+            resource: 'tasks',
             pulled: 1,
             staged,
             cursorFrom: null,
@@ -2602,10 +2692,12 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
                   ? String(item.updated_at ?? item.created_at ?? '')
                   : resource === 'companies'
                     ? String(item.updated_at ?? item.created_at ?? '')
-                    : resource === 'users'
-                      ? getUserDedupeVersion(item)
-                      : resource === 'roles'
-                        ? getRoleDedupeVersion(item)
+                      : resource === 'users'
+                        ? getUserDedupeVersion(item)
+                        : resource === 'roles'
+                          ? getRoleDedupeVersion(item)
+                          : resource === 'tasks'
+                            ? getTaskDedupeVersion(item)
                     : String(item.updated_at ?? '');
         const dedupeKey = `${resource}:${dedupeIdentity}:${dedupeVersion}`;
         stageRows.push({

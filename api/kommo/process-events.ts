@@ -322,20 +322,24 @@ function mapKommoTaskToTable(payload: Record<string, unknown>) {
     business_id: taskId,
     name: payload.name ?? null,
     text: payload.text ?? null,
+    entity_type: asNullableText(payload.entity_type),
+    entity_id: asNumber(payload.entity_id, 0) || null,
     task_type_id: asNumber(payload.task_type_id, 0) || null,
     status: payload.status ?? null,
     group_id: asNumber(payload.group_id, 0) || null,
     created_by: asNumber(payload.created_by, 0) || null,
+    updated_by: asNumber(payload.updated_by, 0) || null,
     duration: asNumber(payload.duration, 0) || null,
-    // DB column: bigint (unix seconds)
-    complete_till: completeTillTs || null,
+    complete_till: completeTillTs ? new Date(completeTillTs * 1000).toISOString() : null,
     is_completed: payload.is_completed ?? false,
     result: payload.result ?? null,
+    account_id: asNumber(payload.account_id, 0) || null,
     responsible_user_id: asNumber(payload.responsible_user_id, 0) || null,
     created_at: createdAtTs ? new Date(createdAtTs * 1000).toISOString() : null,
     updated_at: updatedAtTs ? new Date(updatedAtTs * 1000).toISOString() : null,
     closest_task_at: closestTaskAtTs ? new Date(closestTaskAtTs * 1000).toISOString() : null,
     completed_at: completedAtTs ? new Date(completedAtTs * 1000).toISOString() : null,
+    raw_payload: payload,
   };
 }
 
