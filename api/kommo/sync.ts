@@ -544,7 +544,6 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
 
         const nextCursor = getMaxUpdatedAtIso(updatedEntities);
 
-        let pulledLinks = 0;
         let stagedLinks = 0;
         const rows: WebhookEventInsert[] = [];
 
@@ -560,8 +559,6 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
               entityId,
               1,
             );
-
-            pulledLinks += linksResult.items.length;
 
             for (const link of linksResult.items) {
               const toEntityType = String(link.to_entity_type ?? link.to ?? '');

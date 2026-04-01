@@ -6,6 +6,7 @@ import { SheetView } from './components/SheetView';
 import { DashboardOverview } from './features/dashboard/DashboardOverview';
 import { Login } from './features/auth/Login';
 import { KommoSyncPanel } from './features/kommo/KommoSyncPanel';
+import { KommoExplorer } from './features/kommo/KommoExplorer';
 import { prefetchSheetData } from './hooks/useSheetData';
 import { isSupabaseConfigured, supabase } from './lib/supabase';
 
@@ -120,6 +121,8 @@ function Layout() {
             <Routes>
               <Route path="/" element={<DashboardOverview />} />
               <Route path="/sheet/:sheetName" element={<SheetRouteWrapper />} />
+              <Route path="/kommo" element={<KommoExplorer />} />
+              <Route path="/kommo/:resource" element={<KommoExplorer />} />
             </Routes>
           </div>
         </main>
