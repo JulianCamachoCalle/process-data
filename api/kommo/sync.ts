@@ -346,6 +346,46 @@ type WebhookEventInsert = {
   status: 'pending';
 };
 
+type QueueStats = {
+  pending: number;
+  processing: number;
+  failed: number;
+};
+
+async function getQueueStatsForAccountBaseUrl(
+  supabase: ReturnType<typeof getSupabaseAdminClient>,
+  accountBaseUrl: string,
+): Promise<QueueStats> {
+  const [pendingCount, processingCount, failedCount] = await Promise.all([
+    supabase
+      .from('kommo_webhook_events' as never)
+      .select('id', { count: 'exact', head: true })
+      .eq('account_base_url', accountBaseUrl)
+      .eq('status', 'pending'),
+    supabase
+      .from('kommo_webhook_events' as never)
+      .select('id', { count: 'exact', head: true })
+      .eq('account_base_url', accountBaseUrl)
+      .eq('status', 'processing'),
+    supabase
+      .from('kommo_webhook_events' as never)
+      .select('id', { count: 'exact', head: true })
+      .eq('account_base_url', accountBaseUrl)
+      .eq('status', 'failed'),
+  ]);
+
+  const error = pendingCount.error ?? processingCount.error ?? failedCount.error;
+  if (error) {
+    throw new Error(error.message || 'No se pudieron obtener métricas de cola Kommo');
+  }
+
+  return {
+    pending: pendingCount.count ?? 0,
+    processing: processingCount.count ?? 0,
+    failed: failedCount.count ?? 0,
+  };
+}
+
 // Retorna el número de filas que fueron efectivamente insertadas (no duplicados).
 async function stageWebhookEvents(
   supabase: ReturnType<typeof getSupabaseAdminClient>,
@@ -812,6 +852,8 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
       ? resourceParam as KommoResource 
       : 'leads';
     const resourcesToSync: KommoResource[] = [selectedResource];
+    const includeQueueStatsParam = asSingleQueryParam(req.query.include_queue_stats);
+    const includeQueueStats = includeQueueStatsParam === 'true' || includeQueueStatsParam === '1';
     const requestedWith = asSingleQueryParam(req.query.with)?.trim();
     const leadsWith = requestedWith || 'contacts,loss_reason,is_price_modified_by_robot,catalog_elements,source_id,source';
     const contactsWith = requestedWith || 'leads,catalog_elements';
@@ -1766,6 +1808,7 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
       cursorFrom: string | null;
       cursorTo: string | null;
       hasMore?: boolean;
+      truncated?: boolean;
     }> = [];
 
     // Manejo especial para recursos que requieren iteración por entity_type (tags, custom_fields, notes) o por entidad (links).
@@ -1954,6 +1997,9 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
         resources: results,
         totalPulled: results.reduce((sum, r) => sum + r.pulled, 0),
         totalStaged: results.reduce((sum, r) => sum + r.staged, 0),
+        queueStats: includeQueueStats
+          ? await getQueueStatsForAccountBaseUrl(supabase, freshConnection.account_base_url)
+          : undefined,
       });
     }
 
@@ -2007,7 +2053,7 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
               freshConnection.access_token,
               entity,
               entityId,
-              1,
+              maxPages,
             );
 
             for (const link of linksResult.items) {
@@ -2085,6 +2131,9 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
         resources: results,
         totalPulled: results.reduce((sum, r) => sum + r.pulled, 0),
         totalStaged: results.reduce((sum, r) => sum + r.staged, 0),
+        queueStats: includeQueueStats
+          ? await getQueueStatsForAccountBaseUrl(supabase, freshConnection.account_base_url)
+          : undefined,
       });
     }
 
@@ -2713,7 +2762,7 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
 
       // Actualizamos el cursor con el máximo updated_at de los items que acabamos de sincronizar.
       const nextCursor = getMaxUpdatedAtIso(items);
-      if (nextCursor) {
+      if (nextCursor && !hasMore) {
         const { error: upsertCursorError } = await supabase.from('kommo_sync_cursor' as never).upsert(
           {
             account_subdomain: freshConnection.account_subdomain,
@@ -2736,8 +2785,9 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
         pulled: totalPulled,
         staged,
         cursorFrom: fromDateIso,
-        cursorTo: nextCursor,
+        cursorTo: hasMore ? fromDateIso : nextCursor,
         hasMore,
+        truncated: hasMore,
       });
     }
 
@@ -2747,6 +2797,9 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
       resources: results,
       totalPulled: results.reduce((sum, r) => sum + r.pulled, 0),
       totalStaged: results.reduce((sum, r) => sum + r.staged, 0),
+      queueStats: includeQueueStats
+        ? await getQueueStatsForAccountBaseUrl(supabase, freshConnection.account_base_url)
+        : undefined,
     });
   } catch (error: unknown) {
     return res.status(500).json({

@@ -4,6 +4,10 @@ import { getSupabaseAdminClient, isSecretAuthorized, isVercelCronAuthorized, ver
 const PROCESS_SECRET_HEADER = 'x-kommo-process-secret';
 const PROCESS_SECRET_ENV = 'KOMMO_PROCESS_SECRET';
 const DEFAULT_LIMIT = 50;
+const DEFAULT_PROCESSING_LEASE_SECONDS = 600;
+const DEFAULT_FAILED_MAX_ATTEMPTS = 8;
+const DEFAULT_FAILED_BACKOFF_BASE_SECONDS = 30;
+const DEFAULT_FAILED_BACKOFF_MAX_SECONDS = 1800;
 
 const DEFAULT_UPSERT_CHUNK_SIZE = 250;
 
@@ -46,6 +50,112 @@ function groupBy<T>(items: T[], getKey: (item: T) => string) {
 function asNumber(value: unknown, fallback = 0) {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+type QueueStatus = 'pending' | 'processing' | 'failed';
+
+function getExponentialBackoffDelaySeconds(
+  attempts: number,
+  baseDelaySeconds: number,
+  maxDelaySeconds: number,
+) {
+  const normalizedAttempts = Math.max(0, Math.floor(attempts));
+  const exponent = Math.max(0, normalizedAttempts - 1);
+  const delay = baseDelaySeconds * (2 ** exponent);
+  return Math.min(maxDelaySeconds, Math.max(baseDelaySeconds, delay));
+}
+
+async function recoverStaleProcessingEvents(
+  supabase: ReturnType<typeof getSupabaseAdminClient>,
+  leaseSeconds: number,
+) {
+  const cutoffIso = new Date(Date.now() - leaseSeconds * 1000).toISOString();
+  const { data, error } = await supabase
+    .from('kommo_webhook_events' as never)
+    .update({ status: 'pending' } as never)
+    .eq('status', 'processing')
+    .lt('updated_at', cutoffIso)
+    .select('id');
+
+  if (error) {
+    throw new Error(error.message || 'No se pudieron recuperar eventos stale en processing');
+  }
+
+  return (data ?? []).length;
+}
+
+async function retryFailedEventsWithBackoff(
+  supabase: ReturnType<typeof getSupabaseAdminClient>,
+  args: {
+    maxAttempts: number;
+    baseDelaySeconds: number;
+    maxDelaySeconds: number;
+  },
+) {
+  const { data, error } = await supabase
+    .from('kommo_webhook_events' as never)
+    .select('id,attempts,updated_at')
+    .eq('status', 'failed')
+    .lt('attempts', args.maxAttempts);
+
+  if (error) {
+    throw new Error(error.message || 'No se pudieron leer eventos failed para retry');
+  }
+
+  const now = Date.now();
+  const rows = (data ?? []) as Array<{ id: string; attempts: number; updated_at: string | null }>;
+  const retryIds: string[] = [];
+
+  for (const row of rows) {
+    const updatedAtMs = row.updated_at ? Date.parse(row.updated_at) : Number.NaN;
+    if (!Number.isFinite(updatedAtMs)) {
+      retryIds.push(row.id);
+      continue;
+    }
+
+    const delaySeconds = getExponentialBackoffDelaySeconds(
+      row.attempts ?? 0,
+      args.baseDelaySeconds,
+      args.maxDelaySeconds,
+    );
+    const ageSeconds = (now - updatedAtMs) / 1000;
+    if (ageSeconds >= delaySeconds) {
+      retryIds.push(row.id);
+    }
+  }
+
+  if (retryIds.length === 0) {
+    return 0;
+  }
+
+  const { data: retriedRows, error: retryError } = await supabase
+    .from('kommo_webhook_events' as never)
+    .update({ status: 'pending' } as never)
+    .in('id', retryIds)
+    .eq('status', 'failed')
+    .select('id');
+
+  if (retryError) {
+    throw new Error(retryError.message || 'No se pudieron reencolar eventos failed');
+  }
+
+  return (retriedRows ?? []).length;
+}
+
+async function countQueueByStatus(
+  supabase: ReturnType<typeof getSupabaseAdminClient>,
+  status: QueueStatus,
+) {
+  const { count, error } = await supabase
+    .from('kommo_webhook_events' as never)
+    .select('id', { count: 'exact', head: true })
+    .eq('status', status);
+
+  if (error) {
+    throw new Error(error.message || `No se pudo contar eventos en estado ${status}`);
+  }
+
+  return count ?? 0;
 }
 
 function asNullableText(value: unknown) {
@@ -1311,7 +1421,35 @@ export default async function kommoProcessEventsHandler(req: VercelRequest, res:
     const loopParam = asSingleQueryParam(req.query.loop);
     const shouldLoop = loopParam === 'true' || loopParam === '1';
 
+    const processingLeaseParam = asSingleQueryParam(req.query.processing_lease_seconds);
+    const failedMaxAttemptsParam = asSingleQueryParam(req.query.failed_max_attempts);
+    const failedBackoffBaseParam = asSingleQueryParam(req.query.failed_backoff_base_seconds);
+    const failedBackoffMaxParam = asSingleQueryParam(req.query.failed_backoff_max_seconds);
+
+    const processingLeaseSeconds = Math.max(
+      1,
+      Number(processingLeaseParam ?? DEFAULT_PROCESSING_LEASE_SECONDS) || DEFAULT_PROCESSING_LEASE_SECONDS,
+    );
+    const failedMaxAttempts = Math.max(
+      1,
+      Number(failedMaxAttemptsParam ?? DEFAULT_FAILED_MAX_ATTEMPTS) || DEFAULT_FAILED_MAX_ATTEMPTS,
+    );
+    const failedBackoffBaseSeconds = Math.max(
+      1,
+      Number(failedBackoffBaseParam ?? DEFAULT_FAILED_BACKOFF_BASE_SECONDS) || DEFAULT_FAILED_BACKOFF_BASE_SECONDS,
+    );
+    const failedBackoffMaxSeconds = Math.max(
+      failedBackoffBaseSeconds,
+      Number(failedBackoffMaxParam ?? DEFAULT_FAILED_BACKOFF_MAX_SECONDS) || DEFAULT_FAILED_BACKOFF_MAX_SECONDS,
+    );
+
     const supabase = getSupabaseAdminClient();
+    const recoveredProcessing = await recoverStaleProcessingEvents(supabase, processingLeaseSeconds);
+    const retriedFailed = await retryFailedEventsWithBackoff(supabase, {
+      maxAttempts: failedMaxAttempts,
+      baseDelaySeconds: failedBackoffBaseSeconds,
+      maxDelaySeconds: failedBackoffMaxSeconds,
+    });
     
     let totalProcessed = 0;
     let totalFailed = 0;
@@ -1513,11 +1651,22 @@ export default async function kommoProcessEventsHandler(req: VercelRequest, res:
       await new Promise(resolve => setTimeout(resolve, 100));
     }
 
+    const [remainingPending, remainingProcessing, remainingFailed] = await Promise.all([
+      countQueueByStatus(supabase, 'pending'),
+      countQueueByStatus(supabase, 'processing'),
+      countQueueByStatus(supabase, 'failed'),
+    ]);
+
     return res.status(200).json({
       success: true,
       iterations,
       processed: totalProcessed,
       failed: totalFailed,
+      recoveredProcessing,
+      retriedFailed,
+      remainingPending,
+      remainingProcessing,
+      remainingFailed,
     });
   } catch (error: unknown) {
     return res.status(500).json({
