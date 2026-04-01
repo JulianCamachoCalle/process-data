@@ -221,12 +221,18 @@ function mapKommoCompanyToTable(payload: Record<string, unknown>) {
     group_id: asNumber(payload.group_id, 0) || null,
     account_id: asNumber(payload.account_id, 0) || null,
     responsible_user_id: asNumber(payload.responsible_user_id, 0) || null,
+    created_by: asNumber(payload.created_by, 0) || null,
+    updated_by: asNumber(payload.updated_by, 0) || null,
     is_deleted: payload.is_deleted ?? false,
     created_at: createdAtTs ? new Date(createdAtTs * 1000).toISOString() : null,
     updated_at: updatedAtTs ? new Date(updatedAtTs * 1000).toISOString() : null,
     closest_task_at: closestTaskAtTs ? new Date(closestTaskAtTs * 1000).toISOString() : null,
     custom_fields_values: payload.custom_fields_values ?? null,
-    embedded_data: embedded ? { tags: embedded.tags } : null,
+    tags: embedded?.tags ?? null,
+    contacts: embedded?.contacts ?? null,
+    leads: embedded?.leads ?? null,
+    catalog_elements: embedded?.catalog_elements ?? null,
+    raw_payload: payload,
   };
 }
 

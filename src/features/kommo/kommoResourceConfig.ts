@@ -175,7 +175,7 @@ export const KOMMO_RESOURCES: KommoResourceDataConfig[] = [
     table: 'kommo_companies',
     primaryKey: 'business_id',
     defaultSort: 'updated_at',
-    listColumns: ['business_id', 'name', 'responsible_user_id', 'group_id', 'is_deleted', 'updated_at'],
+    listColumns: ['business_id', 'name', 'responsible_user_id', 'created_by', 'updated_by', 'is_deleted', 'updated_at'],
     sortColumns: ['updated_at', 'business_id', 'name'],
     searchColumns: ['name'],
   },

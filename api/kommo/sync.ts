@@ -326,7 +326,7 @@ async function fetchAllPages(
       url.searchParams.set('filter[updated_at][from]', String(toUnixSeconds(fromDateIso)));
     }
 
-    if (withValue && (resource === 'leads' || resource === 'contacts')) {
+    if (withValue && (resource === 'leads' || resource === 'contacts' || resource === 'companies')) {
       url.searchParams.set('with', withValue);
     }
 
@@ -605,6 +605,7 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
     const requestedWith = asSingleQueryParam(req.query.with)?.trim();
     const leadsWith = requestedWith || 'contacts,loss_reason,is_price_modified_by_robot,catalog_elements,source_id,source';
     const contactsWith = requestedWith || 'leads,catalog_elements';
+    const companiesWith = requestedWith || 'leads,contacts,catalog_elements';
 
     // Manejo especial para lead puntual por ID.
     // Si viene id con resource=leads, usamos GET /api/v4/leads/{id} y stageamos un único evento lead.pull.
@@ -735,6 +736,86 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
         const resources = [
           {
             resource: 'contacts',
+            pulled: 1,
+            staged,
+            cursorFrom: null,
+            cursorTo: null,
+            hasMore: false,
+          },
+        ];
+
+        return res.status(200).json({
+          success: true,
+          account: freshConnection.account_subdomain,
+          resources,
+          totalPulled: 1,
+          totalStaged: staged,
+        });
+      }
+    }
+
+    // Manejo especial para company puntual por ID.
+    // Si viene id con resource=companies, usamos GET /api/v4/companies/{id}
+    // y stageamos un único evento companie.pull.
+    if (selectedResource === 'companies') {
+      const companyIdParam = asSingleQueryParam(req.query.id);
+
+      if (companyIdParam !== undefined) {
+        const companyIdRaw = companyIdParam.trim();
+        const companyId = Number(companyIdRaw);
+
+        if (!companyIdRaw || !Number.isInteger(companyId) || companyId <= 0) {
+          return res.status(400).json({
+            error: 'El parámetro id debe ser un número entero positivo para resource=companies.',
+          });
+        }
+
+        const endpoint = `/api/v4/companies/${encodeURIComponent(String(companyId))}`;
+        const url = new URL(`${freshConnection.account_base_url}${endpoint}`);
+        if (companiesWith) {
+          url.searchParams.set('with', companiesWith);
+        }
+
+        const response = await fetch(url.toString(), {
+          method: 'GET',
+          headers: {
+            Authorization: `Bearer ${freshConnection.access_token}`,
+            'Content-Type': 'application/json',
+          },
+        });
+
+        if (response.status === 404) {
+          const raw = await response.text();
+          return res.status(404).json({
+            error: `Kommo companies id ${companyId} no encontrado (404).`,
+            resource: 'companies',
+            id: companyId,
+            details: raw,
+          });
+        }
+
+        if (!response.ok) {
+          const raw = await response.text();
+          throw new Error(`Kommo company id ${companyId} error (${response.status}): ${raw}`);
+        }
+
+        const company = (await response.json()) as Record<string, unknown>;
+        const dedupeVersion = String(company.updated_at ?? company.created_at ?? '');
+        const dedupeKey = `company:${companyId}:${dedupeVersion}`;
+
+        const staged = await stageWebhookEvents(supabase, [
+          {
+            account_base_url: freshConnection.account_base_url,
+            event_type: RESOURCE_EVENT_TYPES.companies,
+            payload: company,
+            dedupe_key: dedupeKey,
+            status: 'pending',
+          },
+        ]);
+
+        const resources = [
+          {
+            resource: 'companies',
             pulled: 1,
             staged,
             cursorFrom: null,
@@ -1508,7 +1589,9 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
           ? leadsWith
           : resource === 'contacts'
             ? contactsWith
-            : undefined,
+            : resource === 'companies'
+              ? companiesWith
+              : undefined,
         maxPages,
       );
 
@@ -1525,7 +1608,9 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
                 ? getPipelineDedupeVersion(item)
                 : resource === 'contacts'
                   ? String(item.updated_at ?? item.created_at ?? '')
-                : String(item.updated_at ?? '');
+                  : resource === 'companies'
+                    ? String(item.updated_at ?? item.created_at ?? '')
+                    : String(item.updated_at ?? '');
         const dedupeKey = `${resource}:${dedupeIdentity}:${dedupeVersion}`;
         stageRows.push({
           account_base_url: freshConnection.account_base_url,
