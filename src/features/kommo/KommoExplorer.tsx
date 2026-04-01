@@ -1,16 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import {
-  ChevronLeft,
-  ChevronRight,
-  Database,
-  Search,
-  ArrowDownWideNarrow,
-  ArrowUpWideNarrow,
-  Eye,
-  X,
-} from 'lucide-react';
 import { getKommoColumnLabel, getKommoResource, KOMMO_RESOURCES, type KommoResourceKey } from './kommoResourceConfig';
 
 type ApiResponse = {
@@ -28,12 +18,10 @@ function isLikelyTimestamp(value: string | number) {
   if (typeof value === 'number') {
     return value > 1_000_000_000 && value < 9_999_999_999_999;
   }
-
   if (typeof value === 'string') {
     if (/^\d{10,13}$/.test(value)) return true;
     if (/^\d{4}-\d{2}-\d{2}T/.test(value)) return true;
   }
-
   return false;
 }
 
@@ -42,26 +30,21 @@ function toLocaleDateTime(value: string | number) {
     const ms = value > 9_999_999_999 ? value : value * 1000;
     return new Date(ms).toLocaleString('es-PE');
   }
-
   if (/^\d{10,13}$/.test(value)) {
     const asNumber = Number(value);
     const ms = value.length === 13 ? asNumber : asNumber * 1000;
     return new Date(ms).toLocaleString('es-PE');
   }
-
   return new Date(value).toLocaleString('es-PE');
 }
 
 function formatCellValue(value: unknown) {
   if (value === null || value === undefined || value === '') return '-';
-
   if (typeof value === 'boolean') return value ? 'Sí' : 'No';
-
   if (typeof value === 'number') {
     if (isLikelyTimestamp(value)) return toLocaleDateTime(value);
     return new Intl.NumberFormat('es-PE').format(value);
   }
-
   if (typeof value === 'string') {
     if (isLikelyTimestamp(value)) {
       const formatted = toLocaleDateTime(value);
@@ -69,7 +52,6 @@ function formatCellValue(value: unknown) {
     }
     return value;
   }
-
   if (Array.isArray(value)) return `${value.length} ítem(s)`;
   if (typeof value === 'object') return 'Objeto';
   return String(value);
@@ -83,6 +65,104 @@ function safeJson(value: unknown) {
   }
 }
 
+/* ── Win2K chrome primitives ─────────────────────────────────── */
+
+const win2kPanel =
+  'bg-[#d4d0c8] border-2 border-[#ffffff] border-r-[#808080] border-b-[#808080]';
+
+const win2kSunken =
+  'bg-white border border-[#808080] border-r-[#ffffff] border-b-[#ffffff]';
+
+const win2kButton =
+  'bg-[#d4d0c8] border border-[#ffffff] border-r-[#404040] border-b-[#404040] px-4 py-0.5 text-[11px] font-[Tahoma,_"MS_Sans_Serif",_Arial,_sans-serif] text-black active:border-[#404040] active:border-r-[#ffffff] active:border-b-[#ffffff] cursor-default select-none hover:bg-[#e8e4dc]';
+
+const win2kTitleBar =
+  'bg-gradient-to-r from-[#0a246a] to-[#a6caf0] flex items-center gap-1.5 px-2 py-1';
+
+/* ── Detail Modal ─────────────────────────────────────────────── */
+function DetailModal({
+  open,
+  label,
+  onClose,
+  isLoading,
+  error,
+  data,
+}: {
+  open: boolean;
+  label: string;
+  onClose: () => void;
+  isLoading: boolean;
+  error?: string;
+  data: unknown;
+}) {
+  if (!open) return null;
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
+      {/* Window */}
+      <div
+        className="w-full max-w-3xl max-h-[88vh] flex flex-col shadow-[2px_2px_0_#000]"
+        style={{ background: '#d4d0c8', border: '2px solid #ffffff', borderRight: '2px solid #808080', borderBottom: '2px solid #808080' }}
+      >
+        {/* Title bar */}
+        <div className={win2kTitleBar}>
+          {/* tiny icon */}
+          <div className="w-3.5 h-3.5 bg-[#c0c0c0] border border-[#808080] flex items-center justify-center flex-shrink-0">
+            <div className="w-2 h-1.5 bg-[#0a246a]" />
+          </div>
+          <span className="text-white text-[11px] font-bold flex-1 truncate font-[Tahoma,_'MS_Sans_Serif',_Arial,_sans-serif]">
+            {label} — Detalle
+          </span>
+          {/* Close button */}
+          <button
+            onClick={onClose}
+            className="w-[17px] h-[14px] bg-[#d4d0c8] border border-[#ffffff] border-r-[#404040] border-b-[#404040] flex items-center justify-center text-[9px] font-bold text-black hover:bg-[#e04040] hover:text-white"
+          >
+            ✕
+          </button>
+        </div>
+
+        {/* Menu-bar stub */}
+        <div className="px-1 py-0.5 bg-[#d4d0c8] border-b border-[#a0a0a0]">
+          <span className="text-[11px] px-1 cursor-default font-[Tahoma,_'MS_Sans_Serif',_Arial,_sans-serif]">
+            <u>A</u>rchivo&nbsp;&nbsp;<u>E</u>ditar&nbsp;&nbsp;A<u>y</u>uda
+          </span>
+        </div>
+
+        {/* Body */}
+        <div className="flex-1 overflow-auto p-3">
+          {isLoading ? (
+            <p className="text-[11px] font-[Tahoma,_'MS_Sans_Serif',_Arial,_sans-serif]">Cargando detalle…</p>
+          ) : error ? (
+            <p className="text-[11px] text-red-700 font-[Tahoma,_'MS_Sans_Serif',_Arial,_sans-serif]">{error}</p>
+          ) : (
+            <div
+              className="w-full h-full overflow-auto p-2 text-[11px] leading-relaxed"
+              style={{
+                background: '#ffffff',
+                border: '1px solid #808080',
+                borderRight: '1px solid #ffffff',
+                borderBottom: '1px solid #ffffff',
+                fontFamily: 'Courier New, monospace',
+              }}
+            >
+              <pre className="whitespace-pre-wrap break-all">{safeJson(data)}</pre>
+            </div>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div className="px-3 py-2 flex justify-end border-t border-[#a0a0a0]">
+          <button onClick={onClose} className={win2kButton}>
+            Cerrar
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ── Main Explorer ────────────────────────────────────────────── */
 export function KommoExplorer() {
   const params = useParams<{ resource?: string }>();
   const resourceFromUrl = getKommoResource(params.resource);
@@ -120,16 +200,9 @@ function KommoExplorerView({ resource }: { resource: KommoResourceKey }) {
       params.set('sort', sort);
       params.set('order', order);
       if (q) params.set('q', q);
-
-      const response = await fetch(`/api/sheet?${params.toString()}`, {
-        method: 'GET',
-        credentials: 'include',
-      });
-
+      const response = await fetch(`/api/sheet?${params.toString()}`, { method: 'GET', credentials: 'include' });
       const payload = (await response.json()) as ApiResponse;
-      if (!response.ok) {
-        return { success: false, error: payload.error || 'Error consultando datos' };
-      }
+      if (!response.ok) return { success: false, error: payload.error || 'Error consultando datos' };
       return payload;
     },
   });
@@ -152,16 +225,9 @@ function KommoExplorerView({ resource }: { resource: KommoResourceKey }) {
       params.set('resource', resource);
       params.set('full', 'true');
       params.set('id', String(detailId ?? ''));
-
-      const response = await fetch(`/api/sheet?${params.toString()}`, {
-        method: 'GET',
-        credentials: 'include',
-      });
-
+      const response = await fetch(`/api/sheet?${params.toString()}`, { method: 'GET', credentials: 'include' });
       const payload = (await response.json()) as ApiResponse;
-      if (!response.ok) {
-        return { success: false, error: payload.error || 'Error consultando detalle' };
-      }
+      if (!response.ok) return { success: false, error: payload.error || 'Error consultando detalle' };
       return payload;
     },
   });
@@ -175,120 +241,224 @@ function KommoExplorerView({ resource }: { resource: KommoResourceKey }) {
     setDetailOpen(true);
   };
 
+  const win2kFont = { fontFamily: "Tahoma, 'MS Sans Serif', Arial, sans-serif" };
+
   return (
-    <div className="space-y-6">
-      <div className="rounded-2xl border border-gray-200 bg-white shadow-[0_24px_50px_-36px_rgba(15,23,42,0.8)] overflow-hidden">
-        <div className="px-6 py-5 border-b border-gray-200 bg-gradient-to-r from-gray-50 to-white">
-          <div className="flex items-start justify-between gap-4 flex-wrap">
-            <div className="flex items-center gap-3">
-              <div className="h-11 w-11 rounded-xl bg-red-600/10 border border-red-500/25 flex items-center justify-center">
-                <Database className="text-red-600" size={20} />
-              </div>
-              <div>
-                <h1 className="text-base font-semibold text-gray-900">Kommo Data Explorer</h1>
-                <p className="text-xs text-gray-500">Exploración de recursos Kommo (paginación server-side)</p>
-              </div>
-            </div>
-
-            <div className="text-xs text-gray-500">
-              {listQuery.isFetching ? 'Actualizando…' : `Total: ${total.toLocaleString('es-PE')}`}
-            </div>
+    <>
+      {/* Outer window chrome */}
+      <div
+        className="flex flex-col shadow-[2px_2px_0_#000]"
+        style={{
+          background: '#d4d0c8',
+          border: '2px solid #ffffff',
+          borderRight: '2px solid #404040',
+          borderBottom: '2px solid #404040',
+          ...win2kFont,
+        }}
+      >
+        {/* Title bar */}
+        <div className={win2kTitleBar}>
+          <div className="w-3.5 h-3.5 bg-[#c0c0c0] border border-[#808080] flex items-center justify-center flex-shrink-0">
+            <div className="w-2 h-1.5 bg-[#0a246a]" />
           </div>
-
-          <div className="mt-4 grid grid-cols-1 lg:grid-cols-12 gap-3">
-            <label className="lg:col-span-3 rounded-xl border border-gray-200 bg-white px-3 py-2 inline-flex items-center gap-2 text-sm text-gray-700">
-              <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Recurso</span>
-              <select
-                value={resource}
-                onChange={(e) => {
-                  const next = e.target.value as KommoResourceKey;
-                  navigate(next === 'leads' ? '/kommo' : `/kommo/${next}`);
-                }}
-                className="ml-auto bg-transparent outline-none text-sm"
-                aria-label="Seleccionar recurso"
+          <span className="text-white text-[11px] font-bold flex-1" style={win2kFont}>
+            Kommo Data Explorer — {uiConfig.label}
+          </span>
+          {/* Window controls */}
+          <div className="flex gap-0.5">
+            {['_', '□', '✕'].map((ch, i) => (
+              <div
+                key={ch}
+                className="w-[17px] h-[14px] bg-[#d4d0c8] border border-[#ffffff] border-r-[#404040] border-b-[#404040] flex items-center justify-center text-[9px] font-bold text-black cursor-default"
+                style={i === 2 ? { background: '#c0c0c0' } : {}}
               >
-                {KOMMO_RESOURCES.map((r) => (
-                  <option key={r.key} value={r.key}>
-                    {r.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-
-            <label className="lg:col-span-4 rounded-xl border border-gray-200 bg-white px-3 py-2 inline-flex items-center gap-2 text-sm text-gray-600">
-              <Search size={15} className="text-gray-400" />
-              <input
-                value={searchInput}
-                onChange={(e) => setSearchInput(e.target.value)}
-                placeholder="Buscar (opcional)"
-                className="w-full bg-transparent outline-none"
-              />
-            </label>
-
-            <label className="lg:col-span-3 rounded-xl border border-gray-200 bg-white px-3 py-2 inline-flex items-center gap-2 text-sm text-gray-700">
-              <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Ordenar</span>
-              <select
-                value={sort}
-                onChange={(e) => {
-                  setSort(e.target.value);
-                  setPage(1);
-                }}
-                className="ml-auto bg-transparent outline-none text-sm"
-                aria-label="Ordenar por"
-              >
-                {uiConfig.sortColumns.map((col) => (
-                  <option key={col} value={col}>
-                    {getKommoColumnLabel(resource, col)}
-                  </option>
-                ))}
-              </select>
-            </label>
-
-            <div className="lg:col-span-2 flex items-center gap-2">
-              <button
-                onClick={() => setOrder((prev) => (prev === 'desc' ? 'asc' : 'desc'))}
-                className="flex-1 inline-flex items-center justify-center gap-2 px-3 py-2 rounded-xl border border-gray-200 bg-white hover:bg-gray-50 text-sm font-semibold text-gray-700"
-              >
-                {order === 'desc' ? <ArrowDownWideNarrow size={16} /> : <ArrowUpWideNarrow size={16} />}
-                {order.toUpperCase()}
-              </button>
-            </div>
+                {ch}
+              </div>
+            ))}
           </div>
         </div>
 
-        <div className="overflow-x-auto">
-          <table className="min-w-full divide-y divide-gray-200">
-            <thead className="bg-gray-50/90">
-              <tr>
-                <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider whitespace-nowrap w-36">
+        {/* Menu bar */}
+        <div className="px-1 border-b border-[#a0a0a0] bg-[#d4d0c8]">
+          <div className="flex text-[11px]" style={win2kFont}>
+            {['Archivo', 'Ver', 'Herramientas', 'Ayuda'].map((m) => (
+              <span key={m} className="px-2 py-0.5 cursor-default hover:bg-[#0a246a] hover:text-white">
+                {m}
+              </span>
+            ))}
+          </div>
+        </div>
+
+        {/* Toolbar */}
+        <div
+          className="flex items-center gap-2 px-2 py-1.5 flex-wrap border-b border-[#a0a0a0]"
+          style={{ background: '#d4d0c8' }}
+        >
+          {/* Resource selector */}
+          <div className="flex items-center gap-1">
+            <label className="text-[11px]" style={win2kFont}>
+              Recurso:
+            </label>
+            <select
+              value={resource}
+              onChange={(e) => {
+                const next = e.target.value as KommoResourceKey;
+                navigate(next === 'leads' ? '/kommo' : `/kommo/${next}`);
+              }}
+              className="text-[11px] px-1 py-0.5 h-[22px] cursor-default"
+              style={{
+                background: '#ffffff',
+                border: '1px solid #808080',
+                borderRight: '1px solid #ffffff',
+                borderBottom: '1px solid #ffffff',
+                ...win2kFont,
+              }}
+              aria-label="Seleccionar recurso"
+            >
+              {KOMMO_RESOURCES.map((r) => (
+                <option key={r.key} value={r.key}>
+                  {r.label}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* Separator */}
+          <div className="w-px h-5 bg-[#808080] mx-1" />
+
+          {/* Search */}
+          <div className="flex items-center gap-1">
+            <label className="text-[11px]" style={win2kFont}>
+              Buscar:
+            </label>
+            <input
+              value={searchInput}
+              onChange={(e) => setSearchInput(e.target.value)}
+              placeholder="Escriba para buscar..."
+              className="text-[11px] px-1 py-0.5 h-[22px] w-44"
+              style={{
+                background: '#ffffff',
+                border: '1px solid #808080',
+                borderRight: '1px solid #ffffff',
+                borderBottom: '1px solid #ffffff',
+                outline: 'none',
+                ...win2kFont,
+              }}
+            />
+          </div>
+
+          {/* Separator */}
+          <div className="w-px h-5 bg-[#808080] mx-1" />
+
+          {/* Sort */}
+          <div className="flex items-center gap-1">
+            <label className="text-[11px]" style={win2kFont}>
+              Ordenar:
+            </label>
+            <select
+              value={sort}
+              onChange={(e) => {
+                setSort(e.target.value);
+                setPage(1);
+              }}
+              className="text-[11px] px-1 py-0.5 h-[22px] cursor-default"
+              style={{
+                background: '#ffffff',
+                border: '1px solid #808080',
+                borderRight: '1px solid #ffffff',
+                borderBottom: '1px solid #ffffff',
+                ...win2kFont,
+              }}
+              aria-label="Ordenar por"
+            >
+              {uiConfig.sortColumns.map((col) => (
+                <option key={col} value={col}>
+                  {getKommoColumnLabel(resource, col)}
+                </option>
+              ))}
+            </select>
+            <button
+              onClick={() => setOrder((prev) => (prev === 'desc' ? 'asc' : 'desc'))}
+              className={win2kButton}
+              title="Cambiar dirección de orden"
+            >
+              {order === 'desc' ? '▼ DESC' : '▲ ASC'}
+            </button>
+          </div>
+
+          {/* Status indicator */}
+          <div className="ml-auto text-[11px] text-gray-600" style={win2kFont}>
+            {listQuery.isFetching ? 'Actualizando…' : `${total.toLocaleString('es-PE')} registros`}
+          </div>
+        </div>
+
+        {/* Table area — sunken panel */}
+        <div
+          className="overflow-x-auto"
+          style={{
+            margin: '4px',
+            border: '2px solid #808080',
+            borderRight: '2px solid #ffffff',
+            borderBottom: '2px solid #ffffff',
+            background: '#ffffff',
+          }}
+        >
+          <table className="min-w-full border-collapse" style={{ ...win2kFont, fontSize: '11px' }}>
+            <thead>
+              <tr style={{ background: '#d4d0c8' }}>
+                <th
+                  className="px-3 py-1 text-left whitespace-nowrap text-[11px] font-bold cursor-default select-none"
+                  style={{
+                    borderRight: '1px solid #808080',
+                    borderBottom: '1px solid #808080',
+                    ...win2kFont,
+                  }}
+                >
                   Acciones
                 </th>
                 {columns.map((col) => (
                   <th
                     key={col}
-                    className="px-6 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider whitespace-nowrap"
+                    className="px-3 py-1 text-left whitespace-nowrap text-[11px] font-bold cursor-default select-none"
+                    style={{
+                      borderRight: '1px solid #808080',
+                      borderBottom: '1px solid #808080',
+                      ...win2kFont,
+                    }}
                   >
                     {getKommoColumnLabel(resource, col)}
                   </th>
                 ))}
               </tr>
             </thead>
-            <tbody className="bg-white divide-y divide-gray-100">
+            <tbody>
               {listQuery.isLoading ? (
                 <tr>
-                  <td colSpan={columns.length + 1} className="px-6 py-10 text-center text-sm text-gray-500">
+                  <td
+                    colSpan={columns.length + 1}
+                    className="px-4 py-6 text-center text-[11px]"
+                    style={win2kFont}
+                  >
                     Cargando…
                   </td>
                 </tr>
               ) : listQuery.data?.success === false ? (
                 <tr>
-                  <td colSpan={columns.length + 1} className="px-6 py-10 text-center text-sm text-red-700">
+                  <td
+                    colSpan={columns.length + 1}
+                    className="px-4 py-6 text-center text-[11px] text-red-700"
+                    style={win2kFont}
+                  >
                     {listQuery.data.error || 'Error consultando datos'}
                   </td>
                 </tr>
               ) : rows.length === 0 ? (
                 <tr>
-                  <td colSpan={columns.length + 1} className="px-6 py-10 text-center text-sm text-gray-500">
+                  <td
+                    colSpan={columns.length + 1}
+                    className="px-4 py-6 text-center text-[11px]"
+                    style={win2kFont}
+                  >
                     No hay resultados.
                   </td>
                 </tr>
@@ -299,16 +469,29 @@ function KommoExplorerView({ resource }: { resource: KommoResourceKey }) {
                     typeof primaryValue === 'string' || typeof primaryValue === 'number'
                       ? String(primaryValue)
                       : `${resource}-${page}-${idx}`;
-
+                  const isEven = idx % 2 === 0;
                   return (
-                    <tr key={rowKey} className="hover:bg-red-50/40 transition-colors">
-                      <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
+                    <tr
+                      key={rowKey}
+                      style={{ background: isEven ? '#ffffff' : '#f0f4ff' }}
+                      className="hover:bg-[#0a246a] hover:text-white group"
+                    >
+                      <td
+                        className="px-3 py-1 whitespace-nowrap"
+                        style={{ borderRight: '1px solid #d0ccc4', ...win2kFont }}
+                      >
                         <button
                           onClick={() => openDetail(row)}
-                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-red-200 bg-red-50 text-red-700 hover:bg-red-100 transition-colors text-xs font-semibold"
+                          className="text-[11px] px-3 py-0.5 cursor-default"
+                          style={{
+                            background: '#d4d0c8',
+                            border: '1px solid #ffffff',
+                            borderRight: '1px solid #404040',
+                            borderBottom: '1px solid #404040',
+                            ...win2kFont,
+                          }}
                         >
-                          <Eye size={13} />
-                          Ver detalle
+                          Ver...
                         </button>
                       </td>
                       {columns.map((col) => {
@@ -317,7 +500,8 @@ function KommoExplorerView({ resource }: { resource: KommoResourceKey }) {
                         return (
                           <td
                             key={`${rowKey}-${col}`}
-                            className="px-6 py-4 whitespace-nowrap text-sm text-gray-700 max-w-[420px]"
+                            className="px-3 py-1 whitespace-nowrap max-w-[320px]"
+                            style={{ borderRight: '1px solid #d0ccc4', ...win2kFont, fontSize: '11px' }}
                             title={typeof rendered === 'string' ? rendered : undefined}
                           >
                             <span className="block truncate">{rendered}</span>
@@ -332,81 +516,105 @@ function KommoExplorerView({ resource }: { resource: KommoResourceKey }) {
           </table>
         </div>
 
-        <div className="px-6 py-4 border-t border-gray-200 bg-white flex items-center justify-between gap-4 flex-wrap">
-          <div className="inline-flex items-center gap-2 text-sm text-gray-600">
-            <span>Filas por página:</span>
+        {/* Status bar */}
+        <div
+          className="flex items-center justify-between px-2 py-1 gap-4 flex-wrap"
+          style={{ borderTop: '1px solid #a0a0a0', background: '#d4d0c8' }}
+        >
+          {/* Rows per page */}
+          <div className="flex items-center gap-2">
+            <span className="text-[11px]" style={win2kFont}>
+              Filas:
+            </span>
             <select
               value={pageSize}
               onChange={(e) => {
                 setPageSize(Number(e.target.value));
                 setPage(1);
               }}
-              className="px-2 py-1 rounded-lg border border-gray-300 bg-white text-sm"
+              className="text-[11px] h-[20px] px-1 cursor-default"
+              style={{
+                background: '#ffffff',
+                border: '1px solid #808080',
+                borderRight: '1px solid #ffffff',
+                borderBottom: '1px solid #ffffff',
+                ...win2kFont,
+              }}
             >
-              <option value={25}>25</option>
-              <option value={50}>50</option>
-              <option value={100}>100</option>
-              <option value={200}>200</option>
+              {[25, 50, 100, 200].map((n) => (
+                <option key={n} value={n}>
+                  {n}
+                </option>
+              ))}
             </select>
           </div>
 
-          <div className="inline-flex items-center gap-2">
+          {/* Pagination */}
+          <div className="flex items-center gap-2">
             <button
               onClick={() => setPage((prev) => Math.max(1, Math.min(prev, totalPages) - 1))}
               disabled={safePage === 1}
-              className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg border border-gray-300 bg-white text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+              className={win2kButton}
+              style={{ opacity: safePage === 1 ? 0.5 : 1 }}
             >
-              <ChevronLeft size={15} />
-              Anterior
+              {'◄ Anterior'}
             </button>
-            <span className="text-sm text-gray-600 px-2">
-              Página {safePage} de {totalPages}
+            <span
+              className="text-[11px] px-2"
+              style={{
+                ...win2kFont,
+                border: '1px solid #808080',
+                borderRight: '1px solid #ffffff',
+                borderBottom: '1px solid #ffffff',
+                background: '#ffffff',
+                padding: '1px 8px',
+              }}
+            >
+              Pág. {safePage} / {totalPages}
             </span>
             <button
               onClick={() => setPage((prev) => Math.min(totalPages, Math.min(prev, totalPages) + 1))}
               disabled={safePage >= totalPages}
-              className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg border border-gray-300 bg-white text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+              className={win2kButton}
+              style={{ opacity: safePage >= totalPages ? 0.5 : 1 }}
             >
-              Siguiente
-              <ChevronRight size={15} />
+              {'Siguiente ►'}
             </button>
+          </div>
+
+          {/* Status area */}
+          <div
+            className="text-[11px] px-2 py-0.5"
+            style={{
+              ...win2kFont,
+              border: '1px solid #808080',
+              borderRight: '1px solid #ffffff',
+              borderBottom: '1px solid #ffffff',
+              background: '#d4d0c8',
+              minWidth: 120,
+            }}
+          >
+            {listQuery.isFetching ? '⏳ Cargando...' : `✔ ${total.toLocaleString('es-PE')} registros`}
           </div>
         </div>
       </div>
 
-      {detailOpen && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
-            <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 bg-gray-50">
-              <div>
-                <p className="text-xs text-gray-500 uppercase tracking-[0.16em] font-semibold">{uiConfig.label}</p>
-                <h2 className="font-semibold text-gray-900">Detalle</h2>
-              </div>
-              <button
-                onClick={() => {
-                  setDetailOpen(false);
-                  setDetailId(null);
-                }}
-                className="p-2 hover:bg-gray-200 rounded-lg transition-colors"
-              >
-                <X className="w-5 h-5 text-gray-500" />
-              </button>
-            </div>
-
-            <div className="flex-1 overflow-auto p-6">
-              {detailQuery.isLoading ? (
-                <div className="text-sm text-gray-500">Cargando detalle…</div>
-              ) : detailQuery.data?.success === false ? (
-                <div className="text-sm text-red-700">{detailQuery.data.error || 'Error consultando detalle'}</div>
-              ) : (
-                <pre className="text-xs bg-gray-950 text-gray-100 rounded-xl p-4 overflow-auto border border-gray-800">
-                  {safeJson(detailQuery.data?.rows?.[0] ?? null)}
-                </pre>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
+      {/* Detail Modal */}
+      <DetailModal
+        open={detailOpen}
+        label={uiConfig.label}
+        onClose={() => {
+          setDetailOpen(false);
+          setDetailId(null);
+        }}
+        isLoading={detailQuery.isLoading}
+        error={
+          detailQuery.data?.success === false
+            ? detailQuery.data.error || 'Error consultando detalle'
+            : undefined
+        }
+        data={detailQuery.data?.rows?.[0] ?? null}
+      />
+    </>
   );
 }

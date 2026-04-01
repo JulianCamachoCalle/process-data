@@ -1,60 +1,83 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Montserrat:wght@600;700;800&display=swap');
 @import "tailwindcss";
 
-@theme {
-  --color-brand-red: #E60000;
-  --color-brand-black: #1A1A1A;
-  --color-brand-white: #FFFFFF;
-}
+/* ── Windows 2000 Global Styles ───────────────────────────────── */
 
 :root {
-	color-scheme: light;
-	--fondo-principal: #f6f7fb;
-	--texto-principal: #151821;
-	--borde-suave: #e8ebf3;
+  color-scheme: light;
+  --win2k-bg: #d4d0c8;
+  --win2k-text: #000000;
+  --win2k-blue: #0a246a;
+  --win2k-teal: #008080;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
 }
 
 body {
-	margin: 0;
-	min-height: 100vh;
-	font-family: 'Inter', sans-serif;
-	color: var(--texto-principal);
-	background:
-		radial-gradient(circle at 8% 10%, rgba(230, 0, 0, 0.08) 0%, rgba(230, 0, 0, 0) 38%),
-		radial-gradient(circle at 92% 90%, rgba(17, 24, 39, 0.08) 0%, rgba(17, 24, 39, 0) 34%),
-		var(--fondo-principal);
-	text-rendering: geometricPrecision;
-	-webkit-font-smoothing: antialiased;
-	-moz-osx-font-smoothing: grayscale;
+  margin: 0;
+  min-height: 100vh;
+  font-family: Tahoma, "MS Sans Serif", Arial, sans-serif;
+  font-size: 11px;
+  color: #000000;
+  background: #008080;
+  text-rendering: optimizeLegibility;
+  /* Disable subpixel AA for that authentic aliased Win2K look */
+  -webkit-font-smoothing: none;
+  -moz-osx-font-smoothing: unset;
 }
 
 #root {
-	min-height: 100vh;
+  min-height: 100vh;
 }
 
-h1,
-h2,
-h3 {
-	font-family: 'Montserrat', 'Inter', sans-serif;
+h1, h2, h3, h4, h5, h6 {
+  font-family: Tahoma, "MS Sans Serif", Arial, sans-serif;
+  font-weight: bold;
 }
 
+/* Classic Win2K scrollbars */
 * {
-	scrollbar-width: thin;
-	scrollbar-color: #c8cfdd transparent;
+  scrollbar-width: thin;
+  scrollbar-color: #a0a0a0 #d4d0c8;
 }
 
 *::-webkit-scrollbar {
-	width: 10px;
-	height: 10px;
+  width: 16px;
+  height: 16px;
 }
 
 *::-webkit-scrollbar-thumb {
-	background: linear-gradient(180deg, #d6dbe7, #c7cfdd);
-	border-radius: 999px;
-	border: 2px solid transparent;
-	background-clip: content-box;
+  background: #d4d0c8;
+  border: 1px solid #ffffff;
+  border-right-color: #808080;
+  border-bottom-color: #808080;
 }
 
 *::-webkit-scrollbar-track {
-	background: transparent;
+  background: #d4d0c8;
+  border: 1px inset #808080;
+}
+
+*::-webkit-scrollbar-button {
+  background: #d4d0c8;
+  border: 1px solid #ffffff;
+  border-right-color: #808080;
+  border-bottom-color: #808080;
+  width: 16px;
+  height: 16px;
+}
+
+/* Remove default focus outline — Win2K used dotted outline */
+:focus {
+  outline: 1px dotted #000000;
+  outline-offset: -2px;
+}
+
+/* Selection colors */
+::selection {
+  background: #0a246a;
+  color: #ffffff;
 }
