@@ -564,8 +564,23 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
             pulledLinks += linksResult.items.length;
 
             for (const link of linksResult.items) {
-              const dedupeKey = `links:${entity}:${entityId}:${String(link.to ?? '')}:${String(link.to_id ?? '')}`;
-              const linkPayload = { ...link, from: entity, from_id: entityId };
+              const toEntityType = String(link.to_entity_type ?? link.to ?? '');
+              const toEntityIdRaw = link.to_entity_id ?? link.to_id ?? '';
+              const toEntityId = Number(toEntityIdRaw);
+              if (!toEntityType || !toEntityId) continue;
+
+              const dedupeKey = `links:${entity}:${entityId}:${toEntityType}:${String(toEntityId)}`;
+
+              // Normalizamos el payload para los links, ya que la estructura de la API puede variar y queremos mantener consistencia en los eventos.
+              const linkPayload = {
+                from: entity,
+                from_id: entityId,
+                to_entity_type: toEntityType,
+                to_entity_id: toEntityId,
+                link_type: (link as Record<string, unknown>).link_type ?? null,
+                created_at: (link as Record<string, unknown>).created_at ?? null,
+                metadata: (link as Record<string, unknown>).metadata ?? null,
+              };
               rows.push({
                 account_base_url: freshConnection.account_base_url,
                 event_type: 'link.pull',
@@ -575,7 +590,7 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
               });
             }
 
-            // Stagiamos progresivamente cada 500 links para evitar sobrecargar memoria o límites de API
+            // Para evitar sobrecargar memoria o límites de la base de datos, hacemos staging progresivo cada 500 links obtenidos.
             if (rows.length >= 500) {
               stagedLinks += await stageWebhookEvents(supabase, rows.splice(0, rows.length));
             }

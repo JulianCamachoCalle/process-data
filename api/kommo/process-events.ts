@@ -7,6 +7,7 @@ const DEFAULT_LIMIT = 50;
 
 const DEFAULT_UPSERT_CHUNK_SIZE = 250;
 
+// Funcion auxiliar para manejar query params que pueden venir como string o array de strings (en caso de múltiples valores con el mismo nombre)
 function asSingleQueryParam(value: string | string[] | undefined) {
   return Array.isArray(value) ? value[0] : value;
 }
@@ -19,6 +20,7 @@ interface KommoEventRow {
   attempts: number;
 }
 
+// Funciones auxiliares para procesamiento de datos Kommo, mapeo a tablas, y operaciones de base de datos.
 function chunkArray<T>(items: T[], chunkSize: number) {
   const size = Math.max(1, Math.floor(chunkSize));
   const chunks: T[][] = [];
@@ -28,6 +30,7 @@ function chunkArray<T>(items: T[], chunkSize: number) {
   return chunks;
 }
 
+// Agrupa un array de items por una clave obtenida mediante la función getKey.
 function groupBy<T>(items: T[], getKey: (item: T) => string) {
   const map = new Map<string, T[]>();
   for (const item of items) {
@@ -39,17 +42,37 @@ function groupBy<T>(items: T[], getKey: (item: T) => string) {
   return map;
 }
 
+// Convierte un valor a número, devolviendo un fallback si no es posible parsear un número finito.
 function asNumber(value: unknown, fallback = 0) {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
+// Convierte un valor a segundos Unix, aceptando tanto números como strings (que pueden ser timestamps o fechas parseables).
+function asUnixSeconds(value: unknown) {
+  if (typeof value === 'number') {
+    return Number.isFinite(value) ? Math.floor(value) : 0;
+  }
+
+  if (typeof value === 'string') {
+    const numeric = Number(value);
+    if (Number.isFinite(numeric)) return Math.floor(numeric);
+
+    const ms = Date.parse(value);
+    if (Number.isFinite(ms)) return Math.floor(ms / 1000);
+  }
+
+  return 0;
+}
+
+// Obtener el id del payload de un lead, asegurando que es un número válido.
 function getLeadIdFromPayload(payload: Record<string, unknown>) {
   const id = payload.id;
   const parsed = asNumber(id, 0);
   return parsed > 0 ? parsed : null;
 }
 
+// Obtener una fecha de un campo del payload, esperando un timestamp en segundos, y devolviendo una fecha ISO (YYYY-MM-DD) o null si no es valida.
 function getLeadDateFromPayload(payload: Record<string, unknown>, field: 'created_at' | 'updated_at') {
   const raw = payload[field];
   const seconds = asNumber(raw, 0);
@@ -247,7 +270,7 @@ function mapKommoTaskToTable(payload: Record<string, unknown>) {
   const createdAtTs = asNumber(payload.created_at, 0);
   const updatedAtTs = asNumber(payload.updated_at, 0);
   const closestTaskAtTs = asNumber(payload.closest_task_at, 0);
-  const completeTillTs = asNumber(payload.complete_till, 0);
+  const completeTillTs = asUnixSeconds(payload.complete_till);
   const completedAtTs = asNumber(payload.completed_at, 0);
 
   return {
@@ -260,7 +283,8 @@ function mapKommoTaskToTable(payload: Record<string, unknown>) {
     group_id: asNumber(payload.group_id, 0) || null,
     created_by: asNumber(payload.created_by, 0) || null,
     duration: asNumber(payload.duration, 0) || null,
-    complete_till: completeTillTs ? new Date(completeTillTs * 1000).toISOString() : null,
+    // DB column: bigint (unix seconds)
+    complete_till: completeTillTs || null,
     is_completed: payload.is_completed ?? false,
     result: payload.result ?? null,
     responsible_user_id: asNumber(payload.responsible_user_id, 0) || null,
@@ -354,16 +378,22 @@ function mapKommoUnsortedLeadToTable(payload: Record<string, unknown>) {
 }
 
 function mapKommoLinkToTable(payload: Record<string, unknown>) {
-  const fromEntityType = String(payload.from ?? '');
-  const fromEntityId = asNumber(payload.from_id ?? 0, 0);
-  const toEntityType = String(payload.to ?? '');
-  const toEntityId = asNumber(payload.to_id ?? 0, 0);
+  // Accept both shapes:
+  // - { from, from_id, to, to_id }
+  // - { from, from_id, to_entity_type, to_entity_id }
+  // Also accept { from_entity_type, from_entity_id } as fallback.
+  const fromEntityType = String(payload.from ?? payload.from_entity_type ?? '');
+  const fromEntityId = asNumber(payload.from_id ?? payload.from_entity_id ?? 0, 0);
+  const toEntityType = String(payload.to_entity_type ?? payload.to ?? '');
+  const toEntityId = asNumber(payload.to_entity_id ?? payload.to_id ?? 0, 0);
 
   if (!fromEntityType || !fromEntityId || !toEntityType || !toEntityId) {
     return null;
   }
 
   const stableId = `kommo-link-${fromEntityType}-${fromEntityId}-${toEntityType}-${toEntityId}`;
+
+  const createdAtSeconds = asUnixSeconds(payload.created_at);
 
   return {
     stable_id: stableId,
@@ -372,7 +402,7 @@ function mapKommoLinkToTable(payload: Record<string, unknown>) {
     to_entity_type: toEntityType,
     to_entity_id: toEntityId,
     link_type: payload.link_type ?? null,
-    created_at: payload.created_at ? new Date(Number(payload.created_at) * 1000).toISOString() : null,
+    created_at: createdAtSeconds ? new Date(createdAtSeconds * 1000).toISOString() : null,
   };
 }
 
