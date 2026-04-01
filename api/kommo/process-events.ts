@@ -65,79 +65,14 @@ function asUnixSeconds(value: unknown) {
   return 0;
 }
 
-// Obtener el id del payload de un lead, asegurando que es un número válido.
-function getLeadIdFromPayload(payload: Record<string, unknown>) {
-  const id = payload.id;
-  const parsed = asNumber(id, 0);
-  return parsed > 0 ? parsed : null;
-}
-
-// Obtener una fecha de un campo del payload, esperando un timestamp en segundos, y devolviendo una fecha ISO (YYYY-MM-DD) o null si no es valida.
-function getLeadDateFromPayload(payload: Record<string, unknown>, field: 'created_at' | 'updated_at') {
-  const raw = payload[field];
-  const seconds = asNumber(raw, 0);
-  if (!seconds) return null;
-  return new Date(seconds * 1000).toISOString().slice(0, 10);
-}
-
-function findNumberCustomField(payload: Record<string, unknown>, codeCandidates: string[]) {
-  const embedded = payload._embedded as { custom_fields_values?: Array<Record<string, unknown>> } | undefined;
-  const customFields = embedded?.custom_fields_values ?? [];
-
-  for (const field of customFields) {
-    const fieldCode = String(field.field_code ?? '').toUpperCase();
-    if (!fieldCode || !codeCandidates.includes(fieldCode)) continue;
-
-    const values = field.values as Array<Record<string, unknown>> | undefined;
-    const first = values?.[0];
-    const parsed = Number(first?.value ?? 0);
-    if (Number.isFinite(parsed)) return parsed;
-  }
-
-  return 0;
-}
-
-function mapKommoLeadToLeadGanado(payload: Record<string, unknown>) {
-  const leadId = getLeadIdFromPayload(payload);
-  if (!leadId) {
-    return null;
-  }
-
-  const responsibleUserId = asNumber(payload.responsible_user_id, 0);
-  const createdAt = getLeadDateFromPayload(payload, 'created_at');
-  const updatedAt = getLeadDateFromPayload(payload, 'updated_at');
-
-  const cantidadEnvios = Math.max(0, Math.round(findNumberCustomField(payload, ['CANTIDAD_ENVIOS', 'QTY_ENVIOS'])));
-  const anulados = Math.max(0, Math.round(findNumberCustomField(payload, ['ANULADOS_FULLFILMENT', 'ANULADOS_FULL'])));
-  const ingresoAnulados = anulados * 2;
-
-  return {
-    stable_id: `kommo-lead-${leadId}`,
-    business_id: leadId,
-    id_tienda: null,
-    id_vendedor: responsibleUserId > 0 ? responsibleUserId : null,
-    fecha_ingreso_lead: createdAt,
-    fecha_registro_lead: updatedAt ?? createdAt,
-    fecha_lead_ganado: updatedAt ?? createdAt,
-    dias_lead_a_registro: 0,
-    dias_registro_a_ganado: 0,
-    dias_lead_a_ganado: 0,
-    id_fullfilment: null,
-    notas: String(payload.name ?? 'Lead Kommo'),
-    distrito: null,
-    cantidad_envios: cantidadEnvios,
-    id_origen: null,
-    anulados_fullfilment: anulados,
-    ingreso_anulados_fullfilment: ingresoAnulados,
-  };
-}
-
 function mapKommoLeadToKommoLeads(payload: Record<string, unknown>) {
   const leadId = asNumber(payload.id, 0);
   if (!leadId) {
     return null;
   }
 
+  const createdAtTs = asNumber(payload.created_at, 0);
+  const updatedAtTs = asNumber(payload.updated_at, 0);
   const closedAtTs = asNumber(payload.closed_at, 0);
   const closestTaskAtTs = asNumber(payload.closest_task_at, 0);
 
@@ -150,6 +85,8 @@ function mapKommoLeadToKommoLeads(payload: Record<string, unknown>) {
     price: asNumber(payload.price, 0) || null,
     score: asNumber(payload.score, 0) || null,
     group_id: asNumber(payload.group_id, 0) || null,
+    created_at: createdAtTs ? new Date(createdAtTs * 1000).toISOString() : null,
+    updated_at: updatedAtTs ? new Date(updatedAtTs * 1000).toISOString() : null,
     closed_at: closedAtTs ? new Date(closedAtTs * 1000).toISOString() : null,
     status_id: asNumber(payload.status_id, 0) || null,
     account_id: asNumber(payload.account_id, 0) || null,
@@ -159,10 +96,18 @@ function mapKommoLeadToKommoLeads(payload: Record<string, unknown>) {
     updated_by: asNumber(payload.updated_by, 0) || null,
     pipeline_id: asNumber(payload.pipeline_id, 0) || null,
     loss_reason_id: asNumber(payload.loss_reason_id, 0) || null,
+    source_id: asNumber(payload.source_id, 0) || null,
     closest_task_at: closestTaskAtTs ? new Date(closestTaskAtTs * 1000).toISOString() : null,
     responsible_user_id: asNumber(payload.responsible_user_id, 0) || null,
-    custom_fields_values: payload.custom_fields_values ?? null,
-    embedded_data: embedded ? { tags: embedded.tags, companies: embedded.companies } : null,
+    is_price_modified_by_robot: payload.is_price_modified_by_robot ?? null,
+    custom_fields_values: payload.custom_fields_values ?? embedded?.custom_fields_values ?? null,
+    loss_reason: payload.loss_reason ?? embedded?.loss_reason ?? null,
+    tags: embedded?.tags ?? null,
+    contacts: embedded?.contacts ?? null,
+    companies: embedded?.companies ?? null,
+    catalog_elements: embedded?.catalog_elements ?? null,
+    source: payload.source ?? embedded?.source ?? null,
+    raw_payload: payload,
   };
 }
 
@@ -692,12 +637,12 @@ async function processEvent(event: KommoEventRow) {
   const supabase = getSupabaseAdminClient();
 
   if (event.event_type === 'lead.pull' || event.event_type === 'webhook') {
-    const mapped = mapKommoLeadToLeadGanado(event.payload);
+    const mapped = mapKommoLeadToKommoLeads(event.payload);
     if (!mapped) {
       throw new Error('No se pudo derivar lead_id desde payload de Kommo');
     }
 
-    const { error: upsertError } = await supabase.from('leads_ganados' as never).upsert(
+    const { error: upsertError } = await supabase.from('kommo_leads' as never).upsert(
       mapped as never,
       {
         onConflict: 'business_id',
@@ -705,22 +650,7 @@ async function processEvent(event: KommoEventRow) {
     );
 
     if (upsertError) {
-      throw new Error(upsertError.message || 'No se pudo upsert a leads_ganados');
-    }
-
-    // Also save to kommo_leads with all fields
-    const mappedFull = mapKommoLeadToKommoLeads(event.payload);
-    if (mappedFull) {
-      const { error: upsertFullError } = await supabase.from('kommo_leads' as never).upsert(
-        mappedFull as never,
-        {
-          onConflict: 'business_id',
-        },
-      );
-
-      if (upsertFullError) {
-        console.error('Error upserting to kommo_leads:', upsertFullError.message);
-      }
+      throw new Error(upsertError.message || 'No se pudo upsert a kommo_leads');
     }
     return;
   }
@@ -1132,12 +1062,12 @@ export default async function kommoProcessEventsHandler(req: VercelRequest, res:
         for (const ev of group) attemptsById.set(ev.id, ev.attempts ?? 0);
 
         try {
-          // Special case: leads write to two tables (one hard, one best-effort)
+          // Special case: leads primary sink is kommo_leads
           if (eventType === 'lead.pull' || eventType === 'webhook') {
             const mappedItems: Array<WorkItem<Record<string, unknown>>> = [];
 
             for (const ev of group) {
-              const mapped = mapKommoLeadToLeadGanado(ev.payload);
+              const mapped = mapKommoLeadToKommoLeads(ev.payload);
               if (!mapped) {
                 failures.push({ id: ev.id, attempts: ev.attempts, message: 'No se pudo derivar lead_id desde payload de Kommo' });
                 continue;
@@ -1147,36 +1077,15 @@ export default async function kommoProcessEventsHandler(req: VercelRequest, res:
 
             const { okIds, failed } = await bulkUpsertWithFallback({
               supabase,
-              table: 'leads_ganados',
+              table: 'kommo_leads',
               onConflict: 'business_id',
               items: mappedItems,
             });
 
             doneIds.push(...okIds);
-            const okIdSet = new Set(okIds);
             failures.push(...failed.map(f => {
               return { id: f.id, attempts: attemptsById.get(f.id) ?? 0, message: f.message };
             }));
-
-            // Best-effort: kommo_leads full mirror
-            const fullItems: Array<WorkItem<Record<string, unknown>>> = [];
-            for (const ev of group) {
-              if (!okIdSet.has(ev.id)) continue;
-              const mappedFull = mapKommoLeadToKommoLeads(ev.payload);
-              if (!mappedFull) continue;
-              fullItems.push({ eventId: ev.id, attempts: ev.attempts, row: mappedFull as unknown as Record<string, unknown> });
-            }
-            if (fullItems.length > 0) {
-              const { failed: softFailed } = await bulkUpsertWithFallback({
-                supabase,
-                table: 'kommo_leads',
-                onConflict: 'business_id',
-                items: fullItems,
-              });
-              if (softFailed.length > 0) {
-                console.error(`kommo_leads best-effort upsert failures: ${softFailed.length}`);
-              }
-            }
             continue;
           }
 

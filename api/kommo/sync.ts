@@ -248,6 +248,7 @@ async function fetchAllPages(
   accessToken: string,
   resource: KommoResource,
   fromDateIso: string | null,
+  withValue?: string,
   maxPages: number = 5, // Limit pages per run to avoid timeout
 ): Promise<{ items: Array<Record<string, unknown>>; totalPulled: number; hasMore: boolean }> {
   const allItems: Array<Record<string, unknown>> = [];
@@ -263,6 +264,10 @@ async function fetchAllPages(
     const supportsUpdatedAtFilter = resource !== 'unsorted';
     if (fromDateIso && supportsUpdatedAtFilter) {
       url.searchParams.set('filter[updated_at][from]', String(toUnixSeconds(fromDateIso)));
+    }
+
+    if (withValue && resource === 'leads') {
+      url.searchParams.set('with', withValue);
     }
 
     const response = await fetch(url.toString(), {
@@ -491,6 +496,8 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
       ? resourceParam as KommoResource 
       : 'leads';
     const resourcesToSync: KommoResource[] = [selectedResource];
+    const requestedWith = asSingleQueryParam(req.query.with)?.trim();
+    const leadsWith = requestedWith || 'contacts,loss_reason,is_price_modified_by_robot,catalog_elements,source_id,source';
 
     const results: Array<{
       resource: string;
@@ -602,6 +609,7 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
           freshConnection.access_token,
           entity as KommoResource,
           fromDateIso,
+          undefined,
           maxPages,
         );
 
@@ -915,6 +923,7 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
         freshConnection.access_token,
         resource,
         fromDateIso,
+        resource === 'leads' ? leadsWith : undefined,
         maxPages,
       );
 
