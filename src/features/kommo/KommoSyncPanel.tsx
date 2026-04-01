@@ -32,7 +32,7 @@ export function KommoSyncPanel({ onClose }: KommoSyncPanelProps) {
   const [resources, setResources] = useState<Record<string, SyncResource>>({});
   const [secret, setSecret] = useState('');
 
-  const runSync = async (resource: string) => {
+  const runSync = async (resource: string, opts?: { autoProcessEvents?: boolean }) => {
     if (!secret) {
       setResources(prev => ({
         ...prev,
@@ -65,15 +65,17 @@ export function KommoSyncPanel({ onClose }: KommoSyncPanelProps) {
           }
         }));
 
-        // Auto run process-events
-        await runProcessEvents(secret);
+        if (opts?.autoProcessEvents !== false) {
+          // Auto run process-events
+          await runProcessEvents(secret);
+        }
       } else {
         setResources(prev => ({
           ...prev,
           [resource]: { name: resource, status: 'error', message: data.error || 'Error desconocido' }
         }));
       }
-    } catch (err) {
+    } catch {
       setResources(prev => ({
         ...prev,
         [resource]: { name: resource, status: 'error', message: 'Error de red' }
@@ -95,9 +97,12 @@ export function KommoSyncPanel({ onClose }: KommoSyncPanelProps) {
 
   const runAllSync = async () => {
     for (const resource of RESOURCES) {
-      await runSync(resource);
+      await runSync(resource, { autoProcessEvents: false });
       await new Promise(r => setTimeout(r, 500));
     }
+
+    // Process once at the end
+    await runProcessEvents(secret);
   };
 
   return (

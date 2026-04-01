@@ -5,6 +5,8 @@ const PROCESS_SECRET_HEADER = 'x-kommo-process-secret';
 const PROCESS_SECRET_ENV = 'KOMMO_PROCESS_SECRET';
 const DEFAULT_LIMIT = 50;
 
+const DEFAULT_UPSERT_CHUNK_SIZE = 250;
+
 function asSingleQueryParam(value: string | string[] | undefined) {
   return Array.isArray(value) ? value[0] : value;
 }
@@ -15,6 +17,26 @@ interface KommoEventRow {
   event_type: string;
   payload: Record<string, unknown>;
   attempts: number;
+}
+
+function chunkArray<T>(items: T[], chunkSize: number) {
+  const size = Math.max(1, Math.floor(chunkSize));
+  const chunks: T[][] = [];
+  for (let i = 0; i < items.length; i += size) {
+    chunks.push(items.slice(i, i + size));
+  }
+  return chunks;
+}
+
+function groupBy<T>(items: T[], getKey: (item: T) => string) {
+  const map = new Map<string, T[]>();
+  for (const item of items) {
+    const key = getKey(item);
+    const arr = map.get(key);
+    if (arr) arr.push(item);
+    else map.set(key, [item]);
+  }
+  return map;
 }
 
 function asNumber(value: unknown, fallback = 0) {
@@ -474,6 +496,115 @@ function mapKommoSourceToTable(payload: Record<string, unknown>) {
   };
 }
 
+function mapKommoPipelineToTable(payload: Record<string, unknown>) {
+  const pipelineId = asNumber(payload.id, 0);
+  if (!pipelineId) {
+    return null;
+  }
+
+  const embedded = payload._embedded as Record<string, unknown> | undefined;
+
+  return {
+    stable_id: `kommo-pipeline-${pipelineId}`,
+    business_id: pipelineId,
+    name: payload.name ?? null,
+    sort: asNumber(payload.sort, 0) || null,
+    is_main: payload.is_main ?? null,
+    is_archive: payload.is_archive ?? null,
+    is_unsorted_on: payload.is_unsorted_on ?? null,
+    is_deleted: payload.is_deleted ?? false,
+    statuses: embedded?.statuses ?? null,
+    raw_payload: payload,
+  };
+}
+
+type WorkItem<T extends Record<string, unknown>> = {
+  eventId: string;
+  attempts: number;
+  row: T;
+};
+
+async function bulkUpsertWithFallback<T extends Record<string, unknown>>(
+  args: {
+    supabase: ReturnType<typeof getSupabaseAdminClient>;
+    table: string;
+    onConflict: string;
+    items: Array<WorkItem<T>>;
+    chunkSize?: number;
+  },
+): Promise<{ okIds: string[]; failed: Array<{ id: string; message: string }>; }> {
+  const { supabase, table, onConflict } = args;
+  const chunkSize = Math.max(1, Math.min(1000, args.chunkSize ?? DEFAULT_UPSERT_CHUNK_SIZE));
+
+  const okIds: string[] = [];
+  const failed: Array<{ id: string; message: string }> = [];
+
+  async function upsertChunk(chunk: Array<WorkItem<T>>): Promise<void> {
+    if (chunk.length === 0) return;
+
+    const rows = chunk.map(c => c.row);
+    const { error } = await supabase
+      .from(table as never)
+      .upsert(rows as never, { onConflict });
+
+    if (!error) {
+      okIds.push(...chunk.map(c => c.eventId));
+      return;
+    }
+
+    // Split until we can isolate the failing row(s).
+    if (chunk.length === 1) {
+      failed.push({ id: chunk[0].eventId, message: error.message || `No se pudo upsert a ${table}` });
+      return;
+    }
+
+    const mid = Math.ceil(chunk.length / 2);
+    await upsertChunk(chunk.slice(0, mid));
+    await upsertChunk(chunk.slice(mid));
+  }
+
+  for (const chunk of chunkArray(args.items, chunkSize)) {
+    await upsertChunk(chunk);
+  }
+
+  return { okIds, failed };
+}
+
+async function markEventsDone(supabase: ReturnType<typeof getSupabaseAdminClient>, ids: string[]) {
+  if (ids.length === 0) return;
+  const { error } = await supabase
+    .from('kommo_webhook_events' as never)
+    .update({ status: 'done', last_error: null } as never)
+    .in('id', ids);
+
+  if (error) {
+    throw new Error(error.message || 'No se pudo marcar eventos Kommo como done');
+  }
+}
+
+async function markEventsFailed(
+  supabase: ReturnType<typeof getSupabaseAdminClient>,
+  failed: Array<{ id: string; attempts: number; message: string }>,
+) {
+  if (failed.length === 0) return;
+
+  // Attempts increment is per-row, so we do per-row updates (should be low volume).
+  for (const f of failed) {
+    const { error } = await supabase
+      .from('kommo_webhook_events' as never)
+      .update({
+        status: 'failed',
+        attempts: (f.attempts ?? 0) + 1,
+        last_error: f.message,
+      } as never)
+      .eq('id', f.id);
+
+    if (error) {
+      console.error('Failed marking kommo event as failed:', f.id, error.message);
+    }
+  }
+}
+
 function mapKommoTalkToTable(payload: Record<string, unknown>) {
   const talkId = asNumber(payload.id, 0);
   if (!talkId) {
@@ -599,7 +730,7 @@ async function processEvent(event: KommoEventRow) {
     const { error: upsertError } = await supabase.from('kommo_tags' as never).upsert(
       mapped as never,
       {
-        onConflict: 'business_id',
+        onConflict: 'business_id,entity_type',
       },
     );
 
@@ -819,6 +950,25 @@ async function processEvent(event: KommoEventRow) {
     return;
   }
 
+  if (event.event_type === 'pipeline.pull') {
+    const mapped = mapKommoPipelineToTable(event.payload);
+    if (!mapped) {
+      throw new Error('No se pudo derivar pipeline_id desde payload de Kommo');
+    }
+
+    const { error: upsertError } = await supabase.from('kommo_pipelines' as never).upsert(
+      mapped as never,
+      {
+        onConflict: 'business_id',
+      },
+    );
+
+    if (upsertError) {
+      throw new Error(upsertError.message || 'No se pudo upsert a kommo_pipelines');
+    }
+    return;
+  }
+
   throw new Error(`Tipo de evento no soportado: ${event.event_type}`);
 }
 
@@ -872,53 +1022,179 @@ export default async function kommoProcessEventsHandler(req: VercelRequest, res:
         break; // No more pending events
       }
 
-      let processed = 0;
-      let failed = 0;
+      // Lock the batch in a single update.
+      const eventIds = events.map(e => e.id);
+      const { data: lockedRows, error: lockError } = await supabase
+        .from('kommo_webhook_events' as never)
+        .update({ status: 'processing', last_error: null } as never)
+        .in('id', eventIds)
+        .eq('status', 'pending')
+        .select('id,account_base_url,event_type,payload,attempts');
 
-      for (const event of events) {
-        const { data: lockRows, error: lockError } = await supabase
-          .from('kommo_webhook_events' as never)
-          .update({ status: 'processing', last_error: null } as never)
-          .eq('id', event.id)
-          .eq('status', 'pending')
-          .select('id')
-          .limit(1);
+      if (lockError) {
+        throw new Error(lockError.message || 'No se pudo lockear eventos Kommo');
+      }
 
-        if (lockError || !lockRows || lockRows.length === 0) {
-          continue;
-        }
+      const lockedEvents = (lockedRows ?? []) as KommoEventRow[];
+      if (lockedEvents.length === 0) {
+        // Another worker took them.
+        if (!shouldLoop) break;
+        continue;
+      }
+
+      const failures: Array<{ id: string; attempts: number; message: string }> = [];
+      const doneIds: string[] = [];
+
+      const groups = groupBy(lockedEvents, e => e.event_type);
+
+      for (const [eventType, group] of groups.entries()) {
+        const attemptsById = new Map<string, number>();
+        for (const ev of group) attemptsById.set(ev.id, ev.attempts ?? 0);
 
         try {
-          await processEvent(event);
+          // Special case: leads write to two tables (one hard, one best-effort)
+          if (eventType === 'lead.pull' || eventType === 'webhook') {
+            const mappedItems: Array<WorkItem<Record<string, unknown>>> = [];
 
-          const { error: doneError } = await supabase
-            .from('kommo_webhook_events' as never)
-            .update({ status: 'done', last_error: null } as never)
-            .eq('id', event.id);
+            for (const ev of group) {
+              const mapped = mapKommoLeadToLeadGanado(ev.payload);
+              if (!mapped) {
+                failures.push({ id: ev.id, attempts: ev.attempts, message: 'No se pudo derivar lead_id desde payload de Kommo' });
+                continue;
+              }
+              mappedItems.push({ eventId: ev.id, attempts: ev.attempts, row: mapped as unknown as Record<string, unknown> });
+            }
 
-          if (doneError) {
-            throw new Error(doneError.message || 'No se pudo marcar evento Kommo como done');
+            const { okIds, failed } = await bulkUpsertWithFallback({
+              supabase,
+              table: 'leads_ganados',
+              onConflict: 'business_id',
+              items: mappedItems,
+            });
+
+            doneIds.push(...okIds);
+            const okIdSet = new Set(okIds);
+            failures.push(...failed.map(f => {
+              return { id: f.id, attempts: attemptsById.get(f.id) ?? 0, message: f.message };
+            }));
+
+            // Best-effort: kommo_leads full mirror
+            const fullItems: Array<WorkItem<Record<string, unknown>>> = [];
+            for (const ev of group) {
+              if (!okIdSet.has(ev.id)) continue;
+              const mappedFull = mapKommoLeadToKommoLeads(ev.payload);
+              if (!mappedFull) continue;
+              fullItems.push({ eventId: ev.id, attempts: ev.attempts, row: mappedFull as unknown as Record<string, unknown> });
+            }
+            if (fullItems.length > 0) {
+              const { failed: softFailed } = await bulkUpsertWithFallback({
+                supabase,
+                table: 'kommo_leads',
+                onConflict: 'business_id',
+                items: fullItems,
+              });
+              if (softFailed.length > 0) {
+                console.error(`kommo_leads best-effort upsert failures: ${softFailed.length}`);
+              }
+            }
+            continue;
           }
 
-          processed += 1;
-        } catch (eventError: unknown) {
-          const message = eventError instanceof Error ? eventError.message : 'Error procesando evento Kommo';
+          // Generic mapper-based upserts
+          const processMapped = async (table: string, onConflict: string, mapper: (p: Record<string, unknown>) => Record<string, unknown> | null) => {
+            const items: Array<WorkItem<Record<string, unknown>>> = [];
+            for (const ev of group) {
+              const mapped = mapper(ev.payload);
+              if (!mapped) {
+                failures.push({ id: ev.id, attempts: ev.attempts, message: `No se pudo mapear payload para ${eventType}` });
+                continue;
+              }
+              items.push({ eventId: ev.id, attempts: ev.attempts, row: mapped });
+            }
 
-          await supabase
-            .from('kommo_webhook_events' as never)
-            .update({
-              status: 'failed',
-              attempts: (event.attempts ?? 0) + 1,
-              last_error: message,
-            } as never)
-            .eq('id', event.id);
+            const { okIds, failed } = await bulkUpsertWithFallback({ supabase, table, onConflict, items });
+            doneIds.push(...okIds);
+            failures.push(...failed.map(f => {
+              return { id: f.id, attempts: attemptsById.get(f.id) ?? 0, message: f.message };
+            }));
+          };
 
-          failed += 1;
+          if (eventType === 'contact.pull') {
+            await processMapped('kommo_contacts', 'business_id', mapKommoContactToTable);
+          } else if (eventType === 'user.pull') {
+            await processMapped('kommo_users', 'business_id', mapKommoUserToTable);
+          } else if (eventType === 'companie.pull') {
+            await processMapped('kommo_companies', 'business_id', mapKommoCompanyToTable);
+          } else if (eventType === 'tag.pull') {
+            await processMapped('kommo_tags', 'business_id,entity_type', mapKommoTagToTable);
+          } else if (eventType === 'task.pull') {
+            await processMapped('kommo_tasks', 'business_id', mapKommoTaskToTable);
+          } else if (eventType === 'note.pull') {
+            await processMapped('kommo_notes', 'business_id', mapKommoNoteToTable);
+          } else if (eventType === 'call.pull') {
+            await processMapped('kommo_calls', 'business_id', mapKommoCallToTable);
+          } else if (eventType === 'event.pull') {
+            await processMapped('kommo_events', 'business_id', mapKommoEventToTable);
+          } else if (eventType === 'catalog.pull') {
+            await processMapped('kommo_catalogs', 'business_id', mapKommoCatalogToTable);
+          } else if (eventType === 'unsorted.pull') {
+            await processMapped('kommo_unsorted_leads', 'business_id', mapKommoUnsortedLeadToTable);
+          } else if (eventType === 'link.pull') {
+            await processMapped('kommo_links', 'stable_id', mapKommoLinkToTable);
+          } else if (eventType === 'custom_field.pull') {
+            await processMapped('kommo_custom_fields', 'business_id', mapKommoCustomFieldToTable);
+          } else if (eventType === 'webhook.pull') {
+            await processMapped('kommo_webhooks', 'business_id', mapKommoWebhookConfigToTable);
+          } else if (eventType === 'talk.pull') {
+            await processMapped('kommo_talks', 'business_id', mapKommoTalkToTable);
+          } else if (eventType === 'source.pull') {
+            await processMapped('kommo_sources', 'business_id', mapKommoSourceToTable);
+          } else if (eventType === 'pipeline.pull') {
+            await processMapped('kommo_pipelines', 'business_id', mapKommoPipelineToTable);
+          } else {
+            // Unknown event type → mark all failed
+            for (const ev of group) {
+              failures.push({ id: ev.id, attempts: ev.attempts, message: `Tipo de evento no soportado: ${eventType}` });
+            }
+          }
+        } catch (e: unknown) {
+          // If the whole group blows up, fall back to per-row processing.
+          console.error(`Batch processing failed for ${eventType}, falling back to per-row`, e);
+          for (const ev of group) {
+            try {
+              await processEvent(ev);
+              doneIds.push(ev.id);
+            } catch (eventError: unknown) {
+              const message = eventError instanceof Error ? eventError.message : 'Error procesando evento Kommo';
+              failures.push({ id: ev.id, attempts: ev.attempts, message });
+            }
+          }
         }
       }
 
-      totalProcessed += processed;
-      totalFailed += failed;
+      // Persist event statuses in bulk
+      const failedIdSet = new Set(failures.map(f => f.id));
+      const uniqueDoneIds = Array.from(new Set(doneIds.filter(id => !failedIdSet.has(id))));
+
+      try {
+        await markEventsDone(supabase, uniqueDoneIds);
+      } catch (e: unknown) {
+        const message = e instanceof Error ? e.message : 'Error marcando eventos Kommo como done';
+        console.error(message);
+        // Requeue as pending so they can be retried (upserts are idempotent).
+        const { error: requeueError } = await supabase
+          .from('kommo_webhook_events' as never)
+          .update({ status: 'pending', last_error: message } as never)
+          .in('id', uniqueDoneIds);
+        if (requeueError) {
+          console.error('Failed requeueing kommo events after done-mark error:', requeueError.message);
+        }
+      }
+
+      await markEventsFailed(supabase, failures);
+
+      totalProcessed += uniqueDoneIds.length;
+      totalFailed += failures.length;
 
       // If not looping, break after first batch
       if (!shouldLoop) {

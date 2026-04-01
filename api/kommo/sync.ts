@@ -12,8 +12,8 @@ import {
 const SYNC_SECRET_HEADER = 'x-kommo-sync-secret';
 const SYNC_SECRET_ENV = 'KOMMO_SYNC_SECRET';
 
-// All available resources in Kommo API v4
-// NOTE: Some resources need special handling (entity_type parameter)
+// Todos los recursos disponibles en Kommo API v4
+// Algunos necesitan manejo especial (tags, custom_fields, links, notes) porque no siguen el patrón estándar de endpoints o necesitan parámetros adicionales.
 const ALL_RESOURCES = [
   'leads',
   'contacts', 
@@ -21,13 +21,12 @@ const ALL_RESOURCES = [
   'users',
   'pipelines',
   'tasks',
-  // notes handled separately (needs entity_type)
-  // NEW: Resources with standard endpoints
+  // pueden existir subtipos
   'events',
   'catalogs',
   'unsorted',
   'sources',
-  // NEW: Resources needing special handling
+  // Estos recursos requieren manejo especial
   'tags',
   'custom_fields',
   'links',
@@ -36,7 +35,7 @@ const ALL_RESOURCES = [
 
 type KommoResource = typeof ALL_RESOURCES[number];
 
-// Standard endpoints (no special params needed)
+// Mapeo de recursos a sus endpoints correspondientes
 const RESOURCE_ENDPOINTS: Record<KommoResource, string> = {
   leads: '/api/v4/leads',
   contacts: '/api/v4/contacts',
@@ -44,19 +43,19 @@ const RESOURCE_ENDPOINTS: Record<KommoResource, string> = {
   users: '/api/v4/users',
   pipelines: '/api/v4/leads/pipelines',
   tasks: '/api/v4/tasks',
-  // notes handled via special function (needs entity_type)
+  // notes, tags, custom_fields y links se manejan por separado debido a sus particularidades en la API
   events: '/api/v4/events',
   catalogs: '/api/v4/catalogs',
   unsorted: '/api/v4/leads/unsorted',
   sources: '/api/v4/sources',
-  // These are handled via separate functions
+  // Recursos especiales sin endpoint directo
   tags: '',
   custom_fields: '',
   links: '',
   notes: '',
 };
 
-// Event types for each resource
+// Tipos de eventos para cada recurso
 const RESOURCE_EVENT_TYPES: Record<string, string> = {
   leads: 'lead.pull',
   contacts: 'contact.pull',
@@ -74,9 +73,9 @@ const RESOURCE_EVENT_TYPES: Record<string, string> = {
   links: 'link.pull',
 };
 
-// Map resource to embedded key in response (some differ from resource name)
+// Algunos recursos tienen la lista de items embebida bajo una clave diferente a su nombre pluralizado, por ejemplo 'events' tiene 'items'.
 const EMBEDDED_KEY_MAP: Record<string, string> = {
-  events: 'items',  // Events use 'items' not 'events'
+  events: 'items',  // Usa items en lugar de events
   catalogs: 'catalogs',
   leads: 'leads',
   contacts: 'contacts',
@@ -89,14 +88,17 @@ const EMBEDDED_KEY_MAP: Record<string, string> = {
   custom_fields: 'custom_fields',
 };
 
+// Helper para manejar query params que pueden ser string o string[]
 function asSingleQueryParam(value: string | string[] | undefined) {
   return Array.isArray(value) ? value[0] : value;
 }
 
+// Convierte una fecha ISO a segundos Unix, que es el formato que Kommo espera para los filtros de fecha.
 function toUnixSeconds(value: string) {
   return Math.floor(new Date(value).getTime() / 1000);
 }
 
+// Dado un array de items con campo updated_at, encuentra el máximo updated_at y lo devuelve como ISO string.
 function getMaxUpdatedAtIso(rows: Array<Record<string, unknown>>) {
   let maxTs = 0;
   for (const row of rows) {
@@ -114,6 +116,70 @@ function getMaxUpdatedAtIso(rows: Array<Record<string, unknown>>) {
   return new Date(maxTs * 1000).toISOString();
 }
 
+// Divide un array en chunks de tamaño específico. Útil para staging progresivo y evitar sobrecargar memoria o límites de API.
+function chunkArray<T>(items: T[], chunkSize: number) {
+  const size = Math.max(1, Math.floor(chunkSize));
+  const chunks: T[][] = [];
+  for (let i = 0; i < items.length; i += size) {
+    chunks.push(items.slice(i, i + size));
+  }
+  return chunks;
+}
+
+// Dado un array de eventos a insertar, los inserta en la tabla kommo_webhook_events y evita los errores por duplicados. Si hay un error, divide el batch y reintenta para aislar filas problemáticas.
+type WebhookEventInsert = {
+  account_base_url: string;
+  event_type: string;
+  payload: Record<string, unknown>;
+  dedupe_key: string;
+  status: 'pending';
+};
+
+// Retorna el número de filas que fueron efectivamente insertadas (no duplicados).
+async function stageWebhookEvents(
+  supabase: ReturnType<typeof getSupabaseAdminClient>,
+  rows: WebhookEventInsert[],
+  opts?: { chunkSize?: number },
+) {
+  const chunkSize = Math.max(1, Math.min(1000, opts?.chunkSize ?? 500));
+  let staged = 0;
+
+  async function stageChunk(chunk: WebhookEventInsert[]) {
+    if (chunk.length === 0) return;
+
+    const { data, error } = await supabase
+      .from('kommo_webhook_events' as never)
+      .upsert(chunk as never, {
+        onConflict: 'dedupe_key',
+        ignoreDuplicates: true,
+      })
+      // Retornamos solo el id para minimizar payload y acelerar la consulta.
+      .select('id');
+
+    if (!error) {
+      staged += (data as unknown[] | null)?.length ?? 0;
+      return;
+    }
+
+    // Si hay un error, intentamos dividir el chunk para aislar la fila problemática.
+    if (chunk.length === 1) {
+      console.error('Failed staging kommo_webhook_events row:', error.message);
+      return;
+    }
+
+    const mid = Math.ceil(chunk.length / 2);
+    await stageChunk(chunk.slice(0, mid));
+    await stageChunk(chunk.slice(mid));
+  }
+
+  for (const chunk of chunkArray(rows, chunkSize)) {
+    await stageChunk(chunk);
+  }
+
+  return staged;
+}
+
+// Función para paginar a través de todos los items de un recurso específico
 async function fetchAllPages(
   baseUrl: string,
   endpoint: string,
@@ -122,7 +188,7 @@ async function fetchAllPages(
   fromDateIso: string | null,
   maxPages: number = 5, // Limit pages per run to avoid timeout
 ): Promise<{ items: Array<Record<string, unknown>>; totalPulled: number; hasMore: boolean }> {
-  let allItems: Array<Record<string, unknown>> = [];
+  const allItems: Array<Record<string, unknown>> = [];
   let page = 1;
   let hasMore = true;
   const embeddedKey = EMBEDDED_KEY_MAP[resource] ?? resource;
@@ -151,10 +217,10 @@ async function fetchAllPages(
 
     const payload = (await response.json()) as Record<string, unknown>;
     const items = ((payload._embedded as Record<string, unknown> | undefined)?.[embeddedKey] as Array<Record<string, unknown>>) ?? [];
+
+    allItems.push(...items);
     
-    allItems = [...allItems, ...items];
-    
-    // Check if there's a next page
+    // Verificar si hay una página siguiente. Kommo API v4 usa enlaces HATEOAS para paginación, así que buscamos un enlace "next" en _links.
     const nextLink = (payload._links as Record<string, unknown> | undefined)?.next;
     hasMore = !!nextLink;
     page++;
@@ -163,14 +229,14 @@ async function fetchAllPages(
   return { items: allItems, totalPulled: allItems.length, hasMore };
 }
 
-// Fetch tags for a specific entity type
+// Funciones específicas para recursos que requieren iteración por entity_type (tags, custom_fields, notes) o por entidad (links).
 async function fetchEntityTypeTags(
   baseUrl: string,
   accessToken: string,
   entityType: string,
   maxPages: number,
 ): Promise<{ items: Array<Record<string, unknown>>; totalPulled: number }> {
-  let allItems: Array<Record<string, unknown>> = [];
+  const allItems: Array<Record<string, unknown>> = [];
   let page = 1;
   let hasMore = true;
 
@@ -194,7 +260,7 @@ async function fetchEntityTypeTags(
 
     const payload = (await response.json()) as Record<string, unknown>;
     const items = (payload._embedded as Record<string, unknown> | undefined)?.tags as Array<Record<string, unknown>> ?? [];
-    allItems = [...allItems, ...items];
+    allItems.push(...items);
 
     const nextLink = (payload._links as Record<string, unknown> | undefined)?.next;
     hasMore = !!nextLink;
@@ -204,14 +270,14 @@ async function fetchEntityTypeTags(
   return { items: allItems, totalPulled: allItems.length };
 }
 
-// Fetch custom fields for a specific entity type
+// Recurso de custom_fields también requiere iteración por entity_type
 async function fetchEntityTypeCustomFields(
   baseUrl: string,
   accessToken: string,
   entityType: string,
   maxPages: number,
 ): Promise<{ items: Array<Record<string, unknown>>; totalPulled: number }> {
-  let allItems: Array<Record<string, unknown>> = [];
+  const allItems: Array<Record<string, unknown>> = [];
   let page = 1;
   let hasMore = true;
 
@@ -235,7 +301,7 @@ async function fetchEntityTypeCustomFields(
 
     const payload = (await response.json()) as Record<string, unknown>;
     const items = (payload._embedded as Record<string, unknown> | undefined)?.custom_fields as Array<Record<string, unknown>> ?? [];
-    allItems = [...allItems, ...items];
+    allItems.push(...items);
 
     const nextLink = (payload._links as Record<string, unknown> | undefined)?.next;
     hasMore = !!nextLink;
@@ -245,14 +311,14 @@ async function fetchEntityTypeCustomFields(
   return { items: allItems, totalPulled: allItems.length };
 }
 
-// Fetch notes for a specific entity type
+// Recurso de notes también requiere iteración por entity_type
 async function fetchEntityNotes(
   baseUrl: string,
   accessToken: string,
   entityType: string,
   maxPages: number,
 ): Promise<{ items: Array<Record<string, unknown>>; totalPulled: number }> {
-  let allItems: Array<Record<string, unknown>> = [];
+  const allItems: Array<Record<string, unknown>> = [];
   let page = 1;
   let hasMore = true;
 
@@ -276,7 +342,7 @@ async function fetchEntityNotes(
 
     const payload = (await response.json()) as Record<string, unknown>;
     const items = (payload._embedded as Record<string, unknown> | undefined)?.notes as Array<Record<string, unknown>> ?? [];
-    allItems = [...allItems, ...items];
+    allItems.push(...items);
 
     const nextLink = (payload._links as Record<string, unknown> | undefined)?.next;
     hasMore = !!nextLink;
@@ -286,7 +352,7 @@ async function fetchEntityNotes(
   return { items: allItems, totalPulled: allItems.length };
 }
 
-// Fetch links for a specific entity (leads, contacts, companies)
+// Recurso de links requiere iteración por entidad, es decir, primero obtenemos las entidades actualizadas (leads, contacts, companies). Luego para cada entidad obtenemos sus links.
 async function fetchEntityLinks(
   baseUrl: string,
   accessToken: string,
@@ -294,7 +360,7 @@ async function fetchEntityLinks(
   entityId: number,
   maxPages: number,
 ): Promise<{ items: Array<Record<string, unknown>>; totalPulled: number }> {
-  let allItems: Array<Record<string, unknown>> = [];
+  const allItems: Array<Record<string, unknown>> = [];
   let page = 1;
   let hasMore = true;
 
@@ -318,7 +384,7 @@ async function fetchEntityLinks(
 
     const payload = (await response.json()) as Record<string, unknown>;
     const items = (payload._embedded as Record<string, unknown> | undefined)?.links as Array<Record<string, unknown>> ?? [];
-    allItems = [...allItems, ...items];
+    allItems.push(...items);
 
     const nextLink = (payload._links as Record<string, unknown> | undefined)?.next;
     hasMore = !!nextLink;
@@ -328,6 +394,7 @@ async function fetchEntityLinks(
   return { items: allItems, totalPulled: allItems.length };
 }
 
+// Handler principal para sincronización. Soporta sincronización incremental basada en un cursor de updated_at almacenado en la base de datos.
 export default async function kommoSyncHandler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST' && req.method !== 'GET') {
     return res.status(405).json({ error: 'Método no permitido' });
@@ -355,7 +422,7 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
     const freshConnection = await ensureFreshConnection(connection);
     const supabase = getSupabaseAdminClient();
 
-    // Check if syncing all resources or specific one
+    // Si se especifica un recurso en query params, solo sincronizamos ese recurso. Si no, sincronizamos todos los recursos.
     const resourceParam = asSingleQueryParam(req.query.resource);
     const selectedResource = (resourceParam && ALL_RESOURCES.includes(resourceParam as KommoResource)) 
       ? resourceParam as KommoResource 
@@ -371,7 +438,7 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
       hasMore?: boolean;
     }> = [];
 
-    // Handle special resources (tags, custom_fields, notes need entity_type iteration)
+    // Manejo especial para recursos que requieren iteración por entity_type (tags, custom_fields, notes) o por entidad (links).
     if (selectedResource === 'tags' || selectedResource === 'custom_fields' || selectedResource === 'notes') {
       const entityTypes = ['leads', 'contacts', 'companies'];
       const maxPagesParam = asSingleQueryParam(req.query.max_pages);
@@ -406,26 +473,22 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
           items = result.items;
         }
 
-        // Add entity_type to each item for processing
+        // Adaptamos el event_type para incluir el entity_type, por ejemplo: tag.pull.leads, tag.pull.contacts, etc.
         const eventType = RESOURCE_EVENT_TYPES[selectedResource];
-        let staged = 0;
-
+        const rows: WebhookEventInsert[] = [];
         for (const item of items) {
           const itemWithEntityType = { ...item, entity_type: entityType };
           const dedupeKey = `${selectedResource}:${entityType}:${String(item.id ?? '')}`;
-
-          const { error: insertError } = await supabase.from('kommo_webhook_events' as never).insert({
+          rows.push({
             account_base_url: freshConnection.account_base_url,
             event_type: eventType,
             payload: itemWithEntityType,
             dedupe_key: dedupeKey,
             status: 'pending',
-          } as never);
-
-          if (!insertError) {
-            staged++;
-          }
+          });
         }
+
+        const staged = await stageWebhookEvents(supabase, rows);
 
         results.push({
           resource: `${selectedResource}_${entityType}`,
@@ -445,82 +508,113 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
       });
     }
 
-    // Handle links (needs to iterate over entities to get their links)
+    // Manejo especial para links, que requiere iteración por entidad. Para cada entidad actualizada (leads, contacts, companies).
     if (selectedResource === 'links') {
       const entities = ['leads', 'contacts', 'companies'];
       const maxPagesParam = asSingleQueryParam(req.query.max_pages);
       const maxPages = maxPagesParam ? Math.min(50, parseInt(maxPagesParam, 10) || 5) : 5;
 
-      // First get all entity IDs from each type
+      // Iteramos por cada tipo de entidad para obtener sus links asociados.
       for (const entity of entities) {
-        let page = 1;
-        let hasMore = true;
+        // Obtenemos el cursor específico para los links de esta entidad, por ejemplo: links_leads, links_contacts, etc. 
+        const cursorResource = `links_${entity}`;
+        const { data: cursorRows, error: cursorError } = await supabase
+          .from('kommo_sync_cursor' as never)
+          .select('*')
+          .eq('account_subdomain', freshConnection.account_subdomain)
+          .eq('resource', cursorResource)
+          .order('updated_at', { ascending: false })
+          .limit(1);
 
-        while (hasMore && page <= maxPages) {
-          const url = new URL(`${freshConnection.account_base_url}/api/v4/${entity}`);
-          url.searchParams.set('limit', '250');
-          url.searchParams.set('page', String(page));
-
-          const response = await fetch(url.toString(), {
-            method: 'GET',
-            headers: {
-              Authorization: `Bearer ${freshConnection.access_token}`,
-              'Content-Type': 'application/json',
-            },
-          });
-
-          if (!response.ok) {
-            throw new Error(`Kommo ${entity} list error (${response.status})`);
-          }
-
-          const payload = (await response.json()) as Record<string, unknown>;
-          const items = (payload._embedded as Record<string, unknown> | undefined)?.[entity] as Array<Record<string, unknown>> ?? [];
-
-          // For each entity, fetch its links
-          for (const item of items) {
-            const entityId = Number(item.id);
-            if (!entityId) continue;
-
-            try {
-              const linksResult = await fetchEntityLinks(
-                freshConnection.account_base_url,
-                freshConnection.access_token,
-                entity,
-                entityId,
-                1, // Just need first page per entity
-              );
-
-              for (const link of linksResult.items) {
-                const dedupeKey = `links:${entity}:${entityId}:${String(link.to ?? '')}:${String(link.to_id ?? '')}`;
-                const linkPayload = { ...link, from: entity, from_id: entityId };
-
-                const { error: insertError } = await supabase.from('kommo_webhook_events' as never).insert({
-                  account_base_url: freshConnection.account_base_url,
-                  event_type: 'link.pull',
-                  payload: linkPayload,
-                  dedupe_key: dedupeKey,
-                  status: 'pending',
-                } as never);
-
-                if (!insertError) {
-                  results.push({
-                    resource: `links_${entity}_${entityId}`,
-                    pulled: 1,
-                    staged: 1,
-                    cursorFrom: null,
-                    cursorTo: null,
-                  });
-                }
-              }
-            } catch (e) {
-              console.error(`Error fetching links for ${entity}/${entityId}:`, e);
-            }
-          }
-
-          const nextLink = (payload._links as Record<string, unknown> | undefined)?.next;
-          hasMore = !!nextLink;
-          page++;
+        if (cursorError) {
+          throw new Error(cursorError.message || `No se pudo leer cursor de sync para ${cursorResource}`);
         }
+
+        const cursor = ((cursorRows ?? []) as Array<{ cursor_updated_at: string | null }>)[0] ?? null;
+        const fromDateIso = cursor?.cursor_updated_at ?? null;
+
+        const { items: updatedEntities, totalPulled, hasMore } = await fetchAllPages(
+          freshConnection.account_base_url,
+          `/api/v4/${entity}`,
+          freshConnection.access_token,
+          entity as KommoResource,
+          fromDateIso,
+          maxPages,
+        );
+
+        const nextCursor = getMaxUpdatedAtIso(updatedEntities);
+
+        let pulledLinks = 0;
+        let stagedLinks = 0;
+        const rows: WebhookEventInsert[] = [];
+
+        for (const item of updatedEntities) {
+          const entityId = Number(item.id);
+          if (!entityId) continue;
+
+          try {
+            const linksResult = await fetchEntityLinks(
+              freshConnection.account_base_url,
+              freshConnection.access_token,
+              entity,
+              entityId,
+              1,
+            );
+
+            pulledLinks += linksResult.items.length;
+
+            for (const link of linksResult.items) {
+              const dedupeKey = `links:${entity}:${entityId}:${String(link.to ?? '')}:${String(link.to_id ?? '')}`;
+              const linkPayload = { ...link, from: entity, from_id: entityId };
+              rows.push({
+                account_base_url: freshConnection.account_base_url,
+                event_type: 'link.pull',
+                payload: linkPayload,
+                dedupe_key: dedupeKey,
+                status: 'pending',
+              });
+            }
+
+            // Stagiamos progresivamente cada 500 links para evitar sobrecargar memoria o límites de API
+            if (rows.length >= 500) {
+              stagedLinks += await stageWebhookEvents(supabase, rows.splice(0, rows.length));
+            }
+          } catch (e) {
+            console.error(`Error fetching links for ${entity}/${entityId}:`, e);
+          }
+        }
+
+        if (rows.length > 0) {
+          stagedLinks += await stageWebhookEvents(supabase, rows);
+        }
+
+        // Actualizamos el cursor específico para los links de esta entidad. 
+        if (nextCursor) {
+          const { error: upsertCursorError } = await supabase.from('kommo_sync_cursor' as never).upsert(
+            {
+              account_subdomain: freshConnection.account_subdomain,
+              resource: cursorResource,
+              cursor_updated_at: nextCursor,
+              updated_at: new Date().toISOString(),
+            } as never,
+            {
+              onConflict: 'account_subdomain,resource',
+            },
+          );
+
+          if (upsertCursorError) {
+            console.error(`Error updating cursor for ${cursorResource}:`, upsertCursorError.message);
+          }
+        }
+
+        results.push({
+          resource: cursorResource,
+          pulled: totalPulled,
+          staged: stagedLinks,
+          cursorFrom: fromDateIso,
+          cursorTo: nextCursor,
+          hasMore,
+        });
       }
 
       return res.status(200).json({
@@ -532,13 +626,13 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
       });
     }
 
-    // Standard resources (leads, contacts, companies, users, pipelines, tasks, notes, events, catalogs, unsorted)
+    // Recursos Estandar (leads, contacts, companies, users, pipelines, tasks, notes, events, catalogs, unsorted)
 
     for (const resource of resourcesToSync) {
       const endpoint = RESOURCE_ENDPOINTS[resource];
       const eventType = RESOURCE_EVENT_TYPES[resource];
 
-      // Get cursor for this resource
+      // Leemos el cursor de sync para este recurso desde la base de datos. Si no existe, sincronizamos todo.
       const { data: cursorRows, error: cursorError } = await supabase
         .from('kommo_sync_cursor' as never)
         .select('*')
@@ -554,11 +648,11 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
       const cursor = ((cursorRows ?? []) as Array<{ cursor_updated_at: string | null }>)[0] ?? null;
       const fromDateIso = cursor?.cursor_updated_at ?? null;
 
-      // Get maxPages from query param or default to 5
+      // Obtener max_pages desde query params, con un valor por defecto de 5 páginas y un máximo de 50 para evitar tiempos de ejecución demasiado largos. 
       const maxPagesParam = asSingleQueryParam(req.query.max_pages);
       const maxPages = maxPagesParam ? Math.min(50, parseInt(maxPagesParam, 10) || 5) : 5;
 
-      // Fetch all pages
+      // Obtenemos todos los items actualizados desde la última sincronización usando paginación. 
       const { items, totalPulled, hasMore } = await fetchAllPages(
         freshConnection.account_base_url,
         endpoint,
@@ -568,25 +662,21 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
         maxPages,
       );
 
-      // Stage all items
-      let staged = 0;
+      const stageRows: WebhookEventInsert[] = [];
       for (const item of items) {
         const dedupeKey = `${resource}:${String(item.id ?? '')}:${String(item.updated_at ?? '')}`;
-
-        const { error: insertError } = await supabase.from('kommo_webhook_events' as never).insert({
+        stageRows.push({
           account_base_url: freshConnection.account_base_url,
           event_type: eventType,
           payload: item,
           dedupe_key: dedupeKey,
           status: 'pending',
-        } as never);
-
-        if (!insertError) {
-          staged++;
-        }
+        });
       }
 
-      // Update cursor
+      const staged = await stageWebhookEvents(supabase, stageRows);
+
+      // Actualizamos el cursor con el máximo updated_at de los items que acabamos de sincronizar.
       const nextCursor = getMaxUpdatedAtIso(items);
       if (nextCursor) {
         const { error: upsertCursorError } = await supabase.from('kommo_sync_cursor' as never).upsert(
