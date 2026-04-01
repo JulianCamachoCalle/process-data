@@ -11,7 +11,7 @@ import {
   Eye,
   X,
 } from 'lucide-react';
-import { getKommoResource, KOMMO_RESOURCES, type KommoResourceKey } from './kommoResourceConfig';
+import { getKommoColumnLabel, getKommoResource, KOMMO_RESOURCES, type KommoResourceKey } from './kommoResourceConfig';
 
 type ApiResponse = {
   success: boolean;
@@ -24,12 +24,54 @@ type ApiResponse = {
   columns?: string[];
 };
 
+function isLikelyTimestamp(value: string | number) {
+  if (typeof value === 'number') {
+    return value > 1_000_000_000 && value < 9_999_999_999_999;
+  }
+
+  if (typeof value === 'string') {
+    if (/^\d{10,13}$/.test(value)) return true;
+    if (/^\d{4}-\d{2}-\d{2}T/.test(value)) return true;
+  }
+
+  return false;
+}
+
+function toLocaleDateTime(value: string | number) {
+  if (typeof value === 'number') {
+    const ms = value > 9_999_999_999 ? value : value * 1000;
+    return new Date(ms).toLocaleString('es-PE');
+  }
+
+  if (/^\d{10,13}$/.test(value)) {
+    const asNumber = Number(value);
+    const ms = value.length === 13 ? asNumber : asNumber * 1000;
+    return new Date(ms).toLocaleString('es-PE');
+  }
+
+  return new Date(value).toLocaleString('es-PE');
+}
+
 function formatCellValue(value: unknown) {
   if (value === null || value === undefined || value === '') return '-';
-  if (typeof value === 'string') return value;
-  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
-  if (Array.isArray(value)) return `[${value.length}]`;
-  if (typeof value === 'object') return '{…}';
+
+  if (typeof value === 'boolean') return value ? 'Sí' : 'No';
+
+  if (typeof value === 'number') {
+    if (isLikelyTimestamp(value)) return toLocaleDateTime(value);
+    return new Intl.NumberFormat('es-PE').format(value);
+  }
+
+  if (typeof value === 'string') {
+    if (isLikelyTimestamp(value)) {
+      const formatted = toLocaleDateTime(value);
+      return Number.isNaN(new Date(value).getTime()) && !/^\d{10,13}$/.test(value) ? value : formatted;
+    }
+    return value;
+  }
+
+  if (Array.isArray(value)) return `${value.length} ítem(s)`;
+  if (typeof value === 'object') return 'Objeto';
   return String(value);
 }
 
@@ -71,6 +113,7 @@ function KommoExplorerView({ resource }: { resource: KommoResourceKey }) {
     queryKey: ['kommo-data', resource, page, pageSize, sort, order, q],
     queryFn: async (): Promise<ApiResponse> => {
       const params = new URLSearchParams();
+      params.set('name', 'KOMMO');
       params.set('resource', resource);
       params.set('page', String(page));
       params.set('pageSize', String(pageSize));
@@ -78,7 +121,7 @@ function KommoExplorerView({ resource }: { resource: KommoResourceKey }) {
       params.set('order', order);
       if (q) params.set('q', q);
 
-      const response = await fetch(`/api/kommo/data?${params.toString()}`, {
+      const response = await fetch(`/api/sheet?${params.toString()}`, {
         method: 'GET',
         credentials: 'include',
       });
@@ -105,11 +148,12 @@ function KommoExplorerView({ resource }: { resource: KommoResourceKey }) {
     enabled: detailOpen && Boolean(detailId),
     queryFn: async (): Promise<ApiResponse> => {
       const params = new URLSearchParams();
+      params.set('name', 'KOMMO');
       params.set('resource', resource);
       params.set('full', 'true');
       params.set('id', String(detailId ?? ''));
 
-      const response = await fetch(`/api/kommo/data?${params.toString()}`, {
+      const response = await fetch(`/api/sheet?${params.toString()}`, {
         method: 'GET',
         credentials: 'include',
       });
@@ -194,7 +238,7 @@ function KommoExplorerView({ resource }: { resource: KommoResourceKey }) {
               >
                 {uiConfig.sortColumns.map((col) => (
                   <option key={col} value={col}>
-                    {col}
+                    {getKommoColumnLabel(resource, col)}
                   </option>
                 ))}
               </select>
@@ -224,7 +268,7 @@ function KommoExplorerView({ resource }: { resource: KommoResourceKey }) {
                     key={col}
                     className="px-6 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider whitespace-nowrap"
                   >
-                    {col}
+                    {getKommoColumnLabel(resource, col)}
                   </th>
                 ))}
               </tr>

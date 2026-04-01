@@ -1,6 +1,8 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createRequire } from 'node:module';
 import { z, ZodError } from 'zod';
+import { getSupabaseAdminClient } from './kommo/_shared.js';
+import { KOMMO_RESOURCE_CONFIG, type KommoResourceKey } from '../src/features/kommo/kommoResourceConfig.js';
 
 const require = createRequire(import.meta.url);
 const jwt = require('jsonwebtoken') as typeof import('jsonwebtoken');
@@ -15,6 +17,8 @@ import {
 const querySchema = z.object({
   name: z.string().min(1, 'El nombre de la hoja es obligatorio'),
 });
+
+type SortOrder = 'asc' | 'desc';
 
 const stableIdHeaderReadyBySheet = new Map<string, true>();
 const nextBusinessIdBySheet = new Map<string, number>();
@@ -131,6 +135,157 @@ function parseRowNumberHint(value: unknown): number | null {
 
   const parsed = Number(trimmed);
   return Number.isInteger(parsed) && parsed >= 2 ? parsed : null;
+}
+
+function asSingleQueryParam(value: string | string[] | undefined) {
+  return Array.isArray(value) ? value[0] : value;
+}
+
+function clampInt(value: unknown, fallback: number, min: number, max: number) {
+  const parsed = typeof value === 'string' ? Number.parseInt(value, 10) : typeof value === 'number' ? value : NaN;
+  const safe = Number.isFinite(parsed) ? parsed : fallback;
+  return Math.min(max, Math.max(min, safe));
+}
+
+function normalizeSortOrder(value: unknown): SortOrder {
+  return value === 'asc' ? 'asc' : 'desc';
+}
+
+function escapeOrValue(raw: string) {
+  return raw.replaceAll(',', ' ').trim();
+}
+
+function escapeLike(raw: string) {
+  return escapeOrValue(raw).replaceAll('\\', '\\\\');
+}
+
+function uniqueStrings(items: string[]) {
+  return Array.from(new Set(items.filter(Boolean)));
+}
+
+function hasColumn(config: (typeof KOMMO_RESOURCE_CONFIG)[KommoResourceKey], column: string) {
+  return uniqueStrings([config.primaryKey, ...config.listColumns, ...config.searchColumns]).includes(column);
+}
+
+async function handleKommoGet(req: VercelRequest, res: VercelResponse) {
+  const resourceParam = asSingleQueryParam(req.query.resource);
+  const resourceKey = resourceParam?.trim().toLowerCase() as KommoResourceKey | undefined;
+  const config = resourceKey ? KOMMO_RESOURCE_CONFIG[resourceKey] : undefined;
+
+  if (!resourceKey || !config) {
+    return res.status(400).json({
+      success: false,
+      error: 'Parámetro resource inválido',
+      page: 1,
+      pageSize: 0,
+      total: 0,
+      rows: [],
+      columns: [],
+    });
+  }
+
+  const page = clampInt(asSingleQueryParam(req.query.page), 1, 1, 1_000_000);
+  const pageSize = clampInt(asSingleQueryParam(req.query.pageSize), 50, 1, 200);
+  const order = normalizeSortOrder(asSingleQueryParam(req.query.order));
+
+  const sortParam = asSingleQueryParam(req.query.sort);
+  const sortCandidate = typeof sortParam === 'string' && sortParam.trim() ? sortParam.trim() : config.defaultSort;
+  const sort = config.sortColumns.includes(sortCandidate) ? sortCandidate : config.defaultSort;
+
+  const qParam = asSingleQueryParam(req.query.q);
+  const qRaw = typeof qParam === 'string' ? qParam.trim() : '';
+  const q = qRaw ? escapeLike(qRaw) : '';
+
+  const fullParam = asSingleQueryParam(req.query.full);
+  const full = fullParam === 'true' || fullParam === '1';
+
+  const idParam = asSingleQueryParam(req.query.id);
+  const businessIdParam = asSingleQueryParam(req.query.business_id);
+  const stableIdParam = asSingleQueryParam(req.query.stable_id);
+  const primaryKeyValue =
+    (config.primaryKey === 'business_id' ? (businessIdParam ?? idParam) : (stableIdParam ?? idParam)) ?? null;
+
+  try {
+    const supabase = getSupabaseAdminClient();
+
+    if (primaryKeyValue !== null && String(primaryKeyValue).trim()) {
+      const keyValue = String(primaryKeyValue).trim();
+      const selectColumns = full ? '*' : uniqueStrings([config.primaryKey, ...config.listColumns]).join(',');
+      const { data, error } = await supabase
+        .from(config.table as never)
+        .select(selectColumns as never)
+        .eq(config.primaryKey as never, keyValue as never)
+        .limit(1);
+
+      if (error) {
+        return res.status(500).json({ success: false, error: error.message || 'Error consultando datos' });
+      }
+
+      const row = (data as unknown[] | null)?.[0] ?? null;
+      const columns = row && typeof row === 'object' ? Object.keys(row as Record<string, unknown>) : [];
+
+      return res.status(200).json({
+        success: true,
+        resource: config.key,
+        page: 1,
+        pageSize: 1,
+        total: row ? 1 : 0,
+        rows: row ? [row] : [],
+        columns,
+      });
+    }
+
+    const from = (page - 1) * pageSize;
+    const to = from + pageSize - 1;
+    const listSelect = uniqueStrings([config.primaryKey, ...config.listColumns]).join(',');
+
+    let query = supabase
+      .from(config.table as never)
+      .select(listSelect as never, { count: 'exact' })
+      .order(sort as never, { ascending: order === 'asc' })
+      .range(from, to);
+
+    if (q) {
+      const filters: string[] = [];
+      const asNumber = Number(qRaw);
+      if (Number.isFinite(asNumber) && Number.isInteger(asNumber)) {
+        if (hasColumn(config, 'business_id')) filters.push(`business_id.eq.${asNumber}`);
+        if (hasColumn(config, 'from_entity_id')) filters.push(`from_entity_id.eq.${asNumber}`);
+        if (hasColumn(config, 'to_entity_id')) filters.push(`to_entity_id.eq.${asNumber}`);
+        if (hasColumn(config, 'entity_id')) filters.push(`entity_id.eq.${asNumber}`);
+        if (hasColumn(config, 'element_id')) filters.push(`element_id.eq.${asNumber}`);
+      }
+
+      for (const col of config.searchColumns) {
+        filters.push(`${col}.ilike.%${q}%`);
+      }
+
+      if (filters.length) {
+        query = query.or(filters.join(','));
+      }
+    }
+
+    const { data, error, count } = await query;
+    if (error) {
+      return res.status(500).json({ success: false, error: error.message || 'Error consultando datos' });
+    }
+
+    const rows = (data ?? []) as unknown[];
+    return res.status(200).json({
+      success: true,
+      resource: config.key,
+      page,
+      pageSize,
+      total: count ?? 0,
+      rows,
+      columns: uniqueStrings([config.primaryKey, ...config.listColumns]),
+    });
+  } catch (error: unknown) {
+    return res.status(500).json({
+      success: false,
+      error: error instanceof Error ? error.message : 'Error interno del servidor',
+    });
+  }
 }
 
 async function ensureStableIdHeader(
@@ -282,6 +437,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     if (req.method === 'GET') {
+      if (name.trim().toUpperCase() === 'KOMMO') {
+        return handleKommoGet(req, res);
+      }
+
       const startedAt = Date.now();
       const data = await getGoogleSheet(name);
       console.debug('[sheet:get] ok', {
