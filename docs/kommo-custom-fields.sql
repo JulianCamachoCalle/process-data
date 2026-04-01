@@ -6,6 +6,7 @@ create table if not exists public.kommo_custom_fields (
   stable_id text not null unique,
   business_id bigint not null,
   entity_type text not null,
+  catalog_id bigint,
   name text,
   code text,
   sort integer,
@@ -33,6 +34,9 @@ create unique index if not exists kommo_custom_fields_business_entity_unique_idx
 
 create index if not exists kommo_custom_fields_entity_type_idx
   on public.kommo_custom_fields (entity_type);
+
+create index if not exists kommo_custom_fields_catalog_id_idx
+  on public.kommo_custom_fields (catalog_id);
 
 create index if not exists kommo_custom_fields_name_idx
   on public.kommo_custom_fields (name);

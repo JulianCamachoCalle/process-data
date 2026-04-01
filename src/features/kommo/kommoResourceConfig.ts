@@ -16,6 +16,7 @@ export type KommoResourceKey =
   | 'sources'
   | 'tags'
   | 'custom_fields'
+  | 'custom_field_groups'
   | 'links';
 
 export type KommoResourceUiConfig = {
@@ -63,6 +64,7 @@ const DEFAULT_COLUMN_LABELS: Record<string, string> = {
   is_deletable: 'Se puede eliminar',
   is_api_only: 'Solo API',
   required_statuses: 'Estados requeridos',
+  fields: 'Campos',
   remind: 'Recordatorio',
   code: 'Código',
   color: 'Color',
@@ -341,9 +343,19 @@ export const KOMMO_RESOURCES: KommoResourceDataConfig[] = [
     table: 'kommo_custom_fields',
     primaryKey: 'stable_id',
     defaultSort: 'updated_at',
-    listColumns: ['entity_type', 'business_id', 'name', 'code', 'type', 'sort', 'is_predefined', 'is_deletable', 'updated_at'],
+    listColumns: ['entity_type', 'catalog_id', 'business_id', 'name', 'code', 'type', 'sort', 'is_predefined', 'is_deletable', 'updated_at'],
     sortColumns: ['updated_at', 'entity_type', 'business_id', 'name', 'sort'],
     searchColumns: ['name', 'code', 'entity_type', 'type'],
+  },
+  {
+    key: 'custom_field_groups',
+    label: 'Custom Field Groups',
+    table: 'kommo_custom_field_groups',
+    primaryKey: 'stable_id',
+    defaultSort: 'updated_at_db',
+    listColumns: ['entity_type', 'business_id', 'name', 'type', 'is_predefined', 'sort', 'fields', 'updated_at_db'],
+    sortColumns: ['updated_at_db', 'entity_type', 'business_id', 'name', 'type', 'sort'],
+    searchColumns: ['entity_type', 'name', 'type', 'business_id'],
   },
   {
     key: 'links',

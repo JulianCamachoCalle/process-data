@@ -417,13 +417,23 @@ function mapKommoCustomFieldToTable(payload: Record<string, unknown>) {
     return null;
   }
 
+  const catalogId = asNumber(payload.catalog_id ?? payload.list_id, 0) || null;
+  if (entityType === 'catalogs' && !catalogId) {
+    return null;
+  }
+
   const createdAtTs = asNumber(payload.created_at, 0);
   const updatedAtTs = asNumber(payload.updated_at, 0);
 
+  const stableId = entityType === 'catalogs' && catalogId
+    ? `kommo-cf-catalogs-${catalogId}-${fieldId}`
+    : `kommo-cf-${entityType}-${fieldId}`;
+
   return {
-    stable_id: `kommo-cf-${entityType}-${fieldId}`,
+    stable_id: stableId,
     business_id: fieldId,
     entity_type: entityType,
+    catalog_id: catalogId,
     name: payload.name ?? null,
     code: payload.code ?? null,
     type: payload.type ?? payload.field_type ?? null,
@@ -437,6 +447,32 @@ function mapKommoCustomFieldToTable(payload: Record<string, unknown>) {
     required_statuses: payload.required_statuses ?? null,
     created_at: createdAtTs ? new Date(createdAtTs * 1000).toISOString() : null,
     updated_at: updatedAtTs ? new Date(updatedAtTs * 1000).toISOString() : null,
+    raw_payload: payload,
+  };
+}
+
+function mapKommoCustomFieldGroupToTable(payload: Record<string, unknown>) {
+  const groupId = asNumber(payload.id, 0);
+  if (!groupId) {
+    return null;
+  }
+
+  const entityType = String(payload.entity_type ?? '').trim();
+  if (!entityType) {
+    return null;
+  }
+
+  const hasIsPredefined = Object.prototype.hasOwnProperty.call(payload, 'is_predefined');
+
+  return {
+    stable_id: `kommo-cfg-${entityType}-${groupId}`,
+    business_id: groupId,
+    entity_type: entityType,
+    name: payload.name ?? null,
+    sort: asNullableText(payload.sort),
+    is_predefined: asNullableBoolean(payload.is_predefined, hasIsPredefined),
+    type: asNullableText(payload.type),
+    fields: payload.fields ?? null,
     raw_payload: payload,
   };
 }
@@ -995,7 +1031,7 @@ async function processEvent(event: KommoEventRow) {
     const { error: upsertError } = await supabase.from('kommo_custom_fields' as never).upsert(
       mapped as never,
       {
-        onConflict: 'business_id,entity_type',
+        onConflict: 'stable_id',
       },
     );
 
@@ -1077,6 +1113,25 @@ async function processEvent(event: KommoEventRow) {
 
     if (upsertError) {
       throw new Error(upsertError.message || 'No se pudo upsert a kommo_pipelines');
+    }
+    return;
+  }
+
+  if (event.event_type === 'custom_field_group.pull') {
+    const mapped = mapKommoCustomFieldGroupToTable(event.payload);
+    if (!mapped) {
+      throw new Error('No se pudo derivar custom_field_group_id desde payload de Kommo');
+    }
+
+    const { error: upsertError } = await supabase.from('kommo_custom_field_groups' as never).upsert(
+      mapped as never,
+      {
+        onConflict: 'business_id,entity_type',
+      },
+    );
+
+    if (upsertError) {
+      throw new Error(upsertError.message || 'No se pudo upsert a kommo_custom_field_groups');
     }
     return;
   }
@@ -1311,7 +1366,9 @@ export default async function kommoProcessEventsHandler(req: VercelRequest, res:
           } else if (eventType === 'link.pull') {
             await processMapped('kommo_links', 'stable_id', mapKommoLinkToTable);
           } else if (eventType === 'custom_field.pull') {
-            await processMapped('kommo_custom_fields', 'business_id,entity_type', mapKommoCustomFieldToTable);
+            await processMapped('kommo_custom_fields', 'stable_id', mapKommoCustomFieldToTable);
+          } else if (eventType === 'custom_field_group.pull') {
+            await processMapped('kommo_custom_field_groups', 'business_id,entity_type', mapKommoCustomFieldGroupToTable);
           } else if (eventType === 'webhook.pull') {
             await processMapped('kommo_webhooks', 'business_id', mapKommoWebhookConfigToTable);
           } else if (eventType === 'talk.pull') {

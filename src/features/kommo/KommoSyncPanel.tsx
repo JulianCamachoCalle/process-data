@@ -29,6 +29,7 @@ const RESOURCES = [
   'sources',
   'tags',
   'custom_fields',
+  'custom_field_groups',
   'links',
 ];
 

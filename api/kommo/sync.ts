@@ -12,7 +12,9 @@ import {
 
 const SYNC_SECRET_HEADER = 'x-kommo-sync-secret';
 const SYNC_SECRET_ENV = 'KOMMO_SYNC_SECRET';
-const CUSTOM_FIELD_ENTITY_TYPES = ['leads', 'contacts', 'companies'] as const;
+const STANDARD_CUSTOM_FIELD_ENTITY_TYPES = ['leads', 'contacts', 'companies'] as const;
+const CUSTOM_FIELD_ENTITY_TYPES = [...STANDARD_CUSTOM_FIELD_ENTITY_TYPES, 'catalogs'] as const;
+type StandardCustomFieldEntityType = typeof STANDARD_CUSTOM_FIELD_ENTITY_TYPES[number];
 type CustomFieldEntityType = typeof CUSTOM_FIELD_ENTITY_TYPES[number];
 
 // Todos los recursos disponibles en Kommo API v4
@@ -36,6 +38,7 @@ const ALL_RESOURCES = [
   // Estos recursos requieren manejo especial
   'tags',
   'custom_fields',
+  'custom_field_groups',
   'links',
   'notes',
 ] as const;
@@ -62,6 +65,7 @@ const RESOURCE_ENDPOINTS: Record<KommoResource, string> = {
   // Recursos especiales sin endpoint directo
   tags: '',
   custom_fields: '',
+  custom_field_groups: '',
   links: '',
   notes: '',
 };
@@ -85,6 +89,7 @@ const RESOURCE_EVENT_TYPES: Record<string, string> = {
   sources: 'source.pull',
   tags: 'tag.pull',
   custom_fields: 'custom_field.pull',
+  custom_field_groups: 'custom_field_group.pull',
   links: 'link.pull',
 };
 
@@ -104,6 +109,7 @@ const EMBEDDED_KEY_MAP: Record<string, string> = {
   notes: 'notes',
   tags: 'tags',
   custom_fields: 'custom_fields',
+  custom_field_groups: 'custom_field_groups',
 };
 
 // Helper para manejar query params que pueden ser string o string[]
@@ -258,6 +264,10 @@ function isCustomFieldEntityType(value: string): value is CustomFieldEntityType 
   return (CUSTOM_FIELD_ENTITY_TYPES as readonly string[]).includes(value);
 }
 
+function isStandardCustomFieldEntityType(value: string): value is StandardCustomFieldEntityType {
+  return (STANDARD_CUSTOM_FIELD_ENTITY_TYPES as readonly string[]).includes(value);
+}
+
 function getCustomFieldDedupeVersion(item: Record<string, unknown>) {
   const updatedAt = item.updated_at;
   if (updatedAt !== undefined && updatedAt !== null && String(updatedAt) !== '') {
@@ -269,6 +279,11 @@ function getCustomFieldDedupeVersion(item: Record<string, unknown>) {
     return String(createdAt);
   }
 
+  const stableSeed = JSON.stringify(item);
+  return createHash('sha256').update(stableSeed).digest('hex');
+}
+
+function getCustomFieldGroupDedupeVersion(item: Record<string, unknown>) {
   const stableSeed = JSON.stringify(item);
   return createHash('sha256').update(stableSeed).digest('hex');
 }
@@ -450,6 +465,86 @@ async function fetchEntityTypeCustomFields(
     if (!response.ok) {
       const raw = await response.text();
       throw new Error(`Kommo custom_fields (${entityType}) page ${page} error (${response.status}): ${raw}`);
+    }
+
+    const payload = (await response.json()) as Record<string, unknown>;
+    const items = (payload._embedded as Record<string, unknown> | undefined)?.custom_fields as Array<Record<string, unknown>> ?? [];
+    allItems.push(...items);
+
+    const nextLink = (payload._links as Record<string, unknown> | undefined)?.next;
+    hasMore = !!nextLink;
+    page++;
+  }
+
+  return { items: allItems, totalPulled: allItems.length };
+}
+
+async function fetchEntityTypeCustomFieldGroups(
+  baseUrl: string,
+  accessToken: string,
+  entityType: StandardCustomFieldEntityType,
+  maxPages: number,
+): Promise<{ items: Array<Record<string, unknown>>; totalPulled: number }> {
+  const allItems: Array<Record<string, unknown>> = [];
+  let page = 1;
+  let hasMore = true;
+
+  while (hasMore && page <= maxPages) {
+    const url = new URL(`${baseUrl}/api/v4/${entityType}/custom_fields/groups`);
+    url.searchParams.set('limit', '250');
+    url.searchParams.set('page', String(page));
+
+    const response = await fetch(url.toString(), {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+    });
+
+    if (!response.ok) {
+      const raw = await response.text();
+      throw new Error(`Kommo custom_field_groups (${entityType}) page ${page} error (${response.status}): ${raw}`);
+    }
+
+    const payload = (await response.json()) as Record<string, unknown>;
+    const items = (payload._embedded as Record<string, unknown> | undefined)?.custom_field_groups as Array<Record<string, unknown>> ?? [];
+    allItems.push(...items);
+
+    const nextLink = (payload._links as Record<string, unknown> | undefined)?.next;
+    hasMore = !!nextLink;
+    page++;
+  }
+
+  return { items: allItems, totalPulled: allItems.length };
+}
+
+async function fetchCatalogCustomFields(
+  baseUrl: string,
+  accessToken: string,
+  listId: number,
+  maxPages: number,
+): Promise<{ items: Array<Record<string, unknown>>; totalPulled: number }> {
+  const allItems: Array<Record<string, unknown>> = [];
+  let page = 1;
+  let hasMore = true;
+
+  while (hasMore && page <= maxPages) {
+    const url = new URL(`${baseUrl}/api/v4/catalogs/${encodeURIComponent(String(listId))}/custom_fields`);
+    url.searchParams.set('limit', '250');
+    url.searchParams.set('page', String(page));
+
+    const response = await fetch(url.toString(), {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+    });
+
+    if (!response.ok) {
+      const raw = await response.text();
+      throw new Error(`Kommo custom_fields (catalogs/${listId}) page ${page} error (${response.status}): ${raw}`);
     }
 
     const payload = (await response.json()) as Record<string, unknown>;
@@ -1117,14 +1212,99 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
 
     if (selectedResource === 'custom_fields') {
       const entityTypeParam = asSingleQueryParam(req.query.entity_type);
-      const customFieldIdParam = asSingleQueryParam(req.query.id);
+      const listIdParam = asSingleQueryParam(req.query.list_id);
+      const customFieldIdParam = asSingleQueryParam(req.query.custom_field_id) ?? asSingleQueryParam(req.query.id);
+
+      if (listIdParam !== undefined && customFieldIdParam !== undefined) {
+        const listIdRaw = listIdParam.trim();
+        const customFieldIdRaw = customFieldIdParam.trim();
+        const listId = Number(listIdRaw);
+        const customFieldId = Number(customFieldIdRaw);
+
+        if (!listIdRaw || !Number.isInteger(listId) || listId <= 0) {
+          return res.status(400).json({
+            error: 'El parámetro list_id debe ser un número entero positivo para resource=custom_fields.',
+          });
+        }
+
+        if (!customFieldIdRaw || !Number.isInteger(customFieldId) || customFieldId <= 0) {
+          return res.status(400).json({
+            error: 'El parámetro custom_field_id (o id) debe ser un número entero positivo para resource=custom_fields.',
+          });
+        }
+
+        const endpoint = `/api/v4/catalogs/${encodeURIComponent(String(listId))}/custom_fields/${encodeURIComponent(String(customFieldId))}`;
+        const response = await fetch(`${freshConnection.account_base_url}${endpoint}`, {
+          method: 'GET',
+          headers: {
+            Authorization: `Bearer ${freshConnection.access_token}`,
+            'Content-Type': 'application/json',
+          },
+        });
+
+        if (response.status === 404) {
+          const raw = await response.text();
+          return res.status(404).json({
+            error: `Kommo custom_fields catalogs list_id ${listId} custom_field_id ${customFieldId} no encontrado (404).`,
+            resource: 'custom_fields',
+            list_id: listId,
+            custom_field_id: customFieldId,
+            details: raw,
+          });
+        }
+
+        if (!response.ok) {
+          const raw = await response.text();
+          throw new Error(`Kommo custom_field catalogs list_id ${listId} id ${customFieldId} error (${response.status}): ${raw}`);
+        }
+
+        const customField = (await response.json()) as Record<string, unknown>;
+        const customFieldWithContext: Record<string, unknown> = {
+          ...customField,
+          entity_type: 'catalogs',
+          catalog_id: listId,
+          id: Number(customField.id ?? customFieldId) || customFieldId,
+        };
+
+        const dedupeVersion = getCustomFieldDedupeVersion(customFieldWithContext);
+        const dedupeKey = `custom_field:catalogs:${listId}:${customFieldWithContext.id}:${dedupeVersion}`;
+
+        const staged = await stageWebhookEvents(supabase, [
+          {
+            account_base_url: freshConnection.account_base_url,
+            event_type: RESOURCE_EVENT_TYPES.custom_fields,
+            payload: customFieldWithContext,
+            dedupe_key: dedupeKey,
+            status: 'pending',
+          },
+        ]);
+
+        const resources = [
+          {
+            resource: 'custom_fields',
+            pulled: 1,
+            staged,
+            cursorFrom: null,
+            cursorTo: null,
+            hasMore: false,
+          },
+        ];
+
+        return res.status(200).json({
+          success: true,
+          account: freshConnection.account_subdomain,
+          resources,
+          totalPulled: 1,
+          totalStaged: staged,
+        });
+      }
 
       if (entityTypeParam !== undefined && customFieldIdParam !== undefined) {
         const entityTypeRaw = entityTypeParam.trim().toLowerCase();
         const customFieldIdRaw = customFieldIdParam.trim();
         const customFieldId = Number(customFieldIdRaw);
 
-        if (!isCustomFieldEntityType(entityTypeRaw)) {
+        if (!isStandardCustomFieldEntityType(entityTypeRaw)) {
           return res.status(400).json({
             error: 'El parámetro entity_type debe ser leads, contacts o companies para resource=custom_fields.',
           });
@@ -1201,6 +1381,98 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
       }
     }
 
+    if (selectedResource === 'custom_field_groups') {
+      const entityTypeParam = asSingleQueryParam(req.query.entity_type);
+      const groupIdParam = asSingleQueryParam(req.query.id);
+
+      if (groupIdParam !== undefined && entityTypeParam === undefined) {
+        return res.status(400).json({
+          error: 'El parámetro entity_type es obligatorio cuando se envía id para resource=custom_field_groups.',
+        });
+      }
+
+      if (entityTypeParam !== undefined && groupIdParam !== undefined) {
+        const entityTypeRaw = entityTypeParam.trim().toLowerCase();
+        const groupIdRaw = groupIdParam.trim();
+        const groupId = Number(groupIdRaw);
+
+        if (!isStandardCustomFieldEntityType(entityTypeRaw)) {
+          return res.status(400).json({
+            error: 'El parámetro entity_type debe ser leads, contacts o companies para resource=custom_field_groups.',
+          });
+        }
+
+        if (!groupIdRaw || !Number.isInteger(groupId) || groupId <= 0) {
+          return res.status(400).json({
+            error: 'El parámetro id debe ser un número entero positivo para resource=custom_field_groups.',
+          });
+        }
+
+        const endpoint = `/api/v4/${entityTypeRaw}/custom_fields/groups/${encodeURIComponent(String(groupId))}`;
+        const response = await fetch(`${freshConnection.account_base_url}${endpoint}`, {
+          method: 'GET',
+          headers: {
+            Authorization: `Bearer ${freshConnection.access_token}`,
+            'Content-Type': 'application/json',
+          },
+        });
+
+        if (response.status === 404) {
+          const raw = await response.text();
+          return res.status(404).json({
+            error: `Kommo custom_field_groups entity_type ${entityTypeRaw} id ${groupId} no encontrado (404).`,
+            resource: 'custom_field_groups',
+            entity_type: entityTypeRaw,
+            id: groupId,
+            details: raw,
+          });
+        }
+
+        if (!response.ok) {
+          const raw = await response.text();
+          throw new Error(`Kommo custom_field_group entity_type ${entityTypeRaw} id ${groupId} error (${response.status}): ${raw}`);
+        }
+
+        const group = (await response.json()) as Record<string, unknown>;
+        const groupWithEntityType: Record<string, unknown> = {
+          ...group,
+          entity_type: entityTypeRaw,
+        };
+
+        const dedupeVersion = getCustomFieldGroupDedupeVersion(groupWithEntityType);
+        const dedupeKey = `custom_field_group:${entityTypeRaw}:${groupId}:${dedupeVersion}`;
+
+        const staged = await stageWebhookEvents(supabase, [
+          {
+            account_base_url: freshConnection.account_base_url,
+            event_type: RESOURCE_EVENT_TYPES.custom_field_groups,
+            payload: groupWithEntityType,
+            dedupe_key: dedupeKey,
+            status: 'pending',
+          },
+        ]);
+
+        const resources = [
+          {
+            resource: 'custom_field_groups',
+            pulled: 1,
+            staged,
+            cursorFrom: null,
+            cursorTo: null,
+            hasMore: false,
+          },
+        ];
+
+        return res.status(200).json({
+          success: true,
+          account: freshConnection.account_subdomain,
+          resources,
+          totalPulled: 1,
+          totalStaged: staged,
+        });
+      }
+    }
+
     const results: Array<{
       resource: string;
       pulled: number;
@@ -1211,14 +1483,24 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
     }> = [];
 
     // Manejo especial para recursos que requieren iteración por entity_type (tags, custom_fields, notes) o por entidad (links).
-    if (selectedResource === 'tags' || selectedResource === 'custom_fields' || selectedResource === 'notes') {
+    if (selectedResource === 'tags' || selectedResource === 'custom_fields' || selectedResource === 'custom_field_groups' || selectedResource === 'notes') {
       const requestedEntityType = asSingleQueryParam(req.query.entity_type)?.trim().toLowerCase();
       let entityTypes: string[] = ['leads', 'contacts', 'companies'];
+      const listIdParam = asSingleQueryParam(req.query.list_id);
 
       if (selectedResource === 'custom_fields' && requestedEntityType) {
         if (!isCustomFieldEntityType(requestedEntityType)) {
           return res.status(400).json({
-            error: 'El parámetro entity_type debe ser leads, contacts o companies para resource=custom_fields.',
+            error: 'El parámetro entity_type debe ser leads, contacts, companies o catalogs para resource=custom_fields.',
+          });
+        }
+        entityTypes = [requestedEntityType];
+      }
+
+      if (selectedResource === 'custom_field_groups' && requestedEntityType) {
+        if (!isStandardCustomFieldEntityType(requestedEntityType)) {
+          return res.status(400).json({
+            error: 'El parámetro entity_type debe ser leads, contacts o companies para resource=custom_field_groups.',
           });
         }
         entityTypes = [requestedEntityType];
@@ -1226,6 +1508,86 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
 
       const maxPagesParam = asSingleQueryParam(req.query.max_pages);
       const maxPages = maxPagesParam ? Math.min(50, parseInt(maxPagesParam, 10) || 5) : 5;
+
+      if (selectedResource === 'custom_fields' && requestedEntityType === 'catalogs') {
+        let catalogIds: number[] = [];
+
+        if (listIdParam !== undefined) {
+          const listIdRaw = listIdParam.trim();
+          const listId = Number(listIdRaw);
+
+          if (!listIdRaw || !Number.isInteger(listId) || listId <= 0) {
+            return res.status(400).json({
+              error: 'El parámetro list_id debe ser un número entero positivo para resource=custom_fields cuando entity_type=catalogs.',
+            });
+          }
+
+          catalogIds = [listId];
+        } else {
+          const catalogsResult = await fetchAllPages(
+            freshConnection.account_base_url,
+            RESOURCE_ENDPOINTS.catalogs,
+            freshConnection.access_token,
+            'catalogs',
+            null,
+            undefined,
+            maxPages,
+          );
+
+          catalogIds = uniquePipelineIdsFromItems(catalogsResult.items);
+        }
+
+        for (const catalogId of catalogIds) {
+          const result = await fetchCatalogCustomFields(
+            freshConnection.account_base_url,
+            freshConnection.access_token,
+            catalogId,
+            maxPages,
+          );
+
+          const rows: WebhookEventInsert[] = [];
+          for (const item of result.items) {
+            const itemWithContext: Record<string, unknown> = {
+              ...item,
+              entity_type: 'catalogs',
+              catalog_id: Number(item.catalog_id ?? item.list_id ?? catalogId) || catalogId,
+            };
+
+            const dedupeIdentity = String(
+              itemWithContext.id
+              ?? createHash('sha256').update(JSON.stringify(itemWithContext)).digest('hex'),
+            );
+            const dedupeVersion = getCustomFieldDedupeVersion(itemWithContext);
+            const dedupeKey = `custom_field:catalogs:${catalogId}:${dedupeIdentity}:${dedupeVersion}`;
+
+            rows.push({
+              account_base_url: freshConnection.account_base_url,
+              event_type: RESOURCE_EVENT_TYPES.custom_fields,
+              payload: itemWithContext,
+              dedupe_key: dedupeKey,
+              status: 'pending',
+            });
+          }
+
+          const staged = await stageWebhookEvents(supabase, rows);
+
+          results.push({
+            resource: `custom_fields_catalogs_${catalogId}`,
+            pulled: result.items.length,
+            staged,
+            cursorFrom: null,
+            cursorTo: null,
+          });
+        }
+
+        return res.status(200).json({
+          success: true,
+          account: freshConnection.account_subdomain,
+          resources: results,
+          totalPulled: results.reduce((sum, r) => sum + r.pulled, 0),
+          totalStaged: results.reduce((sum, r) => sum + r.staged, 0),
+        });
+      }
 
       for (const entityType of entityTypes) {
         let items: Array<Record<string, unknown>> = [];
@@ -1246,6 +1608,14 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
             maxPages,
           );
           items = result.items;
+        } else if (selectedResource === 'custom_field_groups') {
+          const result = await fetchEntityTypeCustomFieldGroups(
+            freshConnection.account_base_url,
+            freshConnection.access_token,
+            entityType as StandardCustomFieldEntityType,
+            maxPages,
+          );
+          items = result.items;
         } else if (selectedResource === 'notes') {
           const result = await fetchEntityNotes(
             freshConnection.account_base_url,
@@ -1261,11 +1631,17 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
         const rows: WebhookEventInsert[] = [];
         for (const item of items) {
           const itemWithEntityType = { ...item, entity_type: entityType };
-          const dedupeIdentity = String(item.id ?? '');
+          const dedupeIdentity = selectedResource === 'custom_fields' || selectedResource === 'custom_field_groups'
+            ? String(item.id ?? createHash('sha256').update(JSON.stringify(itemWithEntityType)).digest('hex'))
+            : String(item.id ?? '');
           const dedupeVersion = selectedResource === 'custom_fields'
             ? getCustomFieldDedupeVersion(itemWithEntityType)
+            : selectedResource === 'custom_field_groups'
+              ? getCustomFieldGroupDedupeVersion(itemWithEntityType)
             : String(item.updated_at ?? item.created_at ?? createHash('sha256').update(JSON.stringify(itemWithEntityType)).digest('hex'));
-          const dedupeKey = `${selectedResource}:${entityType}:${dedupeIdentity}:${dedupeVersion}`;
+          const dedupeKey = selectedResource === 'custom_field_groups'
+            ? `custom_field_group:${entityType}:${dedupeIdentity}:${dedupeVersion}`
+            : `${selectedResource}:${entityType}:${dedupeIdentity}:${dedupeVersion}`;
           rows.push({
             account_base_url: freshConnection.account_base_url,
             event_type: eventType,
