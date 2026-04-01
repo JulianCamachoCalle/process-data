@@ -25,6 +25,7 @@ const ALL_RESOURCES = [
   'contacts', 
   'companies',
   'users',
+  'roles',
   'pipelines',
   'pipeline_statuses',
   'tasks',
@@ -52,6 +53,7 @@ const RESOURCE_ENDPOINTS: Record<KommoResource, string> = {
   contacts: '/api/v4/contacts',
   companies: '/api/v4/companies',
   users: '/api/v4/users',
+  roles: '/api/v4/roles',
   pipelines: '/api/v4/leads/pipelines',
   pipeline_statuses: '',
   tasks: '/api/v4/tasks',
@@ -77,6 +79,7 @@ const RESOURCE_EVENT_TYPES: Record<string, string> = {
   contacts: 'contact.pull',
   companies: 'companie.pull',
   users: 'user.pull',
+  roles: 'role.pull',
   pipelines: 'pipeline.pull',
   pipeline_statuses: 'pipeline_status.pull',
   tasks: 'task.pull',
@@ -103,6 +106,7 @@ const EMBEDDED_KEY_MAP: Record<string, string> = {
   contacts: 'contacts',
   companies: 'companies',
   users: 'users',
+  roles: 'roles',
   pipelines: 'pipelines',
   pipeline_statuses: 'statuses',
   tasks: 'tasks',
@@ -288,6 +292,36 @@ function getCustomFieldGroupDedupeVersion(item: Record<string, unknown>) {
   return createHash('sha256').update(stableSeed).digest('hex');
 }
 
+function getUserDedupeVersion(item: Record<string, unknown>) {
+  const updatedAt = item.updated_at;
+  if (updatedAt !== undefined && updatedAt !== null && String(updatedAt) !== '') {
+    return String(updatedAt);
+  }
+
+  const createdAt = item.created_at;
+  if (createdAt !== undefined && createdAt !== null && String(createdAt) !== '') {
+    return String(createdAt);
+  }
+
+  const stableSeed = JSON.stringify(item);
+  return createHash('sha256').update(stableSeed).digest('hex');
+}
+
+function getRoleDedupeVersion(item: Record<string, unknown>) {
+  const updatedAt = item.updated_at;
+  if (updatedAt !== undefined && updatedAt !== null && String(updatedAt) !== '') {
+    return String(updatedAt);
+  }
+
+  const createdAt = item.created_at;
+  if (createdAt !== undefined && createdAt !== null && String(createdAt) !== '') {
+    return String(createdAt);
+  }
+
+  const stableSeed = JSON.stringify(item);
+  return createHash('sha256').update(stableSeed).digest('hex');
+}
+
 // Dado un array de eventos a insertar, los inserta en la tabla kommo_webhook_events y evita los errores por duplicados. Si hay un error, divide el batch y reintenta para aislar filas problemáticas.
 type WebhookEventInsert = {
   account_base_url: string;
@@ -366,7 +400,7 @@ async function fetchAllPages(
       url.searchParams.set('filter[updated_at][from]', String(toUnixSeconds(fromDateIso)));
     }
 
-    if (withValue && (resource === 'leads' || resource === 'contacts' || resource === 'companies')) {
+    if (withValue && (resource === 'leads' || resource === 'contacts' || resource === 'companies' || resource === 'users' || resource === 'roles')) {
       url.searchParams.set('with', withValue);
     }
 
@@ -767,6 +801,8 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
     const leadsWith = requestedWith || 'contacts,loss_reason,is_price_modified_by_robot,catalog_elements,source_id,source';
     const contactsWith = requestedWith || 'leads,catalog_elements';
     const companiesWith = requestedWith || 'leads,contacts,catalog_elements';
+    const usersWith = requestedWith || 'role,group,uuid,amojo_id,user_rank,phone_number';
+    const rolesWith = requestedWith || 'users';
 
     // Manejo especial para lead puntual por ID.
     // Si viene id con resource=leads, usamos GET /api/v4/leads/{id} y stageamos un único evento lead.pull.
@@ -817,6 +853,166 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
         const resources = [
           {
             resource: 'leads',
+            pulled: 1,
+            staged,
+            cursorFrom: null,
+            cursorTo: null,
+            hasMore: false,
+          },
+        ];
+
+        return res.status(200).json({
+          success: true,
+          account: freshConnection.account_subdomain,
+          resources,
+          totalPulled: 1,
+          totalStaged: staged,
+        });
+      }
+    }
+
+    // Manejo especial para user puntual por ID.
+    // Si viene id con resource=users, usamos GET /api/v4/users/{id}
+    // y stageamos un único evento user.pull.
+    if (selectedResource === 'users') {
+      const userIdParam = asSingleQueryParam(req.query.id);
+
+      if (userIdParam !== undefined) {
+        const userIdRaw = userIdParam.trim();
+        const userId = Number(userIdRaw);
+
+        if (!userIdRaw || !Number.isInteger(userId) || userId <= 0) {
+          return res.status(400).json({
+            error: 'El parámetro id debe ser un número entero positivo para resource=users.',
+          });
+        }
+
+        const endpoint = `/api/v4/users/${encodeURIComponent(String(userId))}`;
+        const url = new URL(`${freshConnection.account_base_url}${endpoint}`);
+        if (usersWith) {
+          url.searchParams.set('with', usersWith);
+        }
+
+        const response = await fetch(url.toString(), {
+          method: 'GET',
+          headers: {
+            Authorization: `Bearer ${freshConnection.access_token}`,
+            'Content-Type': 'application/json',
+          },
+        });
+
+        if (response.status === 404) {
+          const raw = await response.text();
+          return res.status(404).json({
+            error: `Kommo users id ${userId} no encontrado (404).`,
+            resource: 'users',
+            id: userId,
+            details: raw,
+          });
+        }
+
+        if (!response.ok) {
+          const raw = await response.text();
+          throw new Error(`Kommo user id ${userId} error (${response.status}): ${raw}`);
+        }
+
+        const user = (await response.json()) as Record<string, unknown>;
+        const dedupeVersion = getUserDedupeVersion(user);
+        const dedupeKey = `user:${userId}:${dedupeVersion}`;
+
+        const staged = await stageWebhookEvents(supabase, [
+          {
+            account_base_url: freshConnection.account_base_url,
+            event_type: RESOURCE_EVENT_TYPES.users,
+            payload: user,
+            dedupe_key: dedupeKey,
+            status: 'pending',
+          },
+        ]);
+
+        const resources = [
+          {
+            resource: 'users',
+            pulled: 1,
+            staged,
+            cursorFrom: null,
+            cursorTo: null,
+            hasMore: false,
+          },
+        ];
+
+        return res.status(200).json({
+          success: true,
+          account: freshConnection.account_subdomain,
+          resources,
+          totalPulled: 1,
+          totalStaged: staged,
+        });
+      }
+    }
+
+    // Manejo especial para role puntual por ID.
+    // Si viene id con resource=roles, usamos GET /api/v4/roles/{id}
+    // y stageamos un único evento role.pull.
+    if (selectedResource === 'roles') {
+      const roleIdParam = asSingleQueryParam(req.query.id);
+
+      if (roleIdParam !== undefined) {
+        const roleIdRaw = roleIdParam.trim();
+        const roleId = Number(roleIdRaw);
+
+        if (!roleIdRaw || !Number.isInteger(roleId) || roleId <= 0) {
+          return res.status(400).json({
+            error: 'El parámetro id debe ser un número entero positivo para resource=roles.',
+          });
+        }
+
+        const endpoint = `/api/v4/roles/${encodeURIComponent(String(roleId))}`;
+        const url = new URL(`${freshConnection.account_base_url}${endpoint}`);
+        if (rolesWith) {
+          url.searchParams.set('with', rolesWith);
+        }
+
+        const response = await fetch(url.toString(), {
+          method: 'GET',
+          headers: {
+            Authorization: `Bearer ${freshConnection.access_token}`,
+            'Content-Type': 'application/json',
+          },
+        });
+
+        if (response.status === 404) {
+          const raw = await response.text();
+          return res.status(404).json({
+            error: `Kommo roles id ${roleId} no encontrado (404).`,
+            resource: 'roles',
+            id: roleId,
+            details: raw,
+          });
+        }
+
+        if (!response.ok) {
+          const raw = await response.text();
+          throw new Error(`Kommo role id ${roleId} error (${response.status}): ${raw}`);
+        }
+
+        const role = (await response.json()) as Record<string, unknown>;
+        const dedupeVersion = getRoleDedupeVersion(role);
+        const dedupeKey = `role:${roleId}:${dedupeVersion}`;
+
+        const staged = await stageWebhookEvents(supabase, [
+          {
+            account_base_url: freshConnection.account_base_url,
+            event_type: RESOURCE_EVENT_TYPES.roles,
+            payload: role,
+            dedupe_key: dedupeKey,
+            status: 'pending',
+          },
+        ]);
+
+        const resources = [
+          {
+            resource: 'roles',
             pulled: 1,
             staged,
             cursorFrom: null,
@@ -2344,7 +2540,7 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
       });
     }
 
-    // Recursos Estandar (leads, contacts, companies, users, pipelines, tasks, notes, events, catalogs, unsorted)
+    // Recursos Estandar (leads, contacts, companies, users, roles, pipelines, tasks, notes, events, catalogs, unsorted)
 
     for (const resource of resourcesToSync) {
       const endpoint = RESOURCE_ENDPOINTS[resource];
@@ -2383,7 +2579,11 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
             ? contactsWith
             : resource === 'companies'
               ? companiesWith
-              : undefined,
+              : resource === 'users'
+                ? usersWith
+                : resource === 'roles'
+                  ? rolesWith
+                : undefined,
         maxPages,
       );
 
@@ -2402,6 +2602,10 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
                   ? String(item.updated_at ?? item.created_at ?? '')
                   : resource === 'companies'
                     ? String(item.updated_at ?? item.created_at ?? '')
+                    : resource === 'users'
+                      ? getUserDedupeVersion(item)
+                      : resource === 'roles'
+                        ? getRoleDedupeVersion(item)
                     : String(item.updated_at ?? '');
         const dedupeKey = `${resource}:${dedupeIdentity}:${dedupeVersion}`;
         stageRows.push({

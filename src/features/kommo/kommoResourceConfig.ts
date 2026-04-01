@@ -4,6 +4,7 @@ export type KommoResourceKey =
   | 'contacts'
   | 'companies'
   | 'users'
+  | 'roles'
   | 'pipelines'
   | 'pipeline_statuses'
   | 'tasks'
@@ -79,6 +80,13 @@ const DEFAULT_COLUMN_LABELS: Record<string, string> = {
   updated_by: 'Actualizado por (ID usuario)',
   is_admin: 'Admin',
   is_active: 'Activo',
+  user_rank: 'Rango',
+  phone_number: 'Teléfono',
+  amojo_id: 'Amojo ID',
+  rights: 'Permisos',
+  role_id: 'ID Rol',
+  status_rights: 'Permisos por estado',
+  users: 'Usuarios',
   is_completed: 'Completada',
   is_default: 'Por defecto',
   pipeline_id: 'ID Pipeline',
@@ -196,9 +204,19 @@ export const KOMMO_RESOURCES: KommoResourceDataConfig[] = [
     table: 'kommo_users',
     primaryKey: 'business_id',
     defaultSort: 'business_id',
-    listColumns: ['business_id', 'name', 'email', 'lang', 'is_admin', 'is_active'],
-    sortColumns: ['business_id', 'name', 'email'],
-    searchColumns: ['name', 'email'],
+    listColumns: ['business_id', 'name', 'email', 'lang', 'is_admin', 'is_active', 'user_rank', 'group_id', 'role_id'],
+    sortColumns: ['business_id', 'name', 'email', 'user_rank', 'group_id', 'role_id'],
+    searchColumns: ['name', 'email', 'user_rank'],
+  },
+  {
+    key: 'roles',
+    label: 'Roles',
+    table: 'kommo_roles',
+    primaryKey: 'business_id',
+    defaultSort: 'business_id',
+    listColumns: ['business_id', 'name', 'is_admin', 'is_active', 'is_free', 'group_id', 'role_id'],
+    sortColumns: ['business_id', 'name', 'is_admin', 'is_active'],
+    searchColumns: ['name', 'business_id'],
   },
   {
     key: 'pipelines',

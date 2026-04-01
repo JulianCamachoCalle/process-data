@@ -17,6 +17,7 @@ const RESOURCES = [
   'contacts', 
   'companies',
   'users',
+  'roles',
   'pipelines',
   'pipeline_statuses',
   'tasks',

@@ -190,16 +190,67 @@ function mapKommoUserToTable(payload: Record<string, unknown>) {
     return null;
   }
 
+  const rights = (payload.rights as Record<string, unknown> | undefined) ?? undefined;
+  const hasTopLevelIsAdmin = Object.prototype.hasOwnProperty.call(payload, 'is_admin');
+  const hasTopLevelIsActive = Object.prototype.hasOwnProperty.call(payload, 'is_active');
+  const hasTopLevelIsFree = Object.prototype.hasOwnProperty.call(payload, 'is_free');
+  const hasTopLevelGroupId = Object.prototype.hasOwnProperty.call(payload, 'group_id');
+  const hasTopLevelRoleId = Object.prototype.hasOwnProperty.call(payload, 'role_id');
+
+  const rightsGroup = (rights?.group as Record<string, unknown> | undefined) ?? undefined;
+  const rightsRole = (rights?.role as Record<string, unknown> | undefined) ?? undefined;
+
   return {
     stable_id: `kommo-user-${userId}`,
     business_id: userId,
     lang: payload.lang ?? null,
     name: payload.name ?? null,
     email: payload.email ?? null,
-    is_admin: payload.is_admin ?? false,
-    is_active: (payload.rights as Record<string, unknown>)?.is_active ?? true,
-    group_id: asNumber(payload.group_id, 0) || null,
-    rights: payload.rights ?? null,
+    rights: rights ?? null,
+    is_admin: asNullableBoolean(hasTopLevelIsAdmin ? payload.is_admin : rights?.is_admin, hasTopLevelIsAdmin || rights?.is_admin !== undefined),
+    is_active: asNullableBoolean(hasTopLevelIsActive ? payload.is_active : rights?.is_active, hasTopLevelIsActive || rights?.is_active !== undefined),
+    is_free: asNullableBoolean(hasTopLevelIsFree ? payload.is_free : rights?.is_free, hasTopLevelIsFree || rights?.is_free !== undefined),
+    group_id: hasTopLevelGroupId
+      ? (asNumber(payload.group_id, 0) || null)
+      : (asNumber(rights?.group_id ?? rightsGroup?.id ?? rightsGroup?.group_id, 0) || null),
+    role_id: hasTopLevelRoleId
+      ? (asNumber(payload.role_id, 0) || null)
+      : (asNumber(rights?.role_id ?? rightsRole?.id ?? rightsRole?.role_id, 0) || null),
+    status_rights: payload.status_rights ?? rights?.status_rights ?? null,
+    role: payload.role ?? rightsRole ?? null,
+    group_data: payload.group ?? rightsGroup ?? null,
+    uuid: asNullableText(payload.uuid),
+    amojo_id: asNullableText(payload.amojo_id),
+    user_rank: asNullableText(payload.user_rank),
+    phone_number: asNullableText(payload.phone_number),
+    raw_payload: payload,
+  };
+}
+
+function mapKommoRoleToTable(payload: Record<string, unknown>) {
+  const roleBusinessId = asNumber(payload.id, 0);
+  if (!roleBusinessId) {
+    return null;
+  }
+
+  const rights = (payload.rights as Record<string, unknown> | undefined) ?? undefined;
+  const rightsGroup = (rights?.group as Record<string, unknown> | undefined) ?? undefined;
+  const rightsRole = (rights?.role as Record<string, unknown> | undefined) ?? undefined;
+  const embedded = payload._embedded as Record<string, unknown> | undefined;
+
+  return {
+    stable_id: `kommo-role-${roleBusinessId}`,
+    business_id: roleBusinessId,
+    name: payload.name ?? null,
+    rights: rights ?? null,
+    is_admin: asNullableBoolean(rights?.is_admin, rights?.is_admin !== undefined),
+    is_active: asNullableBoolean(rights?.is_active, rights?.is_active !== undefined),
+    is_free: asNullableBoolean(rights?.is_free, rights?.is_free !== undefined),
+    group_id: asNumber(rights?.group_id ?? rightsGroup?.id ?? rightsGroup?.group_id, 0) || null,
+    role_id: asNumber(rights?.role_id ?? rightsRole?.id ?? rightsRole?.role_id, 0) || null,
+    status_rights: rights?.status_rights ?? null,
+    users: embedded?.users ?? null,
+    raw_payload: payload,
   };
 }
 
@@ -1117,6 +1168,25 @@ async function processEvent(event: KommoEventRow) {
     return;
   }
 
+  if (event.event_type === 'role.pull') {
+    const mapped = mapKommoRoleToTable(event.payload);
+    if (!mapped) {
+      throw new Error('No se pudo derivar role_id desde payload de Kommo');
+    }
+
+    const { error: upsertError } = await supabase.from('kommo_roles' as never).upsert(
+      mapped as never,
+      {
+        onConflict: 'business_id',
+      },
+    );
+
+    if (upsertError) {
+      throw new Error(upsertError.message || 'No se pudo upsert a kommo_roles');
+    }
+    return;
+  }
+
   if (event.event_type === 'custom_field_group.pull') {
     const mapped = mapKommoCustomFieldGroupToTable(event.payload);
     if (!mapped) {
@@ -1345,6 +1415,8 @@ export default async function kommoProcessEventsHandler(req: VercelRequest, res:
             await processMapped('kommo_contacts', 'business_id', mapKommoContactToTable);
           } else if (eventType === 'user.pull') {
             await processMapped('kommo_users', 'business_id', mapKommoUserToTable);
+          } else if (eventType === 'role.pull') {
+            await processMapped('kommo_roles', 'business_id', mapKommoRoleToTable);
           } else if (eventType === 'companie.pull') {
             await processMapped('kommo_companies', 'business_id', mapKommoCompanyToTable);
           } else if (eventType === 'tag.pull') {
