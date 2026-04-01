@@ -351,40 +351,36 @@ function mapKommoCallToTable(payload: Record<string, unknown>) {
 
 // INSERT MISSING FUNCTIONS HERE
 function mapKommoUnsortedLeadToTable(payload: Record<string, unknown>) {
-  // Unsorted lead payloads can come in different shapes:
-  // - Some responses include an `id` directly
-  // - Others use `uid` and embed the linked lead id under `_embedded.leads[0].id`
-  const embedded = payload._embedded as { leads?: Array<Record<string, unknown>> } | undefined;
-  const embeddedLeadId = asNumber(embedded?.leads?.[0]?.id, 0);
-
-  const leadId = asNumber(payload.id, 0) || embeddedLeadId;
-  if (!leadId) {
+  const uid = String(payload.uid ?? '').trim();
+  if (!uid) {
     return null;
   }
 
-  const uid = String(payload.uid ?? '');
+  const embedded = payload._embedded as {
+    leads?: Array<Record<string, unknown>>;
+    contacts?: Array<Record<string, unknown>>;
+    companies?: Array<Record<string, unknown>>;
+  } | undefined;
 
-  const originalCreationTs = asUnixSeconds(
-    payload.original_creation_date ?? (payload.metadata as Record<string, unknown> | undefined)?.received_at,
-  );
+  const source = payload.source as Record<string, unknown> | undefined;
+  const metadata = (payload.metadata as Record<string, unknown> | undefined) ?? null;
+
   const createdAtTs = asUnixSeconds(payload.created_at);
-  const updatedAtTs = asUnixSeconds(payload.updated_at);
 
   return {
-    stable_id: `kommo-unsorted-${uid || leadId}`,
-    business_id: leadId,
-    name: payload.name ?? null,
-    price: asNumber(payload.price, 0) || null,
-    responsible_user_id: asNumber(payload.responsible_user_id, 0) || null,
-    group_id: asNumber(payload.group_id, 0) || null,
-    status_id: asNumber(payload.status_id, 0) || null,
+    stable_id: `kommo-unsorted-${uid}`,
+    uid,
+    source_uid: String(payload.source_uid ?? source?.uid ?? '').trim() || null,
+    source_name: String(payload.source_name ?? source?.name ?? '').trim() || null,
+    category: String(payload.category ?? '').trim() || null,
     pipeline_id: asNumber(payload.pipeline_id, 0) || null,
-    source_id: asNumber(payload.source_id, 0) || null,
-    original_creation_date: originalCreationTs ? new Date(originalCreationTs * 1000).toISOString() : null,
     created_at: createdAtTs ? new Date(createdAtTs * 1000).toISOString() : null,
-    updated_at: updatedAtTs ? new Date(updatedAtTs * 1000).toISOString() : null,
-    // Keep raw payload for analysis/debugging since unsorted objects include rich metadata.
-    custom_fields_values: payload.custom_fields_values ?? payload ?? null,
+    account_id: asNumber(payload.account_id, 0) || null,
+    metadata,
+    lead_id: asNumber(embedded?.leads?.[0]?.id, 0) || null,
+    contact_id: asNumber(embedded?.contacts?.[0]?.id, 0) || null,
+    company_id: asNumber(embedded?.companies?.[0]?.id, 0) || null,
+    raw_payload: payload,
   };
 }
 
@@ -556,6 +552,30 @@ function mapKommoPipelineToTable(payload: Record<string, unknown>) {
     is_deleted: payload.is_deleted ?? false,
     statuses: embedded?.statuses ?? null,
     raw_payload: payload,
+  };
+}
+
+function mapKommoUnsortedSummaryToTable(payload: Record<string, unknown>) {
+  const meta = payload.meta as Record<string, unknown> | undefined;
+  const stableId = String(meta?.scope_key ?? '').trim();
+  if (!stableId) {
+    return null;
+  }
+
+  const accountBaseUrlRaw = meta?.account_base_url;
+  const accountBaseUrl = typeof accountBaseUrlRaw === 'string' ? accountBaseUrlRaw : null;
+
+  const filters = (meta?.filters as Record<string, unknown> | undefined) ?? null;
+
+  return {
+    stable_id: stableId,
+    account_base_url: accountBaseUrl,
+    total: asNumber(payload.total, 0),
+    accepted: asNumber(payload.accepted, 0),
+    declined: asNumber(payload.declined, 0),
+    average_sort_time: asNumber(payload.average_sort_time, 0),
+    categories: payload.categories ?? null,
+    filters,
   };
 }
 
@@ -880,13 +900,13 @@ async function processEvent(event: KommoEventRow) {
   if (event.event_type === 'unsorted.pull') {
     const mapped = mapKommoUnsortedLeadToTable(event.payload);
     if (!mapped) {
-      throw new Error('No se pudo derivar unsorted lead_id desde payload de Kommo');
+      throw new Error('No se pudo derivar uid de unsorted desde payload de Kommo');
     }
 
     const { error: upsertError } = await supabase.from('kommo_unsorted_leads' as never).upsert(
       mapped as never,
       {
-        onConflict: 'business_id',
+        onConflict: 'uid',
       },
     );
 
@@ -1006,6 +1026,25 @@ async function processEvent(event: KommoEventRow) {
 
     if (upsertError) {
       throw new Error(upsertError.message || 'No se pudo upsert a kommo_pipelines');
+    }
+    return;
+  }
+
+  if (event.event_type === 'unsorted.summary.pull') {
+    const mapped = mapKommoUnsortedSummaryToTable(event.payload);
+    if (!mapped) {
+      throw new Error('No se pudo derivar stable_id de unsorted summary desde payload de Kommo');
+    }
+
+    const { error: upsertError } = await supabase.from('kommo_unsorted_summary' as never).upsert(
+      mapped as never,
+      {
+        onConflict: 'stable_id',
+      },
+    );
+
+    if (upsertError) {
+      throw new Error(upsertError.message || 'No se pudo upsert a kommo_unsorted_summary');
     }
     return;
   }
@@ -1179,7 +1218,7 @@ export default async function kommoProcessEventsHandler(req: VercelRequest, res:
           } else if (eventType === 'catalog.pull') {
             await processMapped('kommo_catalogs', 'business_id', mapKommoCatalogToTable);
           } else if (eventType === 'unsorted.pull') {
-            await processMapped('kommo_unsorted_leads', 'business_id', mapKommoUnsortedLeadToTable);
+            await processMapped('kommo_unsorted_leads', 'uid', mapKommoUnsortedLeadToTable);
           } else if (eventType === 'link.pull') {
             await processMapped('kommo_links', 'stable_id', mapKommoLinkToTable);
           } else if (eventType === 'custom_field.pull') {
@@ -1192,6 +1231,8 @@ export default async function kommoProcessEventsHandler(req: VercelRequest, res:
             await processMapped('kommo_sources', 'business_id', mapKommoSourceToTable);
           } else if (eventType === 'pipeline.pull') {
             await processMapped('kommo_pipelines', 'business_id', mapKommoPipelineToTable);
+          } else if (eventType === 'unsorted.summary.pull') {
+            await processMapped('kommo_unsorted_summary', 'stable_id', mapKommoUnsortedSummaryToTable);
           } else {
             // Unknown event type → mark all failed
             for (const ev of group) {
@@ -1237,12 +1278,12 @@ export default async function kommoProcessEventsHandler(req: VercelRequest, res:
       totalProcessed += uniqueDoneIds.length;
       totalFailed += failures.length;
 
-      // If not looping, break after first batch
+      // Si no se quiere hacer loop, o si no se procesó ningún evento (para evitar loops vacíos), salimos.
       if (!shouldLoop) {
         break;
       }
 
-      // Small delay to prevent tight loop
+      // Pequeña pausa para evitar sobrecargar la base de datos en caso de muchos eventos.
       await new Promise(resolve => setTimeout(resolve, 100));
     }
 

@@ -1,4 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
+import { createHash } from 'node:crypto';
 import {
   ensureFreshConnection,
   getActiveKommoConnection,
@@ -25,6 +26,7 @@ const ALL_RESOURCES = [
   'events',
   'catalogs',
   'unsorted',
+  'unsorted_summary',
   'sources',
   // Estos recursos requieren manejo especial
   'tags',
@@ -47,6 +49,7 @@ const RESOURCE_ENDPOINTS: Record<KommoResource, string> = {
   events: '/api/v4/events',
   catalogs: '/api/v4/catalogs',
   unsorted: '/api/v4/leads/unsorted',
+  unsorted_summary: '/api/v4/leads/unsorted/summary',
   sources: '/api/v4/sources',
   // Recursos especiales sin endpoint directo
   tags: '',
@@ -67,6 +70,7 @@ const RESOURCE_EVENT_TYPES: Record<string, string> = {
   events: 'event.pull',
   catalogs: 'catalog.pull',
   unsorted: 'unsorted.pull',
+  unsorted_summary: 'unsorted.summary.pull',
   sources: 'source.pull',
   tags: 'tag.pull',
   custom_fields: 'custom_field.pull',
@@ -91,6 +95,64 @@ const EMBEDDED_KEY_MAP: Record<string, string> = {
 // Helper para manejar query params que pueden ser string o string[]
 function asSingleQueryParam(value: string | string[] | undefined) {
   return Array.isArray(value) ? value[0] : value;
+}
+
+function asArrayQueryParam(value: string | string[] | undefined) {
+  if (value === undefined) return [];
+  const values = Array.isArray(value) ? value : [value];
+  return values.map((v) => v.trim()).filter(Boolean);
+}
+
+function getNestedQueryValue(
+  root: unknown,
+  path: string[],
+): string | string[] | undefined {
+  let current: unknown = root;
+
+  for (const key of path) {
+    if (!current || typeof current !== 'object') return undefined;
+    current = (current as Record<string, unknown>)[key];
+  }
+
+  if (Array.isArray(current) && current.every((item) => typeof item === 'string')) {
+    return current as string[];
+  }
+
+  return typeof current === 'string' ? current : undefined;
+}
+
+type UnsortedSummaryFilters = {
+  uid?: string[];
+  created_at?: string;
+  created_at_from?: string;
+  created_at_to?: string;
+  pipeline_id?: string[];
+};
+
+function normalizeSummaryFilters(filters: UnsortedSummaryFilters): UnsortedSummaryFilters {
+  const normalized: UnsortedSummaryFilters = {};
+
+  if (filters.uid && filters.uid.length > 0) {
+    normalized.uid = Array.from(new Set(filters.uid)).sort();
+  }
+
+  if (filters.created_at) {
+    normalized.created_at = filters.created_at;
+  }
+
+  if (filters.created_at_from) {
+    normalized.created_at_from = filters.created_at_from;
+  }
+
+  if (filters.created_at_to) {
+    normalized.created_at_to = filters.created_at_to;
+  }
+
+  if (filters.pipeline_id && filters.pipeline_id.length > 0) {
+    normalized.pipeline_id = Array.from(new Set(filters.pipeline_id)).sort();
+  }
+
+  return normalized;
 }
 
 // Convierte una fecha ISO a segundos Unix, que es el formato que Kommo espera para los filtros de fecha.
@@ -198,7 +260,8 @@ async function fetchAllPages(
     url.searchParams.set('limit', '250');
     url.searchParams.set('page', String(page));
     
-    if (fromDateIso) {
+    const supportsUpdatedAtFilter = resource !== 'unsorted';
+    if (fromDateIso && supportsUpdatedAtFilter) {
       url.searchParams.set('filter[updated_at][from]', String(toUnixSeconds(fromDateIso)));
     }
 
@@ -638,6 +701,187 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
       });
     }
 
+    // Manejo especial para unsorted por UID puntual.
+    // Si viene uid, usamos GET /api/v4/leads/unsorted/{uid} y mantenemos el modelo UID-céntrico.
+    if (selectedResource === 'unsorted') {
+      const uidParam = asSingleQueryParam(req.query.uid);
+
+      if (uidParam !== undefined) {
+        const uid = uidParam.trim();
+        if (!uid) {
+          return res.status(400).json({ error: 'El parámetro uid no puede estar vacío para resource=unsorted.' });
+        }
+
+        const endpoint = `/api/v4/leads/unsorted/${encodeURIComponent(uid)}`;
+        const response = await fetch(`${freshConnection.account_base_url}${endpoint}`, {
+          method: 'GET',
+          headers: {
+            Authorization: `Bearer ${freshConnection.access_token}`,
+            'Content-Type': 'application/json',
+          },
+        });
+
+        if (!response.ok) {
+          const raw = await response.text();
+          throw new Error(`Kommo unsorted uid ${uid} error (${response.status}): ${raw}`);
+        }
+
+        const item = (await response.json()) as Record<string, unknown>;
+        const dedupeIdentity = String(item.uid ?? uid);
+        const dedupeVersion = String(item.created_at ?? item.updated_at ?? '');
+        const dedupeKey = `unsorted:${dedupeIdentity}:${dedupeVersion}`;
+
+        const staged = await stageWebhookEvents(supabase, [
+          {
+            account_base_url: freshConnection.account_base_url,
+            event_type: RESOURCE_EVENT_TYPES.unsorted,
+            payload: item,
+            dedupe_key: dedupeKey,
+            status: 'pending',
+          },
+        ]);
+
+        const resources = [
+          {
+            resource: 'unsorted',
+            pulled: 1,
+            staged,
+            cursorFrom: null,
+            cursorTo: null,
+            hasMore: false,
+          },
+        ];
+
+        return res.status(200).json({
+          success: true,
+          account: freshConnection.account_subdomain,
+          resources,
+          totalPulled: 1,
+          totalStaged: staged,
+        });
+      }
+    }
+
+    // Manejo especial para summary de unsorted.
+    // Es una llamada única (sin paginación), con filtros opcionales forwardeados desde query params.
+    if (selectedResource === 'unsorted_summary') {
+      const filters: UnsortedSummaryFilters = normalizeSummaryFilters({
+        uid: asArrayQueryParam(
+          asArrayQueryParam(req.query['filter[uid]'])
+            .concat(
+              asArrayQueryParam(getNestedQueryValue(req.query.filter, ['uid'])),
+            ),
+        ),
+        created_at:
+          asSingleQueryParam(req.query['filter[created_at]'])
+          ?? asSingleQueryParam(getNestedQueryValue(req.query.filter, ['created_at'])),
+        created_at_from:
+          asSingleQueryParam(req.query['filter[created_at][from]'])
+          ?? asSingleQueryParam(getNestedQueryValue(req.query.filter, ['created_at', 'from'])),
+        created_at_to:
+          asSingleQueryParam(req.query['filter[created_at][to]'])
+          ?? asSingleQueryParam(getNestedQueryValue(req.query.filter, ['created_at', 'to'])),
+        pipeline_id: asArrayQueryParam(
+          asArrayQueryParam(req.query['filter[pipeline_id]'])
+            .concat(
+              asArrayQueryParam(getNestedQueryValue(req.query.filter, ['pipeline_id'])),
+            ),
+        ),
+      });
+
+      const endpoint = RESOURCE_ENDPOINTS.unsorted_summary;
+      const url = new URL(`${freshConnection.account_base_url}${endpoint}`);
+
+      for (const uid of filters.uid ?? []) {
+        url.searchParams.append('filter[uid]', uid);
+      }
+
+      if (filters.created_at) {
+        url.searchParams.set('filter[created_at]', filters.created_at);
+      }
+
+      if (filters.created_at_from) {
+        url.searchParams.set('filter[created_at][from]', filters.created_at_from);
+      }
+
+      if (filters.created_at_to) {
+        url.searchParams.set('filter[created_at][to]', filters.created_at_to);
+      }
+
+      for (const pipelineId of filters.pipeline_id ?? []) {
+        url.searchParams.append('filter[pipeline_id]', pipelineId);
+      }
+
+      const response = await fetch(url.toString(), {
+        method: 'GET',
+        headers: {
+          Authorization: `Bearer ${freshConnection.access_token}`,
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (!response.ok) {
+        const raw = await response.text();
+        throw new Error(`Kommo unsorted summary error (${response.status}): ${raw}`);
+      }
+
+      const summaryPayload = (await response.json()) as Record<string, unknown>;
+
+      const scopeSeed = JSON.stringify({
+        account_base_url: freshConnection.account_base_url,
+        filters,
+      });
+      const scopeKey = `kommo-unsorted-summary:${createHash('sha256').update(scopeSeed).digest('hex')}`;
+
+      const payloadWithMeta: Record<string, unknown> = {
+        ...summaryPayload,
+        meta: {
+          scope_key: scopeKey,
+          filters,
+          account_base_url: freshConnection.account_base_url,
+        },
+      };
+
+      const dedupeSeed = JSON.stringify({
+        scope_key: scopeKey,
+        total: summaryPayload.total ?? null,
+        accepted: summaryPayload.accepted ?? null,
+        declined: summaryPayload.declined ?? null,
+        average_sort_time: summaryPayload.average_sort_time ?? null,
+        categories: summaryPayload.categories ?? null,
+      });
+      const dedupeKey = `unsorted_summary:${createHash('sha256').update(dedupeSeed).digest('hex')}`;
+
+      const staged = await stageWebhookEvents(supabase, [
+        {
+          account_base_url: freshConnection.account_base_url,
+          event_type: RESOURCE_EVENT_TYPES.unsorted_summary,
+          payload: payloadWithMeta,
+          dedupe_key: dedupeKey,
+          status: 'pending',
+        },
+      ]);
+
+      const resources = [
+        {
+          resource: 'unsorted_summary',
+          pulled: 1,
+          staged,
+          cursorFrom: null,
+          cursorTo: null,
+          hasMore: false,
+        },
+      ];
+
+      return res.status(200).json({
+        success: true,
+        account: freshConnection.account_subdomain,
+        resources,
+        totalPulled: 1,
+        totalStaged: staged,
+      });
+    }
+
     // Recursos Estandar (leads, contacts, companies, users, pipelines, tasks, notes, events, catalogs, unsorted)
 
     for (const resource of resourcesToSync) {
@@ -676,7 +920,15 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
 
       const stageRows: WebhookEventInsert[] = [];
       for (const item of items) {
-        const dedupeKey = `${resource}:${String(item.id ?? '')}:${String(item.updated_at ?? '')}`;
+        const dedupeIdentity =
+          resource === 'unsorted'
+            ? String(item.uid ?? item.id ?? '')
+            : String(item.id ?? '');
+        const dedupeVersion =
+          resource === 'unsorted'
+            ? String(item.created_at ?? item.updated_at ?? '')
+            : String(item.updated_at ?? '');
+        const dedupeKey = `${resource}:${dedupeIdentity}:${dedupeVersion}`;
         stageRows.push({
           account_base_url: freshConnection.account_base_url,
           event_type: eventType,
