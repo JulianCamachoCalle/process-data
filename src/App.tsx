@@ -8,6 +8,7 @@ import { DashboardOverview } from './features/dashboard/DashboardOverview';
 import { Login } from './features/auth/Login';
 import { KommoSyncPanel } from './features/kommo/sync/KommoSyncPanel';
 import { KommoExplorer } from './features/kommo/explorer/KommoExplorer';
+import { KommoLeadsInsights } from './features/kommo/insights/KommoLeadsInsights';
 import { prefetchSheetData } from './hooks/useSheetData';
 import { isSupabaseConfigured, supabase } from './lib/supabase';
 
@@ -167,6 +168,7 @@ function Layout() {
               <Route path="/" element={<DashboardOverview />} />
               <Route path="/sheet/:sheetName" element={<SheetRouteWrapper />} />
               <Route path="/kommo" element={<KommoExplorer />} />
+              <Route path="/kommo/leads-insights" element={<KommoLeadsInsights />} />
               <Route path="/kommo/:resource" element={<KommoExplorer />} />
             </Routes>
           </div>

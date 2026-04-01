@@ -253,6 +253,13 @@ function getSyncOutboxTable(client: ReturnType<typeof createClient>) {
   return client.from('sync_outbox' as never);
 }
 
+function isMissingSyncOutboxTableError(error: unknown) {
+  if (!error || typeof error !== 'object') return false;
+  const maybeMessage = (error as { message?: unknown }).message;
+  if (typeof maybeMessage !== 'string') return false;
+  return maybeMessage.includes("Could not find the table 'public.sync_outbox'");
+}
+
 function parseCookies(cookieHeader: string | undefined) {
   if (!cookieHeader) return {} as Record<string, string>;
 
@@ -1181,6 +1188,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       .limit(limit);
 
     if (fetchError) {
+      if (isMissingSyncOutboxTableError(fetchError)) {
+        return res.status(200).json({
+          success: true,
+          skipped: true,
+          reason: 'sync_outbox table not found',
+          processed: 0,
+          failed: 0,
+          fetched: 0,
+        });
+      }
       throw new Error(fetchError.message || 'No se pudo leer sync_outbox');
     }
 
