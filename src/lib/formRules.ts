@@ -109,7 +109,6 @@ export const SHEET_FORM_RULES: Record<string, SheetFormRule> = {
   'LEADS GANADOS': {
     inputOverrides: {
       'Fecha ingreso lead': 'date',
-      'Fecha registro lead': 'date',
       'Fecha Lead Ganado': 'date',
       Distrito: 'text',
       'Anulados Fullfilment': 'number',
@@ -117,8 +116,6 @@ export const SHEET_FORM_RULES: Record<string, SheetFormRule> = {
       Notas: 'textarea',
     },
     readOnlyColumns: [
-      'Dias Lead a Registro',
-      'Dias Registro a Ganado',
       'Dias lead a ganado',
       'Cantidad de envios',
       'Ingreso anulados fullfilment',

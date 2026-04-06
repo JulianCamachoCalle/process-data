@@ -97,10 +97,7 @@ interface LeadGanadoRecord {
   stable_id: string;
   business_id: number;
   fecha_ingreso_lead: string | null;
-  fecha_registro_lead: string | null;
   fecha_lead_ganado: string | null;
-  dias_lead_a_registro: number;
-  dias_registro_a_ganado: number;
   dias_lead_a_ganado: number;
   notas: string | null;
   distrito: string | null;
@@ -207,10 +204,7 @@ const LEADS_GANADOS_COLUMNS = [
   'Tienda',
   'Vendedor',
   'Fecha ingreso lead',
-  'Fecha registro lead',
   'Fecha Lead Ganado',
-  'Dias Lead a Registro',
-  'Dias Registro a Ganado',
   'Dias lead a ganado',
   'FullFilment',
   'Notas',
@@ -477,17 +471,13 @@ function diffDays(from: Date | null, to: Date | null): number {
 
 function calculateLeadDerivedValues(input: {
   fechaIngresoLead: unknown;
-  fechaRegistroLead: unknown;
   fechaLeadGanado: unknown;
   anuladosFullfilmentRaw: unknown;
   cantidadEnviosRaw: unknown;
 }) {
   const fechaIngreso = parseIsoDate(input.fechaIngresoLead);
-  const fechaRegistro = parseIsoDate(input.fechaRegistroLead);
   const fechaGanado = parseIsoDate(input.fechaLeadGanado);
 
-  const diasLeadARegistro = diffDays(fechaIngreso, fechaRegistro);
-  const diasRegistroAGanado = diffDays(fechaRegistro, fechaGanado);
   const diasLeadAGanado = diffDays(fechaIngreso, fechaGanado);
 
   const anuladosFullfilment = Math.round(parseNumericValue(input.anuladosFullfilmentRaw) ?? 0);
@@ -496,10 +486,7 @@ function calculateLeadDerivedValues(input: {
 
   return {
     fecha_ingreso_lead: toIsoDateInput(input.fechaIngresoLead),
-    fecha_registro_lead: toIsoDateInput(input.fechaRegistroLead),
     fecha_lead_ganado: toIsoDateInput(input.fechaLeadGanado),
-    dias_lead_a_registro: diasLeadARegistro,
-    dias_registro_a_ganado: diasRegistroAGanado,
     dias_lead_a_ganado: diasLeadAGanado,
     cantidad_envios: cantidadEnvios,
     anulados_fullfilment: formatCostForStorage(anuladosFullfilment),
@@ -612,10 +599,7 @@ function toLeadGanadoSheetRow(record: LeadGanadoRecord): SheetRow {
     Tienda: tiendaFromSnapshot,
     Vendedor: vendedorFromSnapshot,
     'Fecha ingreso lead': toDmyDisplayDate(record.fecha_ingreso_lead),
-    'Fecha registro lead': toDmyDisplayDate(record.fecha_registro_lead),
     'Fecha Lead Ganado': toDmyDisplayDate(record.fecha_lead_ganado),
-    'Dias Lead a Registro': String(record.dias_lead_a_registro ?? 0),
-    'Dias Registro a Ganado': String(record.dias_registro_a_ganado ?? 0),
     'Dias lead a ganado': String(record.dias_lead_a_ganado ?? 0),
     FullFilment: fullfilmentFromSnapshot,
     Notas: record.notas ?? '',
@@ -998,7 +982,7 @@ async function fetchLeadsGanadosFromSupabase(): Promise<SheetData> {
   const leadsResponse = await supabase
     .from('leads_ganados')
     .select(
-      'stable_id,business_id,fecha_ingreso_lead,fecha_registro_lead,fecha_lead_ganado,dias_lead_a_registro,dias_registro_a_ganado,dias_lead_a_ganado,notas,distrito,cantidad_envios,anulados_fullfilment,ingreso_anulados_fullfilment,kommo_lead_id,tienda_nombre_snapshot,vendedor_nombre_snapshot,pipeline_id_snapshot,origen_snapshot,fullfilment_snapshot',
+      'stable_id,business_id,fecha_ingreso_lead,fecha_lead_ganado,dias_lead_a_ganado,notas,distrito,cantidad_envios,anulados_fullfilment,ingreso_anulados_fullfilment,kommo_lead_id,tienda_nombre_snapshot,vendedor_nombre_snapshot,pipeline_id_snapshot,origen_snapshot,fullfilment_snapshot',
     )
     .order('business_id', { ascending: true });
 
@@ -1182,7 +1166,6 @@ export function useEnvioAutoPreview(input: {
 export function useLeadGanadoAutoPreview(input: {
   enabled: boolean;
   fechaIngresoLead: string;
-  fechaRegistroLead: string;
   fechaLeadGanado: string;
   anuladosFullfilment: string;
   tienda: string;
@@ -1192,7 +1175,6 @@ export function useLeadGanadoAutoPreview(input: {
       'sheet-preview',
       'LEADS_GANADOS',
       input.fechaIngresoLead,
-      input.fechaRegistroLead,
       input.fechaLeadGanado,
       input.anuladosFullfilment,
       input.tienda,
@@ -1201,15 +1183,12 @@ export function useLeadGanadoAutoPreview(input: {
     queryFn: async () => {
       const derived = calculateLeadDerivedValues({
         fechaIngresoLead: input.fechaIngresoLead,
-        fechaRegistroLead: input.fechaRegistroLead,
         fechaLeadGanado: input.fechaLeadGanado,
         anuladosFullfilmentRaw: input.anuladosFullfilment,
         cantidadEnviosRaw: 0,
       });
 
       return {
-        'Dias Lead a Registro': String(derived.dias_lead_a_registro),
-        'Dias Registro a Ganado': String(derived.dias_registro_a_ganado),
         'Dias lead a ganado': String(derived.dias_lead_a_ganado),
         'Cantidad de envios': String(derived.cantidad_envios),
         'Ingreso anulados fullfilment': formatCostForDisplay(derived.ingreso_anulados_fullfilment),
@@ -1752,7 +1731,6 @@ async function addLeadGanadoSupabase(rowData: Record<string, unknown>): Promise<
 
   const derived = calculateLeadDerivedValues({
     fechaIngresoLead: rowData['Fecha ingreso lead'],
-    fechaRegistroLead: rowData['Fecha registro lead'],
     fechaLeadGanado: rowData['Fecha Lead Ganado'],
     anuladosFullfilmentRaw: rowData['Anulados Fullfilment'],
     cantidadEnviosRaw: rowData['Cantidad de envios'],
@@ -1770,7 +1748,7 @@ async function addLeadGanadoSupabase(rowData: Record<string, unknown>): Promise<
       ...derived,
     })
     .select(
-      'stable_id,business_id,fecha_ingreso_lead,fecha_registro_lead,fecha_lead_ganado,dias_lead_a_registro,dias_registro_a_ganado,dias_lead_a_ganado,notas,distrito,cantidad_envios,anulados_fullfilment,ingreso_anulados_fullfilment,kommo_lead_id,tienda_nombre_snapshot,vendedor_nombre_snapshot,pipeline_id_snapshot,origen_snapshot,fullfilment_snapshot',
+      'stable_id,business_id,fecha_ingreso_lead,fecha_lead_ganado,dias_lead_a_ganado,notas,distrito,cantidad_envios,anulados_fullfilment,ingreso_anulados_fullfilment,kommo_lead_id,tienda_nombre_snapshot,vendedor_nombre_snapshot,pipeline_id_snapshot,origen_snapshot,fullfilment_snapshot',
     )
     .single();
 
@@ -1808,7 +1786,6 @@ async function updateLeadGanadoSupabase(rowData: UpdateMutationPayload): Promise
 
   const derived = calculateLeadDerivedValues({
     fechaIngresoLead: rowData['Fecha ingreso lead'],
-    fechaRegistroLead: rowData['Fecha registro lead'],
     fechaLeadGanado: rowData['Fecha Lead Ganado'],
     anuladosFullfilmentRaw: rowData['Anulados Fullfilment'],
     cantidadEnviosRaw: rowData['Cantidad de envios'],
@@ -1827,7 +1804,7 @@ async function updateLeadGanadoSupabase(rowData: UpdateMutationPayload): Promise
     })
     .eq('stable_id', rowData._id)
     .select(
-      'stable_id,business_id,fecha_ingreso_lead,fecha_registro_lead,fecha_lead_ganado,dias_lead_a_registro,dias_registro_a_ganado,dias_lead_a_ganado,notas,distrito,cantidad_envios,anulados_fullfilment,ingreso_anulados_fullfilment,kommo_lead_id,tienda_nombre_snapshot,vendedor_nombre_snapshot,pipeline_id_snapshot,origen_snapshot,fullfilment_snapshot',
+      'stable_id,business_id,fecha_ingreso_lead,fecha_lead_ganado,dias_lead_a_ganado,notas,distrito,cantidad_envios,anulados_fullfilment,ingreso_anulados_fullfilment,kommo_lead_id,tienda_nombre_snapshot,vendedor_nombre_snapshot,pipeline_id_snapshot,origen_snapshot,fullfilment_snapshot',
     )
     .single();
 

@@ -344,7 +344,6 @@ export async function syncLeadsGanadosFromKommoLeadIds(
     }
 
     const fechaIngresoLead = ingresoLeadDateByLeadId.get(leadId) ?? toDateOnlyIso(lead.created_at);
-    const fechaRegistroLead = toDateOnlyIso(lead.created_at);
     const fechaLeadGanado = toDateOnlyIso(lead.closed_at);
     const tags = extractLeadTagNames(lead);
     const existing = existingByKommoLeadId.get(leadId);
@@ -367,10 +366,7 @@ export async function syncLeadsGanadosFromKommoLeadIds(
       // Preserva edición manual cuando ya existe valor; sólo autocompleta si está vacío.
       distrito: existingDistrito || distritoComputed,
       fecha_ingreso_lead: fechaIngresoLead,
-      fecha_registro_lead: fechaRegistroLead,
       fecha_lead_ganado: fechaLeadGanado,
-      dias_lead_a_registro: diffDays(fechaIngresoLead, fechaRegistroLead),
-      dias_registro_a_ganado: diffDays(fechaRegistroLead, fechaLeadGanado),
       dias_lead_a_ganado: diffDays(fechaIngresoLead, fechaLeadGanado),
     });
   }

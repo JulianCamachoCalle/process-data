@@ -50,7 +50,6 @@ export function SheetView({ sheetName }: SheetViewProps) {
   });
   const [leadPreviewInput, setLeadPreviewInput] = useState({
     fechaIngresoLead: '',
-    fechaRegistroLead: '',
     fechaLeadGanado: '',
     anuladosFullfilment: '0',
     tienda: '',
@@ -107,7 +106,6 @@ export function SheetView({ sheetName }: SheetViewProps) {
   const { data: leadPreviewData } = useLeadGanadoAutoPreview({
     enabled: isModalOpen && sheetName === 'LEADS GANADOS',
     fechaIngresoLead: leadPreviewInput.fechaIngresoLead,
-    fechaRegistroLead: leadPreviewInput.fechaRegistroLead,
     fechaLeadGanado: leadPreviewInput.fechaLeadGanado,
     anuladosFullfilment: leadPreviewInput.anuladosFullfilment,
     tienda: leadPreviewInput.tienda,
@@ -181,7 +179,6 @@ export function SheetView({ sheetName }: SheetViewProps) {
     });
     setLeadPreviewInput({
       fechaIngresoLead: '',
-      fechaRegistroLead: '',
       fechaLeadGanado: '',
       anuladosFullfilment: '0',
       tienda: '',
@@ -207,7 +204,6 @@ export function SheetView({ sheetName }: SheetViewProps) {
     });
     setLeadPreviewInput({
       fechaIngresoLead: String(row['Fecha ingreso lead'] ?? '').trim(),
-      fechaRegistroLead: String(row['Fecha registro lead'] ?? '').trim(),
       fechaLeadGanado: String(row['Fecha Lead Ganado'] ?? '').trim(),
       anuladosFullfilment: String(parseNumericValue(row['Anulados Fullfilment']) ?? 0),
       tienda: String(row.Tienda ?? '').trim(),
@@ -312,7 +308,7 @@ export function SheetView({ sheetName }: SheetViewProps) {
         return;
       }
 
-      const requiredDates = ['Fecha ingreso lead', 'Fecha registro lead', 'Fecha Lead Ganado'];
+      const requiredDates = ['Fecha ingreso lead', 'Fecha Lead Ganado'];
       const missingDate = requiredDates.find((field) => !String(normalizedFormData[field] ?? '').trim());
 
       if (missingDate) {
@@ -475,8 +471,6 @@ export function SheetView({ sheetName }: SheetViewProps) {
             if (sheetName === 'LEADS GANADOS') {
               if (column === 'Fecha ingreso lead') {
                 setLeadPreviewInput((prev) => ({ ...prev, fechaIngresoLead: value }));
-              } else if (column === 'Fecha registro lead') {
-                setLeadPreviewInput((prev) => ({ ...prev, fechaRegistroLead: value }));
               } else if (column === 'Fecha Lead Ganado') {
                 setLeadPreviewInput((prev) => ({ ...prev, fechaLeadGanado: value }));
               } else if (column === 'Anulados Fullfilment') {
