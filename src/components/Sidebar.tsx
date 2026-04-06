@@ -78,36 +78,36 @@ export function Sidebar({
   return (
     <aside
       className={`
-        fixed inset-y-0 left-0 z-40 min-h-screen flex flex-col text-white border-r border-red-900/40
+        fixed inset-y-0 left-0 z-40 flex h-[100dvh] min-h-[100dvh] flex-col text-white border-r border-red-900/40
         bg-gradient-to-b from-[#101218] via-[#0f1219] to-[#0a0c12] shadow-[8px_0_30px_-14px_rgba(0,0,0,0.75)]
         backdrop-blur-xl relative overflow-hidden transition-all duration-300 transform
         ${isMobileOpen ? 'translate-x-0' : '-translate-x-full'}
-        md:static md:translate-x-0 md:z-10 ${collapsed ? 'md:w-20' : 'md:w-72'} w-72 print:hidden
+        md:static md:z-10 md:h-screen md:min-h-screen md:translate-x-0 ${collapsed ? 'md:w-20' : 'md:w-72'} w-[min(85vw,18rem)] max-w-[18rem] print:hidden
       `}
     >
       <div className="pointer-events-none absolute -top-14 -right-12 h-36 w-36 rounded-full bg-red-500/20 blur-3xl" />
       <div className="pointer-events-none absolute bottom-16 -left-14 h-36 w-36 rounded-full bg-white/10 blur-3xl" />
 
-      <div className={`p-6 border-b border-white/10 ${collapsed ? 'md:px-3' : ''}`}>
-        <div className="mb-3 flex items-center justify-between md:justify-end">
+      <div className={`border-b border-white/10 p-5 sm:p-6 ${collapsed ? 'md:px-3' : ''}`}>
+        <div className="mb-3 flex items-center justify-between md:justify-start">
           <button
             onClick={onCloseMobile}
-            className="md:hidden inline-flex items-center justify-center h-8 w-8 rounded-lg border border-white/20 text-gray-200 hover:bg-white/10"
+            className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-white/20 text-gray-200 hover:bg-white/10 md:hidden"
             aria-label="Cerrar menú"
           >
             <X size={16} />
           </button>
           <button
             onClick={onToggleCollapsed}
-            className="hidden md:inline-flex items-center justify-center h-8 w-8 rounded-lg border border-white/20 text-gray-200 hover:bg-white/10"
+            className="group hidden md:inline-flex md:absolute md:right-3 md:top-3 md:h-7 md:w-7 md:items-center md:justify-center md:rounded-full md:border md:border-white/0 md:bg-white/0 md:text-gray-500/60 md:opacity-35 md:transition-all md:hover:border-white/10 md:hover:bg-white/5 md:hover:text-gray-100 md:hover:opacity-100 focus-visible:opacity-100"
             aria-label={collapsed ? 'Expandir sidebar' : 'Colapsar sidebar'}
             title={collapsed ? 'Expandir sidebar' : 'Colapsar sidebar'}
           >
-            <PanelLeftClose size={16} className={collapsed ? 'rotate-180 transition-transform' : 'transition-transform'} />
+            <PanelLeftClose size={14} className={collapsed ? 'rotate-180 transition-transform' : 'transition-transform'} />
           </button>
         </div>
 
-        <div className="flex items-center gap-3 mb-2">
+        <div className="mb-2 flex items-center gap-3 pr-6 md:pr-0">
           <div className="h-11 w-11 rounded-xl bg-red-600/20 border border-red-500/40 flex items-center justify-center shadow-[0_0_24px_rgba(230,0,0,0.35)]">
             <LayoutDashboard className="text-red-400" size={22} />
           </div>
@@ -122,7 +122,7 @@ export function Sidebar({
         </div>
       </div>
 
-      <nav className="flex-1 px-4 py-6 space-y-2 overflow-y-auto">
+      <nav className="min-h-0 flex-1 space-y-2 overflow-y-auto px-3 py-5 sm:px-4 sm:py-6">
         <Link
           to="/"
           onClick={() => onNavigate?.()}
@@ -187,7 +187,7 @@ export function Sidebar({
         </div>
       </nav>
 
-      <div className="px-2 pb-5 pt-1.5 border-t border-white/10">
+      <div className="border-t border-white/10 px-2 pb-4 pt-1.5 sm:pb-5">
         
         {/* Hidden admin trigger */}
         <button
