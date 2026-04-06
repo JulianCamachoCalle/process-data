@@ -66,12 +66,15 @@ export const SHEET_FORM_RULES: Record<string, SheetFormRule> = {
   },
   ENVIOS: {
     inputOverrides: {
-      Mes: 'month',
+      'Fecha envio': 'date',
       'Excedente pagado moto': 'number',
       observaciones: 'textarea',
       Observaciones: 'textarea',
     },
     readOnlyColumns: [
+      'Tienda',
+      'Vendedor',
+      'FullFilment',
       'Cobro Entrega',
       'Pago moto',
       'Extra punto moto',
@@ -80,10 +83,9 @@ export const SHEET_FORM_RULES: Record<string, SheetFormRule> = {
       'Ingreso total fila',
       'costo total fila',
       'Costo total fila',
-      'idVendedor',
     ],
     defaultValues: {
-      Mes: '__CURRENT_MONTH__',
+      'Fecha envio': '__TODAY__',
       'Excedente pagado moto': '0',
     },
   },
@@ -109,7 +111,6 @@ export const SHEET_FORM_RULES: Record<string, SheetFormRule> = {
   'LEADS GANADOS': {
     inputOverrides: {
       'Fecha ingreso lead': 'date',
-      'Fecha registro lead': 'date',
       'Fecha Lead Ganado': 'date',
       Distrito: 'text',
       'Anulados Fullfilment': 'number',
@@ -117,8 +118,6 @@ export const SHEET_FORM_RULES: Record<string, SheetFormRule> = {
       Notas: 'textarea',
     },
     readOnlyColumns: [
-      'Dias Lead a Registro',
-      'Dias Registro a Ganado',
       'Dias lead a ganado',
       'Cantidad de envios',
       'Ingreso anulados fullfilment',
@@ -302,6 +301,10 @@ export function getFormDefaultValue(sheetName: string, columnName: string, input
   if (override !== null) {
     if (override === '__CURRENT_MONTH__') {
       return currentMonth;
+    }
+
+    if (override === '__TODAY__') {
+      return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
     }
 
     return override;

@@ -344,7 +344,6 @@ export async function syncLeadsGanadosFromKommoLeadIds(
     }
 
     const fechaIngresoLead = ingresoLeadDateByLeadId.get(leadId) ?? toDateOnlyIso(lead.created_at);
-    const fechaRegistroLead = toDateOnlyIso(lead.created_at);
     const fechaLeadGanado = toDateOnlyIso(lead.closed_at);
     const tags = extractLeadTagNames(lead);
     const existing = existingByKommoLeadId.get(leadId);
@@ -367,10 +366,7 @@ export async function syncLeadsGanadosFromKommoLeadIds(
       // Preserva edición manual cuando ya existe valor; sólo autocompleta si está vacío.
       distrito: existingDistrito || distritoComputed,
       fecha_ingreso_lead: fechaIngresoLead,
-      fecha_registro_lead: fechaRegistroLead,
       fecha_lead_ganado: fechaLeadGanado,
-      dias_lead_a_registro: diffDays(fechaIngresoLead, fechaRegistroLead),
-      dias_registro_a_ganado: diffDays(fechaRegistroLead, fechaLeadGanado),
       dias_lead_a_ganado: diffDays(fechaIngresoLead, fechaLeadGanado),
     });
   }
@@ -415,14 +411,15 @@ export async function recalculateLeadGanadoCountersByBusinessId(
 
   const { data: enviosData, error: enviosError } = await supabase
     .from('envios' as never)
-    .select('id_resultado')
+    // Nuevo modelo ENVIOS: el vínculo operativo es exclusivamente `id_lead_ganado`.
+    .select('id_lead_ganado,id_resultado')
     .eq('id_lead_ganado', leadGanadoBusinessId);
 
   if (enviosError) {
     throw new Error(enviosError.message || 'No se pudieron leer envíos para recalcular lead ganado');
   }
 
-  const envios = ((enviosData ?? []) as Array<{ id_resultado: number | null }>);
+  const envios = ((enviosData ?? []) as Array<{ id_lead_ganado: number | null; id_resultado: number | null }>);
   const cantidadEnvios = envios.length;
   const resultadoIds = Array.from(new Set(envios.map((row) => Number(row.id_resultado ?? 0)).filter((id) => id > 0)));
 

@@ -57,8 +57,7 @@ interface TarifaRecord {
 interface EnvioRecord {
   stable_id: string;
   business_id: number;
-  mes: string | null;
-  id_tienda: number;
+  fecha_envio: string | null;
   id_destino: number;
   id_resultado: number;
   cobro_entrega: number;
@@ -67,13 +66,10 @@ interface EnvioRecord {
   ingreso_total_fila: number;
   costo_total_fila: number;
   observaciones: string | null;
-  id_vendedor: number | null;
-  id_lead_ganado: number | null;
+  id_lead_ganado: number;
   id_tipo_punto: number;
-  id_fullfilment: number;
   extra_punto_moto: number;
   extra_punto_empresa: number;
-  vendedor_nombre_snapshot?: string | null;
 }
 
 interface RecojoRecord {
@@ -97,10 +93,7 @@ interface LeadGanadoRecord {
   stable_id: string;
   business_id: number;
   fecha_ingreso_lead: string | null;
-  fecha_registro_lead: string | null;
   fecha_lead_ganado: string | null;
-  dias_lead_a_registro: number;
-  dias_registro_a_ganado: number;
   dias_lead_a_ganado: number;
   notas: string | null;
   distrito: string | null;
@@ -171,8 +164,11 @@ const TARIFAS_COLUMNS = ['idTarifa', 'Destino', 'Cobro Entrega', 'Pago Moto', 'N
 const ENVIOS_SHEET_NAME = 'ENVIOS';
 const ENVIOS_COLUMNS = [
   'idEnvios',
-  'Mes',
+  'Fecha envio',
+  'Lead Ganado',
   'Tienda',
+  'Vendedor',
+  'FullFilment',
   'Destino',
   'Resultado',
   'Cobro Entrega',
@@ -181,9 +177,7 @@ const ENVIOS_COLUMNS = [
   'ingreso total fila',
   'costo total fila',
   'observaciones',
-  'Vendedor',
   'Tipo Punto',
-  'FullFilment',
   'Extra punto moto',
   'Extra punto empresa',
 ] as const;
@@ -207,10 +201,7 @@ const LEADS_GANADOS_COLUMNS = [
   'Tienda',
   'Vendedor',
   'Fecha ingreso lead',
-  'Fecha registro lead',
   'Fecha Lead Ganado',
-  'Dias Lead a Registro',
-  'Dias Registro a Ganado',
   'Dias lead a ganado',
   'FullFilment',
   'Notas',
@@ -366,15 +357,13 @@ function pickFirstValue(row: Row, columns: string[]): unknown {
 
 interface EnvioReferenceData {
   destinoLabelById: Map<number, string>;
-  tiendaLabelById: Map<number, string>;
   resultadoLabelById: Map<number, string>;
   tipoPuntoLabelById: Map<number, string>;
-  fullfilmentLabelById: Map<number, string>;
+  leadGanadoLabelById: Map<number, string>;
+  leadGanadoSnapshotById: Map<number, { tienda: string; vendedor: string; fullfilment: string }>;
   normalTipoPuntoId: number | null;
   deliveredResultadoId: number | null;
   tarifaByDestinoId: Map<number, { cobroEntrega: number; pagoMoto: number }>;
-  vendedorSnapshotByLeadGanadoId: Map<number, string>;
-  latestLeadGanadoByTiendaId: Map<number, { leadGanadoId: number; vendedorSnapshot: string }>;
 }
 
 interface RecojoReferenceData {
@@ -386,34 +375,23 @@ interface RecojoReferenceData {
 }
 
 function toEnvioSheetRow(record: EnvioRecord, refs: EnvioReferenceData): SheetRow {
-  const tienda = refs.tiendaLabelById.get(record.id_tienda) ?? `#${record.id_tienda}`;
+  const leadGanado = refs.leadGanadoLabelById.get(record.id_lead_ganado) ?? `#${record.id_lead_ganado}`;
+  const snapshot = refs.leadGanadoSnapshotById.get(record.id_lead_ganado);
+  const tienda = snapshot?.tienda ?? '';
   const destino = refs.destinoLabelById.get(record.id_destino) ?? `#${record.id_destino}`;
   const resultado = refs.resultadoLabelById.get(record.id_resultado) ?? `#${record.id_resultado}`;
-  const vendedor = (() => {
-    if (record.id_lead_ganado && refs.vendedorSnapshotByLeadGanadoId.has(record.id_lead_ganado)) {
-      return refs.vendedorSnapshotByLeadGanadoId.get(record.id_lead_ganado) ?? '';
-    }
-
-    const latestByTienda = refs.latestLeadGanadoByTiendaId.get(record.id_tienda);
-    if (latestByTienda?.vendedorSnapshot) {
-      return latestByTienda.vendedorSnapshot;
-    }
-
-    const explicitSnapshot = String(record.vendedor_nombre_snapshot ?? '').trim();
-    if (explicitSnapshot) {
-      return explicitSnapshot;
-    }
-
-    return '';
-  })();
+  const vendedor = snapshot?.vendedor ?? '';
   const tipoPunto = refs.tipoPuntoLabelById.get(record.id_tipo_punto) ?? `#${record.id_tipo_punto}`;
-  const fullfilment = refs.fullfilmentLabelById.get(record.id_fullfilment) ?? `#${record.id_fullfilment}`;
+  const fullfilment = snapshot?.fullfilment ?? '';
 
   return {
     _id: record.stable_id,
     idEnvios: record.business_id,
-    Mes: formatMonthForDisplay(record.mes),
+    'Fecha envio': toDmyDisplayDate(record.fecha_envio),
+    'Lead Ganado': leadGanado,
     Tienda: tienda,
+    Vendedor: vendedor,
+    FullFilment: fullfilment,
     Destino: destino,
     Resultado: resultado,
     'Cobro Entrega': formatCostForDisplay(record.cobro_entrega),
@@ -422,9 +400,7 @@ function toEnvioSheetRow(record: EnvioRecord, refs: EnvioReferenceData): SheetRo
     'ingreso total fila': formatCostForDisplay(record.ingreso_total_fila),
     'costo total fila': formatCostForDisplay(record.costo_total_fila),
     observaciones: record.observaciones ?? '',
-    Vendedor: vendedor,
     'Tipo Punto': tipoPunto,
-    FullFilment: fullfilment,
     'Extra punto moto': formatCostForDisplay(record.extra_punto_moto),
     'Extra punto empresa': formatCostForDisplay(record.extra_punto_empresa),
   };
@@ -477,17 +453,13 @@ function diffDays(from: Date | null, to: Date | null): number {
 
 function calculateLeadDerivedValues(input: {
   fechaIngresoLead: unknown;
-  fechaRegistroLead: unknown;
   fechaLeadGanado: unknown;
   anuladosFullfilmentRaw: unknown;
   cantidadEnviosRaw: unknown;
 }) {
   const fechaIngreso = parseIsoDate(input.fechaIngresoLead);
-  const fechaRegistro = parseIsoDate(input.fechaRegistroLead);
   const fechaGanado = parseIsoDate(input.fechaLeadGanado);
 
-  const diasLeadARegistro = diffDays(fechaIngreso, fechaRegistro);
-  const diasRegistroAGanado = diffDays(fechaRegistro, fechaGanado);
   const diasLeadAGanado = diffDays(fechaIngreso, fechaGanado);
 
   const anuladosFullfilment = Math.round(parseNumericValue(input.anuladosFullfilmentRaw) ?? 0);
@@ -496,10 +468,7 @@ function calculateLeadDerivedValues(input: {
 
   return {
     fecha_ingreso_lead: toIsoDateInput(input.fechaIngresoLead),
-    fecha_registro_lead: toIsoDateInput(input.fechaRegistroLead),
     fecha_lead_ganado: toIsoDateInput(input.fechaLeadGanado),
-    dias_lead_a_registro: diasLeadARegistro,
-    dias_registro_a_ganado: diasRegistroAGanado,
     dias_lead_a_ganado: diasLeadAGanado,
     cantidad_envios: cantidadEnvios,
     anulados_fullfilment: formatCostForStorage(anuladosFullfilment),
@@ -588,6 +557,38 @@ function getLatestLeadGanadoVendorMaps(rows: Array<{
   };
 }
 
+function buildLeadGanadoEnvioMaps(rows: Array<{
+  business_id: number | null;
+  tienda_nombre_snapshot: string | null;
+  vendedor_nombre_snapshot: string | null;
+  fullfilment_snapshot: boolean | string | null;
+}>) {
+  const leadGanadoLabelById = new Map<number, string>();
+  const leadGanadoSnapshotById = new Map<number, { tienda: string; vendedor: string; fullfilment: string }>();
+
+  for (const row of rows) {
+    const leadGanadoId = Number(row.business_id ?? 0);
+    if (leadGanadoId <= 0) continue;
+
+    const tienda = String(row.tienda_nombre_snapshot ?? '').trim();
+    const vendedor = String(row.vendedor_nombre_snapshot ?? '').trim();
+    const fullfilment = toFullfilmentSnapshotLabel(row.fullfilment_snapshot);
+    const baseLabel = tienda || 'Lead sin tienda';
+
+    leadGanadoLabelById.set(leadGanadoId, `${baseLabel} — #${leadGanadoId}`);
+    leadGanadoSnapshotById.set(leadGanadoId, {
+      tienda,
+      vendedor,
+      fullfilment,
+    });
+  }
+
+  return {
+    leadGanadoLabelById,
+    leadGanadoSnapshotById,
+  };
+}
+
 function toFullfilmentSnapshotLabel(value: unknown): string {
   if (typeof value === 'boolean') return value ? 'Sí' : 'No';
   if (typeof value === 'number') return value !== 0 ? 'Sí' : 'No';
@@ -612,10 +613,7 @@ function toLeadGanadoSheetRow(record: LeadGanadoRecord): SheetRow {
     Tienda: tiendaFromSnapshot,
     Vendedor: vendedorFromSnapshot,
     'Fecha ingreso lead': toDmyDisplayDate(record.fecha_ingreso_lead),
-    'Fecha registro lead': toDmyDisplayDate(record.fecha_registro_lead),
     'Fecha Lead Ganado': toDmyDisplayDate(record.fecha_lead_ganado),
-    'Dias Lead a Registro': String(record.dias_lead_a_registro ?? 0),
-    'Dias Registro a Ganado': String(record.dias_registro_a_ganado ?? 0),
     'Dias lead a ganado': String(record.dias_lead_a_ganado ?? 0),
     FullFilment: fullfilmentFromSnapshot,
     Notas: record.notas ?? '',
@@ -659,6 +657,12 @@ function getTextValueFromRowData(rowData: Record<string, unknown>, config: BaseS
 
 function triggerOutboxSyncBestEffort() {
   // Google Sheets quedó desacoplado del flujo operativo.
+}
+
+function invalidateEnvioRelatedQueries(queryClient: QueryClient, sheetName: string) {
+  if (sheetName !== ENVIOS_SHEET_NAME) return;
+
+  queryClient.invalidateQueries({ queryKey: getSheetQueryKey(LEADS_GANADOS_SHEET_NAME), refetchType: 'none' });
 }
 
 async function requireSupabaseSession(force = false): Promise<void> {
@@ -829,13 +833,11 @@ async function fetchReferenceMap(
 async function fetchEnvioReferenceData(): Promise<EnvioReferenceData> {
   if (!supabase) throw new Error('Supabase no está configurado');
 
-  const [destinoLabelById, tiendaLabelById, resultadoLabelById, tipoPuntoLabelById, fullfilmentLabelById] =
+  const [destinoLabelById, resultadoLabelById, tipoPuntoLabelById] =
     await Promise.all([
       fetchReferenceMap('destinos', ['business_id', 'id'], ['destino']),
-      fetchReferenceMap('tiendas', ['business_id', 'id'], ['nombre']),
       fetchReferenceMap('resultados', ['business_id', 'id'], ['resultado']),
       fetchReferenceMap('tipo_punto', ['business_id', 'id'], ['tipo_punto']),
-      fetchReferenceMap('fullfilment', ['business_id', 'id'], ['es_fullfilment']),
     ]);
 
   const normalTipoPuntoId =
@@ -865,19 +867,18 @@ async function fetchEnvioReferenceData(): Promise<EnvioReferenceData> {
 
   const { data: leadsData, error: leadsError } = await supabase
     .from('leads_ganados')
-    .select('business_id,tienda_nombre_snapshot,vendedor_nombre_snapshot')
+    .select('business_id,tienda_nombre_snapshot,vendedor_nombre_snapshot,fullfilment_snapshot')
     .order('business_id', { ascending: false })
     .limit(20000);
 
-  const { vendedorSnapshotByLeadGanadoId, latestLeadGanadoByTiendaId } =
-    getLatestLeadGanadoVendorMaps(
-      (leadsData ?? []) as Array<{
-        business_id: number | null;
-        tienda_nombre_snapshot: string | null;
-        vendedor_nombre_snapshot: string | null;
-      }>,
-      tiendaLabelById,
-    );
+  const { leadGanadoLabelById, leadGanadoSnapshotById } = buildLeadGanadoEnvioMaps(
+    (leadsData ?? []) as Array<{
+      business_id: number | null;
+      tienda_nombre_snapshot: string | null;
+      vendedor_nombre_snapshot: string | null;
+      fullfilment_snapshot: boolean | string | null;
+    }>,
+  );
 
   if (leadsError) {
     // fallback sin romper flujo
@@ -885,15 +886,13 @@ async function fetchEnvioReferenceData(): Promise<EnvioReferenceData> {
 
   return {
     destinoLabelById,
-    tiendaLabelById,
     resultadoLabelById,
     tipoPuntoLabelById,
-    fullfilmentLabelById,
+    leadGanadoLabelById,
+    leadGanadoSnapshotById,
     normalTipoPuntoId,
     deliveredResultadoId,
     tarifaByDestinoId,
-    vendedorSnapshotByLeadGanadoId,
-    latestLeadGanadoByTiendaId,
   };
 }
 
@@ -948,7 +947,7 @@ async function fetchEnviosFromSupabase(): Promise<SheetData> {
     supabase
       .from('envios')
       .select(
-        'stable_id,business_id,mes,id_tienda,id_lead_ganado,id_destino,id_resultado,cobro_entrega,pago_moto,excedente_pagado_moto,ingreso_total_fila,costo_total_fila,observaciones,id_vendedor,id_tipo_punto,id_fullfilment,extra_punto_moto,extra_punto_empresa',
+        'stable_id,business_id,fecha_envio,id_lead_ganado,id_destino,id_resultado,cobro_entrega,pago_moto,excedente_pagado_moto,ingreso_total_fila,costo_total_fila,observaciones,id_tipo_punto,extra_punto_moto,extra_punto_empresa',
       )
       .order('business_id', { ascending: true }),
   ]);
@@ -998,7 +997,7 @@ async function fetchLeadsGanadosFromSupabase(): Promise<SheetData> {
   const leadsResponse = await supabase
     .from('leads_ganados')
     .select(
-      'stable_id,business_id,fecha_ingreso_lead,fecha_registro_lead,fecha_lead_ganado,dias_lead_a_registro,dias_registro_a_ganado,dias_lead_a_ganado,notas,distrito,cantidad_envios,anulados_fullfilment,ingreso_anulados_fullfilment,kommo_lead_id,tienda_nombre_snapshot,vendedor_nombre_snapshot,pipeline_id_snapshot,origen_snapshot,fullfilment_snapshot',
+      'stable_id,business_id,fecha_ingreso_lead,fecha_lead_ganado,dias_lead_a_ganado,notas,distrito,cantidad_envios,anulados_fullfilment,ingreso_anulados_fullfilment,kommo_lead_id,tienda_nombre_snapshot,vendedor_nombre_snapshot,pipeline_id_snapshot,origen_snapshot,fullfilment_snapshot',
     )
     .order('business_id', { ascending: true });
 
@@ -1083,11 +1082,10 @@ export function useEnvioFormOptions(enabled: boolean) {
       const refs = await fetchEnvioReferenceData();
 
       return {
-        tiendas: Array.from(refs.tiendaLabelById.values()).sort((a, b) => a.localeCompare(b, 'es')),
+        leadsGanados: Array.from(refs.leadGanadoLabelById.values()).sort((a, b) => a.localeCompare(b, 'es')),
         destinos: Array.from(refs.destinoLabelById.values()).sort((a, b) => a.localeCompare(b, 'es')),
         resultados: Array.from(refs.resultadoLabelById.values()).sort((a, b) => a.localeCompare(b, 'es')),
         tipoPunto: Array.from(refs.tipoPuntoLabelById.values()).sort((a, b) => a.localeCompare(b, 'es')),
-        fullfilment: Array.from(refs.fullfilmentLabelById.values()).sort((a, b) => a.localeCompare(b, 'es')),
       };
     },
     enabled,
@@ -1122,32 +1120,35 @@ export function useDistritoOptions(enabled: boolean) {
 
 export function useEnvioAutoPreview(input: {
   enabled: boolean;
+  leadGanado: string;
   destino: string;
   resultado: string;
   tipoPunto: string;
-  tienda: string;
   excedentePagadoMoto: string;
 }) {
   return useQuery({
-    queryKey: ['sheet-preview', 'ENVIOS', input.destino, input.resultado, input.tipoPunto, input.tienda, input.excedentePagadoMoto],
+    queryKey: ['sheet-preview', 'ENVIOS', input.leadGanado, input.destino, input.resultado, input.tipoPunto, input.excedentePagadoMoto],
     enabled: input.enabled,
     queryFn: async () => {
       const refs = await fetchEnvioReferenceData();
 
+      const idLeadGanado = input.leadGanado ? findIdByLabelOrThrow(refs.leadGanadoLabelById, input.leadGanado, 'Lead Ganado') : null;
       const idDestino = input.destino ? findIdByLabelOrThrow(refs.destinoLabelById, input.destino, 'Destino') : null;
       const idResultado = input.resultado ? findIdByLabelOrThrow(refs.resultadoLabelById, input.resultado, 'Resultado') : null;
       const idTipoPunto = input.tipoPunto ? findIdByLabelOrThrow(refs.tipoPuntoLabelById, input.tipoPunto, 'Tipo Punto') : null;
-      const idTienda = input.tienda ? findIdByLabelOrThrow(refs.tiendaLabelById, input.tienda, 'Tienda') : null;
+      const snapshot = idLeadGanado === null ? null : refs.leadGanadoSnapshotById.get(idLeadGanado) ?? null;
 
       if (idDestino === null || idResultado === null || idTipoPunto === null) {
         return {
+          Tienda: snapshot?.tienda ?? '',
+          Vendedor: snapshot?.vendedor ?? '',
+          FullFilment: snapshot?.fullfilment ?? '',
           'Cobro Entrega': '0.00',
           'Pago moto': '0.00',
           'Extra punto moto': '0.00',
           'Extra punto empresa': '0.00',
           'ingreso total fila': '0.00',
           'costo total fila': '0.00',
-          idVendedor: 'Se asigna por Tienda (Leads Ganados)',
         };
       }
 
@@ -1159,20 +1160,16 @@ export function useEnvioAutoPreview(input: {
         refs,
       });
 
-      const vendedorLabel = (() => {
-        if (idTienda === null) return 'Se asigna por Tienda (Leads Ganados)';
-        const latest = refs.latestLeadGanadoByTiendaId.get(idTienda);
-        return latest?.vendedorSnapshot || 'Se asigna por Tienda (Leads Ganados)';
-      })();
-
       return {
+        Tienda: snapshot?.tienda ?? '',
+        Vendedor: snapshot?.vendedor ?? '',
+        FullFilment: snapshot?.fullfilment ?? '',
         'Cobro Entrega': formatCostForDisplay(derived.cobro_entrega),
         'Pago moto': formatCostForDisplay(derived.pago_moto),
         'Extra punto moto': formatCostForDisplay(derived.extra_punto_moto),
         'Extra punto empresa': formatCostForDisplay(derived.extra_punto_empresa),
         'ingreso total fila': formatCostForDisplay(derived.ingreso_total_fila),
         'costo total fila': formatCostForDisplay(derived.costo_total_fila),
-        idVendedor: vendedorLabel,
       };
     },
     staleTime: 5_000,
@@ -1182,7 +1179,6 @@ export function useEnvioAutoPreview(input: {
 export function useLeadGanadoAutoPreview(input: {
   enabled: boolean;
   fechaIngresoLead: string;
-  fechaRegistroLead: string;
   fechaLeadGanado: string;
   anuladosFullfilment: string;
   tienda: string;
@@ -1192,7 +1188,6 @@ export function useLeadGanadoAutoPreview(input: {
       'sheet-preview',
       'LEADS_GANADOS',
       input.fechaIngresoLead,
-      input.fechaRegistroLead,
       input.fechaLeadGanado,
       input.anuladosFullfilment,
       input.tienda,
@@ -1201,15 +1196,12 @@ export function useLeadGanadoAutoPreview(input: {
     queryFn: async () => {
       const derived = calculateLeadDerivedValues({
         fechaIngresoLead: input.fechaIngresoLead,
-        fechaRegistroLead: input.fechaRegistroLead,
         fechaLeadGanado: input.fechaLeadGanado,
         anuladosFullfilmentRaw: input.anuladosFullfilment,
         cantidadEnviosRaw: 0,
       });
 
       return {
-        'Dias Lead a Registro': String(derived.dias_lead_a_registro),
-        'Dias Registro a Ganado': String(derived.dias_registro_a_ganado),
         'Dias lead a ganado': String(derived.dias_lead_a_ganado),
         'Cantidad de envios': String(derived.cantidad_envios),
         'Ingreso anulados fullfilment': formatCostForDisplay(derived.ingreso_anulados_fullfilment),
@@ -1508,14 +1500,10 @@ async function addEnvioSupabase(rowData: Record<string, unknown>): Promise<Mutat
 
   const refs = await fetchEnvioReferenceData();
 
-  const idTienda = findIdByLabelOrThrow(refs.tiendaLabelById, rowData.Tienda, 'Tienda');
-  const idLeadGanado = refs.latestLeadGanadoByTiendaId.get(idTienda)?.leadGanadoId ?? null;
+  const idLeadGanado = findIdByLabelOrThrow(refs.leadGanadoLabelById, rowData['Lead Ganado'], 'Lead Ganado');
   const idDestino = findIdByLabelOrThrow(refs.destinoLabelById, rowData.Destino, 'Destino');
   const idResultado = findIdByLabelOrThrow(refs.resultadoLabelById, rowData.Resultado, 'Resultado');
   const idTipoPunto = findIdByLabelOrThrow(refs.tipoPuntoLabelById, rowData['Tipo Punto'], 'Tipo Punto');
-  const idFullfilment = findIdByLabelOrThrow(refs.fullfilmentLabelById, rowData.FullFilment, 'FullFilment');
-
-  const idVendedor = null;
 
   const derived = calculateEnvioDerivedValues({
     idDestino,
@@ -1528,19 +1516,16 @@ async function addEnvioSupabase(rowData: Record<string, unknown>): Promise<Mutat
   const { data, error } = await supabase
     .from('envios')
     .insert({
-      mes: formatMonthForStorage(rowData.Mes),
-      id_tienda: idTienda,
+      fecha_envio: toIsoDateInput(rowData['Fecha envio']) || null,
       id_lead_ganado: idLeadGanado,
       id_destino: idDestino,
       id_resultado: idResultado,
-      id_vendedor: idVendedor,
       id_tipo_punto: idTipoPunto,
-      id_fullfilment: idFullfilment,
       observaciones: String(rowData.observaciones ?? rowData.Observaciones ?? '').trim() || null,
       ...derived,
     })
     .select(
-      'stable_id,business_id,mes,id_tienda,id_lead_ganado,id_destino,id_resultado,cobro_entrega,pago_moto,excedente_pagado_moto,ingreso_total_fila,costo_total_fila,observaciones,id_vendedor,id_tipo_punto,id_fullfilment,extra_punto_moto,extra_punto_empresa',
+      'stable_id,business_id,fecha_envio,id_lead_ganado,id_destino,id_resultado,cobro_entrega,pago_moto,excedente_pagado_moto,ingreso_total_fila,costo_total_fila,observaciones,id_tipo_punto,extra_punto_moto,extra_punto_empresa',
     )
     .single();
 
@@ -1560,14 +1545,10 @@ async function updateEnvioSupabase(rowData: UpdateMutationPayload): Promise<Muta
 
   const refs = await fetchEnvioReferenceData();
 
-  const idTienda = findIdByLabelOrThrow(refs.tiendaLabelById, rowData.Tienda, 'Tienda');
-  const idLeadGanado = refs.latestLeadGanadoByTiendaId.get(idTienda)?.leadGanadoId ?? null;
+  const idLeadGanado = findIdByLabelOrThrow(refs.leadGanadoLabelById, rowData['Lead Ganado'], 'Lead Ganado');
   const idDestino = findIdByLabelOrThrow(refs.destinoLabelById, rowData.Destino, 'Destino');
   const idResultado = findIdByLabelOrThrow(refs.resultadoLabelById, rowData.Resultado, 'Resultado');
   const idTipoPunto = findIdByLabelOrThrow(refs.tipoPuntoLabelById, rowData['Tipo Punto'], 'Tipo Punto');
-  const idFullfilment = findIdByLabelOrThrow(refs.fullfilmentLabelById, rowData.FullFilment, 'FullFilment');
-
-  const idVendedor = null;
 
   const derived = calculateEnvioDerivedValues({
     idDestino,
@@ -1580,20 +1561,17 @@ async function updateEnvioSupabase(rowData: UpdateMutationPayload): Promise<Muta
   const { data, error } = await supabase
     .from('envios')
     .update({
-      mes: formatMonthForStorage(rowData.Mes),
-      id_tienda: idTienda,
+      fecha_envio: toIsoDateInput(rowData['Fecha envio']) || null,
       id_lead_ganado: idLeadGanado,
       id_destino: idDestino,
       id_resultado: idResultado,
-      id_vendedor: idVendedor,
       id_tipo_punto: idTipoPunto,
-      id_fullfilment: idFullfilment,
       observaciones: String(rowData.observaciones ?? rowData.Observaciones ?? '').trim() || null,
       ...derived,
     })
     .eq('stable_id', rowData._id)
     .select(
-      'stable_id,business_id,mes,id_tienda,id_lead_ganado,id_destino,id_resultado,cobro_entrega,pago_moto,excedente_pagado_moto,ingreso_total_fila,costo_total_fila,observaciones,id_vendedor,id_tipo_punto,id_fullfilment,extra_punto_moto,extra_punto_empresa',
+      'stable_id,business_id,fecha_envio,id_lead_ganado,id_destino,id_resultado,cobro_entrega,pago_moto,excedente_pagado_moto,ingreso_total_fila,costo_total_fila,observaciones,id_tipo_punto,extra_punto_moto,extra_punto_empresa',
     )
     .single();
 
@@ -1752,7 +1730,6 @@ async function addLeadGanadoSupabase(rowData: Record<string, unknown>): Promise<
 
   const derived = calculateLeadDerivedValues({
     fechaIngresoLead: rowData['Fecha ingreso lead'],
-    fechaRegistroLead: rowData['Fecha registro lead'],
     fechaLeadGanado: rowData['Fecha Lead Ganado'],
     anuladosFullfilmentRaw: rowData['Anulados Fullfilment'],
     cantidadEnviosRaw: rowData['Cantidad de envios'],
@@ -1770,7 +1747,7 @@ async function addLeadGanadoSupabase(rowData: Record<string, unknown>): Promise<
       ...derived,
     })
     .select(
-      'stable_id,business_id,fecha_ingreso_lead,fecha_registro_lead,fecha_lead_ganado,dias_lead_a_registro,dias_registro_a_ganado,dias_lead_a_ganado,notas,distrito,cantidad_envios,anulados_fullfilment,ingreso_anulados_fullfilment,kommo_lead_id,tienda_nombre_snapshot,vendedor_nombre_snapshot,pipeline_id_snapshot,origen_snapshot,fullfilment_snapshot',
+      'stable_id,business_id,fecha_ingreso_lead,fecha_lead_ganado,dias_lead_a_ganado,notas,distrito,cantidad_envios,anulados_fullfilment,ingreso_anulados_fullfilment,kommo_lead_id,tienda_nombre_snapshot,vendedor_nombre_snapshot,pipeline_id_snapshot,origen_snapshot,fullfilment_snapshot',
     )
     .single();
 
@@ -1808,7 +1785,6 @@ async function updateLeadGanadoSupabase(rowData: UpdateMutationPayload): Promise
 
   const derived = calculateLeadDerivedValues({
     fechaIngresoLead: rowData['Fecha ingreso lead'],
-    fechaRegistroLead: rowData['Fecha registro lead'],
     fechaLeadGanado: rowData['Fecha Lead Ganado'],
     anuladosFullfilmentRaw: rowData['Anulados Fullfilment'],
     cantidadEnviosRaw: rowData['Cantidad de envios'],
@@ -1827,7 +1803,7 @@ async function updateLeadGanadoSupabase(rowData: UpdateMutationPayload): Promise
     })
     .eq('stable_id', rowData._id)
     .select(
-      'stable_id,business_id,fecha_ingreso_lead,fecha_registro_lead,fecha_lead_ganado,dias_lead_a_registro,dias_registro_a_ganado,dias_lead_a_ganado,notas,distrito,cantidad_envios,anulados_fullfilment,ingreso_anulados_fullfilment,kommo_lead_id,tienda_nombre_snapshot,vendedor_nombre_snapshot,pipeline_id_snapshot,origen_snapshot,fullfilment_snapshot',
+      'stable_id,business_id,fecha_ingreso_lead,fecha_lead_ganado,dias_lead_a_ganado,notas,distrito,cantidad_envios,anulados_fullfilment,ingreso_anulados_fullfilment,kommo_lead_id,tienda_nombre_snapshot,vendedor_nombre_snapshot,pipeline_id_snapshot,origen_snapshot,fullfilment_snapshot',
     )
     .single();
 
@@ -1975,6 +1951,7 @@ export function useAddRow(sheetName: string) {
       });
 
       queryClient.invalidateQueries({ queryKey: getSheetQueryKey(sheetName), refetchType: 'none' });
+      invalidateEnvioRelatedQueries(queryClient, sheetName);
 
       if (shouldUseSupabaseForSheet(sheetName)) {
         triggerOutboxSyncBestEffort();
@@ -2047,6 +2024,7 @@ export function useUpdateRow(sheetName: string) {
       });
 
       queryClient.invalidateQueries({ queryKey: getSheetQueryKey(sheetName), refetchType: 'none' });
+      invalidateEnvioRelatedQueries(queryClient, sheetName);
 
       if (shouldUseSupabaseForSheet(sheetName)) {
         triggerOutboxSyncBestEffort();
@@ -2113,6 +2091,7 @@ export function useDeleteRow(sheetName: string) {
       });
 
       queryClient.invalidateQueries({ queryKey: getSheetQueryKey(sheetName), refetchType: 'none' });
+      invalidateEnvioRelatedQueries(queryClient, sheetName);
 
       if (shouldUseSupabaseForSheet(sheetName)) {
         triggerOutboxSyncBestEffort();
