@@ -1,5 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { getSupabaseAdminClient, isSecretAuthorized, isVercelCronAuthorized, verifyAdminSession } from './_shared.js';
+import { syncLeadsGanadosFromKommoLeadIds } from './leads-ganados-auto.js';
 
 const PROCESS_SECRET_HEADER = 'x-kommo-process-secret';
 const PROCESS_SECRET_ENV = 'KOMMO_PROCESS_SECRET';
@@ -991,6 +992,12 @@ async function processEvent(event: KommoEventRow) {
     if (upsertError) {
       throw new Error(upsertError.message || 'No se pudo upsert a kommo_leads');
     }
+
+    try {
+      await syncLeadsGanadosFromKommoLeadIds(supabase, [Number(mapped.business_id)]);
+    } catch (syncError: unknown) {
+      console.error('Auto-sync de leads ganados falló (single event):', syncError);
+    }
     return;
   }
 
@@ -1527,6 +1534,7 @@ export default async function kommoProcessEventsHandler(req: VercelRequest, res:
           // Special case: leads primary sink is kommo_leads
           if (eventType === 'lead.pull' || eventType === 'webhook') {
             const mappedItems: Array<WorkItem<Record<string, unknown>>> = [];
+            const leadIdByEventId = new Map<string, number>();
 
             for (const ev of group) {
               const mapped = mapKommoLeadToKommoLeads(ev.payload);
@@ -1534,6 +1542,7 @@ export default async function kommoProcessEventsHandler(req: VercelRequest, res:
                 failures.push({ id: ev.id, attempts: ev.attempts, message: 'No se pudo derivar lead_id desde payload de Kommo' });
                 continue;
               }
+              leadIdByEventId.set(ev.id, Number(mapped.business_id));
               mappedItems.push({ eventId: ev.id, attempts: ev.attempts, row: mapped as unknown as Record<string, unknown> });
             }
 
@@ -1548,6 +1557,18 @@ export default async function kommoProcessEventsHandler(req: VercelRequest, res:
             failures.push(...failed.map(f => {
               return { id: f.id, attempts: attemptsById.get(f.id) ?? 0, message: f.message };
             }));
+
+            const wonLeadIds = okIds
+              .map((eventId) => leadIdByEventId.get(eventId) ?? 0)
+              .filter((leadId) => Number.isFinite(leadId) && leadId > 0);
+
+            if (wonLeadIds.length > 0) {
+              try {
+                await syncLeadsGanadosFromKommoLeadIds(supabase, wonLeadIds);
+              } catch (syncError: unknown) {
+                console.error('Auto-sync de leads ganados falló (batch):', syncError);
+              }
+            }
             continue;
           }
 
