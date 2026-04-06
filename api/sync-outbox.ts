@@ -4,6 +4,10 @@ import { z } from 'zod';
 import { verifyAdminSession } from './_auth.js';
 import { getRawSheet, STABLE_ROW_ID_COLUMN } from '../src/lib/google-sheets.js';
 import { normalizeText } from '../src/lib/tableHelpers.js';
+import {
+  extractLeadGanadoBusinessIdsFromEnvioPayload,
+  recalculateLeadGanadoCountersByBusinessId,
+} from './kommo/leads-ganados-auto.js';
 
 const bodySchema = z
   .object({
@@ -615,6 +619,12 @@ function extractLeadGanadoPayload(event: OutboxEvent) {
     businessId: parseBusinessId(newRow?.business_id),
     idTienda: parseBusinessId(newRow?.id_tienda),
     idVendedor: parseBusinessId(newRow?.id_vendedor),
+    kommoLeadId: parseBusinessId(newRow?.kommo_lead_id),
+    tiendaNombreSnapshot: String(newRow?.tienda_nombre_snapshot ?? '').trim(),
+    vendedorNombreSnapshot: String(newRow?.vendedor_nombre_snapshot ?? '').trim(),
+    pipelineIdSnapshot: parseBusinessId(newRow?.pipeline_id_snapshot),
+    origenSnapshot: String(newRow?.origen_snapshot ?? '').trim(),
+    fullfilmentSnapshot: newRow?.fullfilment_snapshot,
     fechaIngresoLead: String(newRow?.fecha_ingreso_lead ?? '').trim(),
     fechaRegistroLead: String(newRow?.fecha_registro_lead ?? '').trim(),
     fechaLeadGanado: String(newRow?.fecha_lead_ganado ?? '').trim(),
@@ -630,6 +640,22 @@ function extractLeadGanadoPayload(event: OutboxEvent) {
     anuladosFullfilment: Number(newRow?.anulados_fullfilment ?? 0),
     ingresoAnulados: Number(newRow?.ingreso_anulados_fullfilment ?? 0),
   };
+}
+
+function asFullfilmentLabelFromSnapshot(value: unknown): string {
+  if (typeof value === 'boolean') {
+    return value ? 'Sí' : 'No';
+  }
+
+  if (typeof value === 'number') {
+    return value !== 0 ? 'Sí' : 'No';
+  }
+
+  const normalized = String(value ?? '').trim().toLowerCase();
+  if (!normalized) return '';
+  if (['true', '1', 'si', 'sí', 'yes'].includes(normalized)) return 'Sí';
+  if (['false', '0', 'no'].includes(normalized)) return 'No';
+  return String(value ?? '').trim();
 }
 
 function extractRecojoPayload(event: OutboxEvent) {
@@ -804,45 +830,57 @@ async function syncLeadGanadoEvent(event: OutboxEvent) {
   }
 
   if (
-    lead.businessId === null ||
-    lead.idTienda === null ||
-    lead.idVendedor === null ||
-    lead.idFullfilment === null ||
-    lead.idOrigen === null
+    lead.businessId === null
   ) {
-    throw new Error('Evento leads_ganados incompleto para sincronizar');
+    throw new Error('Evento leads_ganados sin business_id para sincronizar');
   }
 
   const [tiendaMap, vendedorMap, fullfilmentMap, origenMap] = await Promise.all([
-    getLabelMapForSheet('TIENDAS', ['idTienda', 'idTiendas'], ['Nombre']),
-    getLabelMapForSheet('VENDEDORES', ['idVendedor', 'idVendedores'], ['Nombre']),
-    getLabelMapForSheet('FULLFILMENT', ['idFullFilment', 'idFullfilment'], ['¿Es FullFilment?']),
-    getLabelMapForSheet('ORIGEN', ['idOrigen'], ['Opcion']),
+    getLabelMapForSheet('TIENDAS', ['idTienda', 'idTiendas'], ['Nombre']).catch(() => new Map<number, string>()),
+    getLabelMapForSheet('VENDEDORES', ['idVendedor', 'idVendedores'], ['Nombre']).catch(() => new Map<number, string>()),
+    getLabelMapForSheet('FULLFILMENT', ['idFullFilment', 'idFullfilment'], ['¿Es FullFilment?']).catch(() => new Map<number, string>()),
+    getLabelMapForSheet('ORIGEN', ['idOrigen'], ['Opcion']).catch(() => new Map<number, string>()),
   ]);
 
   const rowPayload: Record<string, string | number> = {
     [businessIdHeader]: lead.businessId,
-    [idTiendaHeader]: lead.idTienda,
-    [idVendedorHeader]: lead.idVendedor,
+    [idTiendaHeader]: lead.idTienda ?? '',
+    [idVendedorHeader]: lead.idVendedor ?? '',
     [fechaIngresoHeader]: lead.fechaIngresoLead,
     [fechaRegistroHeader]: lead.fechaRegistroLead,
     [fechaGanadoHeader]: lead.fechaLeadGanado,
     [diasLeadRegistroHeader]: Number.isFinite(lead.diasLeadARegistro) ? lead.diasLeadARegistro : 0,
     [diasRegistroGanadoHeader]: Number.isFinite(lead.diasRegistroAGanado) ? lead.diasRegistroAGanado : 0,
     [diasLeadGanadoHeader]: Number.isFinite(lead.diasLeadAGanado) ? lead.diasLeadAGanado : 0,
-    [idFullfilmentHeader]: lead.idFullfilment,
+    [idFullfilmentHeader]: lead.idFullfilment ?? '',
     [notasHeader]: lead.notas,
     [cantidadEnviosHeader]: Number.isFinite(lead.cantidadEnvios) ? Math.round(lead.cantidadEnvios) : 0,
-    [idOrigenHeader]: lead.idOrigen,
+    [idOrigenHeader]: lead.idOrigen ?? '',
     [anuladosHeader]: Number.isFinite(lead.anuladosFullfilment) ? lead.anuladosFullfilment : 0,
     [ingresoAnuladosHeader]: Number.isFinite(lead.ingresoAnulados) ? lead.ingresoAnulados : 0,
     [STABLE_ROW_ID_COLUMN]: lead.stableId,
   };
 
-  if (tiendaLabelHeader) rowPayload[tiendaLabelHeader] = tiendaMap.get(lead.idTienda) ?? `#${lead.idTienda}`;
-  if (vendedorLabelHeader) rowPayload[vendedorLabelHeader] = vendedorMap.get(lead.idVendedor) ?? `#${lead.idVendedor}`;
-  if (fullfilmentLabelHeader) rowPayload[fullfilmentLabelHeader] = fullfilmentMap.get(lead.idFullfilment) ?? `#${lead.idFullfilment}`;
-  if (origenLabelHeader) rowPayload[origenLabelHeader] = origenMap.get(lead.idOrigen) ?? `#${lead.idOrigen}`;
+  if (tiendaLabelHeader) {
+    rowPayload[tiendaLabelHeader] = lead.tiendaNombreSnapshot
+      || (lead.idTienda ? (tiendaMap.get(lead.idTienda) ?? `#${lead.idTienda}`) : '');
+  }
+
+  if (vendedorLabelHeader) {
+    rowPayload[vendedorLabelHeader] = lead.vendedorNombreSnapshot
+      || (lead.idVendedor ? (vendedorMap.get(lead.idVendedor) ?? `#${lead.idVendedor}`) : '');
+  }
+
+  if (fullfilmentLabelHeader) {
+    const fromSnapshot = asFullfilmentLabelFromSnapshot(lead.fullfilmentSnapshot);
+    rowPayload[fullfilmentLabelHeader] = fromSnapshot
+      || (lead.idFullfilment ? (fullfilmentMap.get(lead.idFullfilment) ?? `#${lead.idFullfilment}`) : '');
+  }
+
+  if (origenLabelHeader) {
+    rowPayload[origenLabelHeader] = lead.origenSnapshot
+      || (lead.idOrigen ? (origenMap.get(lead.idOrigen) ?? `#${lead.idOrigen}`) : '');
+  }
   if (leadGanadoPeriodoHeader) rowPayload[leadGanadoPeriodoHeader] = lead.leadGanadoEnPeriodo || '';
   if (distritoHeader) rowPayload[distritoHeader] = lead.distrito;
 
@@ -1100,6 +1138,20 @@ async function processOutboxEvent(event: OutboxEvent) {
 
   if (event.entity === 'envios') {
     await syncEnvioEvent(event);
+
+    const supabaseAdmin = getSupabaseAdminClient();
+    const leadGanadoIds = extractLeadGanadoBusinessIdsFromEnvioPayload(event.payload);
+    for (const leadGanadoId of leadGanadoIds) {
+      try {
+        await recalculateLeadGanadoCountersByBusinessId(supabaseAdmin, leadGanadoId);
+      } catch (counterError: unknown) {
+        console.error('[sync-outbox] recálculo lead_ganado falló', {
+          leadGanadoId,
+          message: counterError instanceof Error ? counterError.message : 'Error desconocido',
+        });
+      }
+    }
+
     return;
   }
 

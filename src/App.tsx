@@ -17,7 +17,6 @@ const SHEETS = [
   'TARIFAS',
   'TIENDAS',
   'COURIER',
-  'VENDEDORES',
   'FULLFILMENT',
   'ORIGEN',
   'RESULTADOS',

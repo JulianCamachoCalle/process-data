@@ -513,12 +513,12 @@ export function KommoLeadsInsights() {
       <section className="rounded-2xl border border-gray-200 bg-white p-5 shadow-[0_20px_36px_-30px_rgba(15,23,42,0.8)] space-y-4">
         <h3 className="text-sm font-semibold text-gray-800 inline-flex items-center gap-2">
           <BarChart3 size={16} className="text-red-600" />
-          Comparación de pipelines
+          Comparación de Personal
         </h3>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           <label className="text-xs font-semibold text-gray-600 uppercase tracking-wide space-y-1">
-            Pipeline A
+            Personal A
             <select
               value={pipelineAKey}
               onChange={(event) => setPipelineAKey(event.target.value)}
@@ -533,7 +533,7 @@ export function KommoLeadsInsights() {
           </label>
 
           <label className="text-xs font-semibold text-gray-600 uppercase tracking-wide space-y-1">
-            Pipeline B
+            Personal B
             <select
               value={pipelineBKey}
               onChange={(event) => setPipelineBKey(event.target.value)}
@@ -581,7 +581,7 @@ export function KommoLeadsInsights() {
       </section>
 
       <section className="grid grid-cols-1 xl:grid-cols-2 gap-4">
-        <ChartCard title="Leads según encargado (pipeline)" icon={<Layers size={16} className="text-red-600" />}>
+        <ChartCard title="Leads según Personal" icon={<Layers size={16} className="text-red-600" />}>
           <ResponsiveContainer width="100%" height={300}>
             <BarChart data={data.pipelines}>
               <CartesianGrid strokeDasharray="3 3" vertical={false} />
@@ -601,7 +601,7 @@ export function KommoLeadsInsights() {
           </ResponsiveContainer>
         </ChartCard>
 
-        <ChartCard title="Horas con más incoming leads" icon={<Clock3 size={16} className="text-red-600" />}>
+        <ChartCard title="Horas con más leads entrantes" icon={<Clock3 size={16} className="text-red-600" />}>
           <ResponsiveContainer width="100%" height={300}>
             <LineChart data={data.hourlyIncoming}>
               <CartesianGrid strokeDasharray="3 3" vertical={false} />
@@ -639,7 +639,7 @@ export function KommoLeadsInsights() {
           </ResponsiveContainer>
         </ChartCard>
 
-        <ChartCard title="Leads por estado + encargado" icon={<BarChart3 size={16} className="text-red-600" />}>
+        <ChartCard title="Leads por estado + personal" icon={<BarChart3 size={16} className="text-red-600" />}>
           <ResponsiveContainer width="100%" height={300}>
             <BarChart data={statusByPipelineData.rows}>
               <CartesianGrid strokeDasharray="3 3" vertical={false} />
@@ -666,7 +666,7 @@ export function KommoLeadsInsights() {
         <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-[0_20px_36px_-30px_rgba(15,23,42,0.8)]">
           <h3 className="text-sm font-semibold text-gray-800 inline-flex items-center gap-2">
             <Users size={16} className="text-red-600" />
-            Top responsables (pipeline como encargado)
+            Top Personal
           </h3>
           <ul className="mt-4 space-y-2 text-sm text-gray-700">
             {data.owners.slice(0, 5).map((owner) => (
@@ -682,7 +682,7 @@ export function KommoLeadsInsights() {
           <h3 className="text-sm font-semibold text-gray-800">Insights extra</h3>
           <ul className="mt-4 space-y-2 text-sm text-gray-700">
             <li className="rounded-lg border border-gray-100 px-3 py-2 bg-gray-50/70">
-              Encargado top (pipeline): <span className="font-semibold text-gray-900">{data.summary.top_pipeline?.pipeline_name ?? 'N/D'}</span>
+              Personal top: <span className="font-semibold text-gray-900">{data.summary.top_pipeline?.pipeline_name ?? 'N/D'}</span>
             </li>
             <li className="rounded-lg border border-gray-100 px-3 py-2 bg-gray-50/70">
               Hora pico incoming: <span className="font-semibold text-gray-900">{data.insights.busiest_hour ? formatHour(data.insights.busiest_hour.hour) : 'N/D'}</span>

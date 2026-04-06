@@ -34,7 +34,6 @@ export function SheetView({ sheetName }: SheetViewProps) {
   const { data: envioFormOptions } = useEnvioFormOptions(sheetName === 'ENVIOS');
   const { data: recojoFormOptions } = useRecojoFormOptions(sheetName === 'RECOJOS');
   const { data: leadsTiendasData } = useSheetData(sheetName === 'LEADS GANADOS' ? 'TIENDAS' : '');
-  const { data: leadsVendedoresData } = useSheetData(sheetName === 'LEADS GANADOS' ? 'VENDEDORES' : '');
   const { data: leadsFullfilmentData } = useSheetData(sheetName === 'LEADS GANADOS' ? 'FULLFILMENT' : '');
   const { data: leadsOrigenData } = useSheetData(sheetName === 'LEADS GANADOS' ? 'ORIGEN' : '');
   const { data: distritoOptions } = useDistritoOptions(sheetName === 'LEADS GANADOS');
@@ -90,7 +89,6 @@ export function SheetView({ sheetName }: SheetViewProps) {
         : sheetName === 'LEADS GANADOS'
           ? {
               Tienda: Array.from(new Set((leadsTiendasData?.rows ?? []).map((row) => String(row.Nombre ?? '').trim()).filter(Boolean))),
-              Vendedor: Array.from(new Set((leadsVendedoresData?.rows ?? []).map((row) => String(row.Nombre ?? '').trim()).filter(Boolean))),
               FullFilment: Array.from(new Set((leadsFullfilmentData?.rows ?? []).map((row) => String(row['¿Es FullFilment?'] ?? '').trim()).filter(Boolean))),
               Origen: Array.from(new Set((leadsOrigenData?.rows ?? []).map((row) => String(row.Opcion ?? '').trim()).filter(Boolean))),
               Distrito: distritoOptions ?? [],
@@ -311,7 +309,7 @@ export function SheetView({ sheetName }: SheetViewProps) {
     }
 
     if (sheetName === 'LEADS GANADOS') {
-      const requiredSelects = ['Tienda', 'Vendedor', 'FullFilment', 'Origen', 'Distrito'];
+      const requiredSelects = ['Tienda', 'FullFilment', 'Origen', 'Distrito'];
       const missingField = requiredSelects.find((field) => !String(normalizedFormData[field] ?? '').trim());
 
       if (missingField) {
