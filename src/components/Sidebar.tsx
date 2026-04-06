@@ -77,8 +77,8 @@ export function Sidebar({
 
   const renderSidebarShell = (className: string, showCloseButton: boolean) => (
     <aside className={className}>
-      <div className="pointer-events-none absolute -top-14 -right-12 h-36 w-36 rounded-full bg-red-500/20 blur-3xl" />
-      <div className="pointer-events-none absolute bottom-16 -left-14 h-36 w-36 rounded-full bg-white/10 blur-3xl" />
+      <div className="pointer-events-none absolute -top-14 -right-12 hidden h-36 w-36 rounded-full bg-red-500/20 blur-3xl md:block" />
+      <div className="pointer-events-none absolute bottom-16 -left-14 hidden h-36 w-36 rounded-full bg-white/10 blur-3xl md:block" />
 
       <div className={`border-b border-white/10 p-5 sm:p-6 ${collapsed ? 'md:px-3' : ''}`}>
         <div className="mb-3 flex items-center justify-between md:justify-start">
@@ -203,7 +203,7 @@ export function Sidebar({
         false,
       )}
       {renderSidebarShell(
-        `fixed inset-y-0 left-0 z-40 flex h-[100dvh] min-h-[100dvh] w-[min(85vw,18rem)] max-w-[18rem] flex-col overflow-hidden border-r border-red-900/40 bg-gradient-to-b from-[#101218] via-[#0f1219] to-[#0a0c12] text-white shadow-[8px_0_30px_-14px_rgba(0,0,0,0.75)] backdrop-blur-xl transition-transform duration-300 md:hidden print:hidden ${isMobileOpen ? 'translate-x-0' : '-translate-x-full'}`,
+        `fixed inset-0 z-40 flex h-[100dvh] min-h-[100dvh] w-screen max-w-none flex-col overflow-hidden border-r-0 bg-[#0b0d12] text-white shadow-none transition-transform duration-300 md:hidden print:hidden ${isMobileOpen ? 'translate-x-0' : '-translate-x-full'}`,
         true,
       )}
     </>

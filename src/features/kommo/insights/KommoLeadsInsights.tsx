@@ -115,27 +115,71 @@ const EXPORT_COLOR_PROPERTIES = [
   'stop-color',
 ] as const;
 
-const EXPORT_LAYOUT_PROPERTIES = [
+const EXPORT_NEUTRALIZED_PROPERTIES = new Set([
   'background-image',
-  'border-top-width',
-  'border-right-width',
-  'border-bottom-width',
-  'border-left-width',
-  'border-top-style',
-  'border-right-style',
-  'border-bottom-style',
-  'border-left-style',
-  'border-top-left-radius',
-  'border-top-right-radius',
-  'border-bottom-right-radius',
-  'border-bottom-left-radius',
   'box-shadow',
   'text-shadow',
-  'opacity',
-] as const;
+  'filter',
+  'backdrop-filter',
+  'mask',
+  'mask-image',
+  '-webkit-mask',
+  '-webkit-mask-image',
+  'clip-path',
+]);
+
+const EXPORT_COLOR_PROPERTY_SET = new Set<string>(EXPORT_COLOR_PROPERTIES);
+
+const exportColorResolver = (() => {
+  let element: HTMLSpanElement | null = null;
+
+  return (value: string) => {
+    if (typeof document === 'undefined') return value;
+
+    if (!element) {
+      element = document.createElement('span');
+      element.setAttribute('aria-hidden', 'true');
+      element.style.position = 'fixed';
+      element.style.left = '-100000px';
+      element.style.top = '0';
+      element.style.pointerEvents = 'none';
+      document.body.appendChild(element);
+    }
+
+    element.style.color = '';
+    element.style.color = value;
+    return window.getComputedStyle(element).color || value;
+  };
+})();
 
 function hasUnsupportedColorFunction(value: string) {
   return /oklch\s*\(|oklab\s*\(/i.test(value);
+}
+
+function sanitizeExportPropertyValue(property: string, value: string) {
+  if (!value) return null;
+
+  if (EXPORT_NEUTRALIZED_PROPERTIES.has(property)) {
+    return 'none';
+  }
+
+  if (!hasUnsupportedColorFunction(value)) {
+    return value;
+  }
+
+  if (EXPORT_COLOR_PROPERTY_SET.has(property)) {
+    return exportColorResolver(value);
+  }
+
+  if (property === 'background' || property === 'background-color') {
+    return '#ffffff';
+  }
+
+  if (property.startsWith('border') && property.endsWith('color')) {
+    return exportColorResolver(value);
+  }
+
+  return null;
 }
 
 function applyExportSafeStyles(sourceElement: Element, targetElement: Element) {
@@ -143,36 +187,41 @@ function applyExportSafeStyles(sourceElement: Element, targetElement: Element) {
 
   const computedStyle = window.getComputedStyle(sourceElement);
 
-  for (const property of EXPORT_COLOR_PROPERTIES) {
-    const value = computedStyle.getPropertyValue(property);
-    if (!value || hasUnsupportedColorFunction(value)) continue;
-    targetElement.style.setProperty(property, value);
+  for (const property of Array.from(computedStyle)) {
+    if (property.startsWith('--')) continue;
+
+    const sanitizedValue = sanitizeExportPropertyValue(property, computedStyle.getPropertyValue(property));
+    if (!sanitizedValue) continue;
+
+    targetElement.style.setProperty(property, sanitizedValue, computedStyle.getPropertyPriority(property));
   }
 
-  for (const property of EXPORT_LAYOUT_PROPERTIES) {
-    const value = computedStyle.getPropertyValue(property);
-    if (!value) continue;
+  targetElement.removeAttribute('class');
 
-    if (property === 'background-image' && hasUnsupportedColorFunction(value)) {
-      targetElement.style.setProperty(property, 'none');
-      continue;
-    }
-
-    if ((property === 'box-shadow' || property === 'text-shadow') && hasUnsupportedColorFunction(value)) {
-      targetElement.style.setProperty(property, 'none');
-      continue;
-    }
-
-    targetElement.style.setProperty(property, value);
+  if (targetElement instanceof SVGElement) {
+    targetElement.removeAttribute('filter');
+    targetElement.removeAttribute('mask');
   }
 
+  targetElement.style.setProperty('background-image', 'none');
+  targetElement.style.setProperty('box-shadow', 'none');
+  targetElement.style.setProperty('text-shadow', 'none');
+  targetElement.style.setProperty('filter', 'none');
+  targetElement.style.setProperty('backdrop-filter', 'none');
+  targetElement.style.setProperty('mask', 'none');
+  targetElement.style.setProperty('-webkit-mask', 'none');
   targetElement.style.setProperty('transition', 'none');
   targetElement.style.setProperty('animation', 'none');
+
+  if (targetElement instanceof HTMLElement) {
+    targetElement.style.setProperty('color-scheme', 'light');
+  }
 }
 
 function createSafeExportClone(sourceNode: HTMLDivElement) {
   const host = document.createElement('div');
   host.setAttribute('aria-hidden', 'true');
+  host.style.all = 'initial';
   host.style.position = 'fixed';
   host.style.left = '-100000px';
   host.style.top = '0';
@@ -181,11 +230,14 @@ function createSafeExportClone(sourceNode: HTMLDivElement) {
   host.style.opacity = '1';
   host.style.zIndex = '-1';
   host.style.background = '#ffffff';
+  host.style.isolation = 'isolate';
+  host.style.contain = 'layout style paint';
 
   const clone = sourceNode.cloneNode(true) as HTMLDivElement;
   clone.style.width = `${sourceNode.scrollWidth}px`;
   clone.style.maxWidth = 'none';
   clone.style.background = '#ffffff';
+  clone.style.color = '#111827';
 
   const sourceElements = [sourceNode, ...Array.from(sourceNode.querySelectorAll('*'))];
   const cloneElements = [clone, ...Array.from(clone.querySelectorAll('*'))];
@@ -195,6 +247,7 @@ function createSafeExportClone(sourceNode: HTMLDivElement) {
     const cloneElement = cloneElements[index];
     if (!sourceElement || !cloneElement) continue;
     applyExportSafeStyles(sourceElement, cloneElement);
+    cloneElement.removeAttribute('class');
   }
 
   host.appendChild(clone);

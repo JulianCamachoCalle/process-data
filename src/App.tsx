@@ -143,7 +143,7 @@ function Layout() {
       {mobileSidebarOpen && (
         <button
           aria-label="Cerrar menú lateral"
-          className="fixed inset-0 z-30 bg-black/45 md:hidden"
+          className="fixed inset-0 z-30 bg-[#020307]/85 md:hidden"
           onClick={() => setMobileSidebarOpen(false)}
         />
       )}
@@ -161,7 +161,7 @@ function Layout() {
         onCloseMobile={() => setMobileSidebarOpen(false)}
         onNavigate={() => setMobileSidebarOpen(false)}
       />
-      <div className="relative z-10 flex min-w-0 flex-1 flex-col overflow-hidden bg-gradient-to-b from-white/90 via-white/75 to-white/95 backdrop-blur-sm print:overflow-visible">
+      <div className={`relative z-10 flex min-w-0 flex-1 flex-col overflow-hidden bg-gradient-to-b from-white/90 via-white/75 to-white/95 backdrop-blur-sm print:overflow-visible ${mobileSidebarOpen ? 'max-md:opacity-0 max-md:pointer-events-none' : ''}`}>
         <header className="sticky top-0 z-20 flex min-h-16 items-center justify-between gap-3 border-b border-gray-200/80 bg-white/75 px-4 py-3 shadow-[0_10px_30px_-20px_rgba(15,23,42,0.45)] backdrop-blur-md sm:min-h-20 sm:px-6 md:px-8 print:hidden">
           <div className="flex min-w-0 items-center gap-3">
             <button
