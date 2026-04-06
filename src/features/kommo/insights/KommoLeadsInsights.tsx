@@ -1,6 +1,8 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
+import html2canvas from 'html2canvas';
+import { jsPDF } from 'jspdf';
 import {
   Activity,
   BarChart3,
@@ -169,7 +171,9 @@ export function KommoLeadsInsights() {
   const [appliedEndDate, setAppliedEndDate] = useState<string | null>(null);
   const [pipelineAKey, setPipelineAKey] = useState<string>('');
   const [pipelineBKey, setPipelineBKey] = useState<string>('');
-  const [printTimestamp, setPrintTimestamp] = useState<string>('');
+  const [exportTimestamp, setExportTimestamp] = useState<string>('');
+  const [isExportingPdf, setIsExportingPdf] = useState(false);
+  const exportContentRef = useRef<HTMLDivElement | null>(null);
 
   const insightsQuery = useQuery({
     queryKey: ['kommo-leads-insights', appliedStartDate, appliedEndDate],
@@ -302,17 +306,79 @@ export function KommoLeadsInsights() {
     setAppliedEndDate(null);
   };
 
-  const handleExportPdf = () => {
+  const handleExportPdf = useCallback(async () => {
+    if (!exportContentRef.current || isExportingPdf) return;
+
     const generatedAt = new Intl.DateTimeFormat('es-PE', {
       dateStyle: 'medium',
       timeStyle: 'short',
     }).format(new Date());
 
-    setPrintTimestamp(generatedAt);
-    window.setTimeout(() => {
-      window.print();
-    }, 0);
-  };
+    setIsExportingPdf(true);
+    setExportTimestamp(generatedAt);
+
+    try {
+      await new Promise<void>((resolve) => {
+        window.requestAnimationFrame(() => {
+          window.requestAnimationFrame(() => resolve());
+        });
+      });
+      if (document.fonts?.ready) {
+        await document.fonts.ready;
+      }
+
+      const exportNode = exportContentRef.current;
+      if (!exportNode) return;
+
+      const canvas = await html2canvas(exportNode, {
+        backgroundColor: '#ffffff',
+        scale: 2,
+        useCORS: true,
+        logging: false,
+        width: exportNode.scrollWidth,
+        height: exportNode.scrollHeight,
+        windowWidth: exportNode.scrollWidth,
+        windowHeight: exportNode.scrollHeight,
+      });
+
+      const pdf = new jsPDF({
+        orientation: 'landscape',
+        unit: 'mm',
+        format: 'a4',
+        compress: true,
+      });
+
+      const pageWidth = pdf.internal.pageSize.getWidth();
+      const pageHeight = pdf.internal.pageSize.getHeight();
+      const margin = 10;
+      const printableWidth = pageWidth - margin * 2;
+      const printableHeight = pageHeight - margin * 2;
+      const imageData = canvas.toDataURL('image/png');
+      const imageHeight = (canvas.height * printableWidth) / canvas.width;
+
+      let remainingHeight = imageHeight;
+      let offsetY = margin;
+
+      pdf.addImage(imageData, 'PNG', margin, offsetY, printableWidth, imageHeight, undefined, 'FAST');
+      remainingHeight -= printableHeight;
+
+      while (remainingHeight > 0) {
+        pdf.addPage('a4', 'landscape');
+        offsetY = margin - (imageHeight - remainingHeight);
+        pdf.addImage(imageData, 'PNG', margin, offsetY, printableWidth, imageHeight, undefined, 'FAST');
+        remainingHeight -= printableHeight;
+      }
+
+      const filenameStart = appliedStartDate ?? 'sin-inicio';
+      const filenameEnd = appliedEndDate ?? 'sin-fin';
+      pdf.save(`leads-insights-${filenameStart}-${filenameEnd}.pdf`);
+    } catch (error) {
+      console.error('No se pudo exportar Leads Insights a PDF', error);
+      window.alert('No se pudo exportar el PDF. Probá nuevamente.');
+    } finally {
+      setIsExportingPdf(false);
+    }
+  }, [appliedEndDate, appliedStartDate, isExportingPdf]);
 
   const statusByPipelineData = useMemo(() => {
     const source = insightsQuery.data?.statuses ?? [];
@@ -369,46 +435,8 @@ export function KommoLeadsInsights() {
   const appliedRangeLabel = `${data.filters.start_date ?? 'sin inicio'} — ${data.filters.end_date ?? 'sin fin'}`;
 
   return (
-    <div className="leads-insights-print-scope space-y-6">
-      <style>{`
-        @media print {
-          @page {
-            size: A4 landscape;
-            margin: 10mm;
-          }
-
-          body * {
-            visibility: hidden;
-          }
-
-          .leads-insights-print-scope,
-          .leads-insights-print-scope * {
-            visibility: visible;
-          }
-
-          .leads-insights-print-scope {
-            position: absolute;
-            inset: 0;
-            width: 100% !important;
-            max-width: none !important;
-            overflow: visible !important;
-            color: #111827 !important;
-            background: #ffffff !important;
-            -webkit-print-color-adjust: exact;
-            print-color-adjust: exact;
-          }
-
-          .leads-insights-print-scope .recharts-wrapper,
-          .leads-insights-print-scope .recharts-surface,
-          .leads-insights-print-scope .recharts-responsive-container {
-            overflow: visible !important;
-          }
-
-          .leads-insights-print-scope .recharts-text {
-            fill: #111827 !important;
-          }
-        }
-      `}</style>
+    <>
+      <div className="space-y-6">
       <header className="rounded-2xl border border-gray-200 bg-white px-6 py-5 shadow-[0_24px_44px_-30px_rgba(15,23,42,0.65)] flex items-center justify-between gap-4 flex-wrap">
         <div>
           <h1 className="text-2xl font-extrabold text-gray-900 inline-flex items-center gap-2">
@@ -421,10 +449,11 @@ export function KommoLeadsInsights() {
           <button
             type="button"
             onClick={handleExportPdf}
-            className="inline-flex items-center gap-2 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs font-semibold text-red-700 hover:bg-red-100"
+            disabled={isExportingPdf}
+            className="inline-flex items-center gap-2 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs font-semibold text-red-700 hover:bg-red-100 disabled:cursor-wait disabled:opacity-70"
           >
             <FileText size={14} />
-            Exportar PDF
+            {isExportingPdf ? 'Exportando PDF...' : 'Exportar PDF'}
           </button>
           <Link
             to="/kommo"
@@ -434,12 +463,6 @@ export function KommoLeadsInsights() {
           </Link>
         </div>
       </header>
-
-      <section className="hidden print:block rounded-xl border border-gray-200 bg-white px-4 py-3">
-        <h2 className="text-lg font-bold text-gray-900">Leads Insights — Exportación PDF</h2>
-        <p className="text-xs text-gray-600 mt-1">Rango aplicado: {appliedRangeLabel}</p>
-        <p className="text-xs text-gray-600">Generado: {printTimestamp || 'en este momento'}</p>
-      </section>
 
       <section className="rounded-2xl border border-gray-200 bg-white p-5 shadow-[0_20px_36px_-30px_rgba(15,23,42,0.8)] space-y-4">
         <div className="flex flex-wrap items-center gap-2">
@@ -493,35 +516,104 @@ export function KommoLeadsInsights() {
         </p>
       </section>
 
-      {data.summary.total_leads === 0 ? (
-        <div className="rounded-2xl border border-gray-200 bg-white p-8 text-center text-sm text-gray-500">
-          No hay leads disponibles para mostrar métricas con los filtros actuales.
-          <div className="mt-3">
-            <Link to="/kommo" className="text-red-700 font-semibold hover:underline">Ir al Explorer de Kommo</Link>
-          </div>
-        </div>
-      ) : (
-        <>
+      <InsightsReportSections
+        data={data}
+        pipelineAKey={pipelineAKey}
+        pipelineBKey={pipelineBKey}
+        onPipelineAChange={setPipelineAKey}
+        onPipelineBChange={setPipelineBKey}
+        selectedPipelineA={selectedPipelineA}
+        selectedPipelineB={selectedPipelineB}
+        pipelineComparisonChartData={pipelineComparisonChartData}
+        statusesByNameForPie={statusesByNameForPie}
+        statusByPipelineData={statusByPipelineData}
+      />
+    </div>
+      <div className="pointer-events-none fixed -left-[200vw] top-0 w-[1280px] bg-white p-8 text-gray-900">
+        <div ref={exportContentRef} className="space-y-6 bg-white">
+          <section className="rounded-2xl border border-gray-200 bg-white px-6 py-5 shadow-[0_24px_44px_-30px_rgba(15,23,42,0.2)]">
+            <h2 className="text-2xl font-extrabold text-gray-900 inline-flex items-center gap-2">
+              <Activity className="text-red-600" size={22} />
+              Leads Insights — Exportación PDF
+            </h2>
+            <p className="mt-2 text-sm text-gray-600">Rango aplicado: {appliedRangeLabel}</p>
+            <p className="text-sm text-gray-600">Generado: {exportTimestamp || 'en este momento'}</p>
+            <p className="text-sm text-gray-600">Zona horaria de entrada: {data.timezone ?? 'America/Lima'}.</p>
+          </section>
 
-      <section className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
+          <InsightsReportSections
+            data={data}
+            pipelineAKey={pipelineAKey}
+            pipelineBKey={pipelineBKey}
+            onPipelineAChange={setPipelineAKey}
+            onPipelineBChange={setPipelineBKey}
+            selectedPipelineA={selectedPipelineA}
+            selectedPipelineB={selectedPipelineB}
+            pipelineComparisonChartData={pipelineComparisonChartData}
+            statusesByNameForPie={statusesByNameForPie}
+            statusByPipelineData={statusByPipelineData}
+          />
+        </div>
+      </div>
+    </>
+  );
+}
+
+function InsightsReportSections({
+  data,
+  pipelineAKey,
+  pipelineBKey,
+  onPipelineAChange,
+  onPipelineBChange,
+  selectedPipelineA,
+  selectedPipelineB,
+  pipelineComparisonChartData,
+  statusesByNameForPie,
+  statusByPipelineData,
+}: {
+  data: LeadsInsightsPayload;
+  pipelineAKey: string;
+  pipelineBKey: string;
+  onPipelineAChange: (value: string) => void;
+  onPipelineBChange: (value: string) => void;
+  selectedPipelineA: LeadsInsightsPayload['pipelinePerformance'][number] | null;
+  selectedPipelineB: LeadsInsightsPayload['pipelinePerformance'][number] | null;
+  pipelineComparisonChartData: Array<{ metric: string; pipelineA: number; pipelineB: number }>;
+  statusesByNameForPie: StatusByNameInsight[];
+  statusByPipelineData: { rows: Array<Record<string, number | string>>; stackKeys: string[] };
+}) {
+  if (data.summary.total_leads === 0) {
+    return (
+      <div className="rounded-2xl border border-gray-200 bg-white p-8 text-center text-sm text-gray-500">
+        No hay leads disponibles para mostrar métricas con los filtros actuales.
+        <div className="mt-3">
+          <Link to="/kommo" className="font-semibold text-red-700 hover:underline">Ir al Explorer de Kommo</Link>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <>
+      <section className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <KpiCard title="Leads totales" value={formatNumber(data.summary.total_leads)} />
         <KpiCard title="Leads abiertos" value={formatNumber(data.summary.total_open)} />
         <KpiCard title="Leads cerrados" value={formatNumber(data.summary.total_closed)} />
         <KpiCard title="Ticket promedio" value={formatCurrency(data.summary.avg_price)} />
       </section>
 
-      <section className="rounded-2xl border border-gray-200 bg-white p-5 shadow-[0_20px_36px_-30px_rgba(15,23,42,0.8)] space-y-4">
-        <h3 className="text-sm font-semibold text-gray-800 inline-flex items-center gap-2">
+      <section className="space-y-4 rounded-2xl border border-gray-200 bg-white p-5 shadow-[0_20px_36px_-30px_rgba(15,23,42,0.8)]">
+        <h3 className="inline-flex items-center gap-2 text-sm font-semibold text-gray-800">
           <BarChart3 size={16} className="text-red-600" />
           Comparación de Personal
         </h3>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-          <label className="text-xs font-semibold text-gray-600 uppercase tracking-wide space-y-1">
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+          <label className="space-y-1 text-xs font-semibold uppercase tracking-wide text-gray-600">
             Personal A
             <select
               value={pipelineAKey}
-              onChange={(event) => setPipelineAKey(event.target.value)}
+              onChange={(event) => onPipelineAChange(event.target.value)}
               className="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-red-200"
             >
               {(data.pipelinePerformance ?? []).map((pipeline) => (
@@ -532,11 +624,11 @@ export function KommoLeadsInsights() {
             </select>
           </label>
 
-          <label className="text-xs font-semibold text-gray-600 uppercase tracking-wide space-y-1">
+          <label className="space-y-1 text-xs font-semibold uppercase tracking-wide text-gray-600">
             Personal B
             <select
               value={pipelineBKey}
-              onChange={(event) => setPipelineBKey(event.target.value)}
+              onChange={(event) => onPipelineBChange(event.target.value)}
               className="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-red-200"
             >
               {(data.pipelinePerformance ?? []).map((pipeline) => (
@@ -550,7 +642,7 @@ export function KommoLeadsInsights() {
 
         {selectedPipelineA && selectedPipelineB ? (
           <>
-            <div className="grid grid-cols-2 lg:grid-cols-6 gap-3">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6">
               <CompareKpiCard label="Total leads" left={selectedPipelineA.total_leads} right={selectedPipelineB.total_leads} />
               <CompareKpiCard label="Open" left={selectedPipelineA.open_leads} right={selectedPipelineB.open_leads} />
               <CompareKpiCard label="Closed" left={selectedPipelineA.closed_leads} right={selectedPipelineB.closed_leads} />
@@ -580,7 +672,7 @@ export function KommoLeadsInsights() {
         )}
       </section>
 
-      <section className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+      <section className="grid grid-cols-1 gap-4 xl:grid-cols-2">
         <ChartCard title="Leads según Personal" icon={<Layers size={16} className="text-red-600" />}>
           <ResponsiveContainer width="100%" height={300}>
             <BarChart data={data.pipelines}>
@@ -614,7 +706,7 @@ export function KommoLeadsInsights() {
         </ChartCard>
       </section>
 
-      <section className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+      <section className="grid grid-cols-1 gap-4 xl:grid-cols-2">
         <ChartCard title="Leads según estado" icon={<PieChartIcon size={16} className="text-red-600" />}>
           <ResponsiveContainer width="100%" height={300}>
             <PieChart>
@@ -631,10 +723,7 @@ export function KommoLeadsInsights() {
                   <Cell key={`${entry.status_name}-${index}`} fill={COLORS[index % COLORS.length]} />
                 ))}
               </Pie>
-              <Tooltip
-                formatter={(value) => formatNumber(asChartNumber(value))}
-                labelFormatter={(label) => String(label)}
-              />
+              <Tooltip formatter={(value) => formatNumber(asChartNumber(value))} labelFormatter={(label) => String(label)} />
             </PieChart>
           </ResponsiveContainer>
         </ChartCard>
@@ -662,15 +751,15 @@ export function KommoLeadsInsights() {
         </ChartCard>
       </section>
 
-      <section className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+      <section className="grid grid-cols-1 gap-4 xl:grid-cols-2">
         <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-[0_20px_36px_-30px_rgba(15,23,42,0.8)]">
-          <h3 className="text-sm font-semibold text-gray-800 inline-flex items-center gap-2">
+          <h3 className="inline-flex items-center gap-2 text-sm font-semibold text-gray-800">
             <Users size={16} className="text-red-600" />
             Top Personal
           </h3>
           <ul className="mt-4 space-y-2 text-sm text-gray-700">
             {data.owners.slice(0, 5).map((owner) => (
-              <li key={String(owner.responsible_user_id ?? 'null')} className="flex items-center justify-between rounded-lg border border-gray-100 px-3 py-2 bg-gray-50/70">
+              <li key={String(owner.responsible_user_id ?? 'null')} className="flex items-center justify-between rounded-lg border border-gray-100 bg-gray-50/70 px-3 py-2">
                 <span className="truncate pr-3">{owner.responsible_user_name}</span>
                 <span className="font-semibold text-gray-900">{formatNumber(owner.total_leads)}</span>
               </li>
@@ -681,27 +770,25 @@ export function KommoLeadsInsights() {
         <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-[0_20px_36px_-30px_rgba(15,23,42,0.8)]">
           <h3 className="text-sm font-semibold text-gray-800">Insights extra</h3>
           <ul className="mt-4 space-y-2 text-sm text-gray-700">
-            <li className="rounded-lg border border-gray-100 px-3 py-2 bg-gray-50/70">
+            <li className="rounded-lg border border-gray-100 bg-gray-50/70 px-3 py-2">
               Personal top: <span className="font-semibold text-gray-900">{data.summary.top_pipeline?.pipeline_name ?? 'N/D'}</span>
             </li>
-            <li className="rounded-lg border border-gray-100 px-3 py-2 bg-gray-50/70">
+            <li className="rounded-lg border border-gray-100 bg-gray-50/70 px-3 py-2">
               Hora pico incoming: <span className="font-semibold text-gray-900">{data.insights.busiest_hour ? formatHour(data.insights.busiest_hour.hour) : 'N/D'}</span>
             </li>
-            <li className="rounded-lg border border-gray-100 px-3 py-2 bg-gray-50/70">
+            <li className="rounded-lg border border-gray-100 bg-gray-50/70 px-3 py-2">
               Estado más frecuente: <span className="font-semibold text-gray-900">{data.insights.top_status?.status_name ?? 'N/D'}</span>
             </li>
-            <li className="rounded-lg border border-gray-100 px-3 py-2 bg-gray-50/70">
+            <li className="rounded-lg border border-gray-100 bg-gray-50/70 px-3 py-2">
               Win rate (sobre cerrados): <span className="font-semibold text-gray-900">{data.insights.won_rate_over_closed !== null ? `${data.insights.won_rate_over_closed}%` : 'N/D'}</span>
             </li>
-            <li className="rounded-lg border border-gray-100 px-3 py-2 bg-gray-50/70">
+            <li className="rounded-lg border border-gray-100 bg-gray-50/70 px-3 py-2">
               Leads sin pipeline: <span className="font-semibold text-gray-900">{formatNumber(data.insights.orphan_pipeline_leads)}</span>
             </li>
           </ul>
         </div>
       </section>
-        </>
-      )}
-    </div>
+    </>
   );
 }
 

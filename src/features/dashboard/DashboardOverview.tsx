@@ -129,7 +129,7 @@ export function DashboardOverview() {
     const tipoRecojoRows = (tipoRecojoQuery.data?.rows ?? []) as Row[];
 
     const enviosDateColumn = getColumnByCandidates(enviosColumns, ['Fecha envio', 'Fecha envío', 'fecha_envio', 'Mes', 'mes', 'Fecha']);
-    const recojosDateColumn = getColumnByCandidates(recojosColumns, ['Mes', 'mes', 'Fecha', 'Fecha de recojo']);
+    const recojosDateColumn = getColumnByCandidates(recojosColumns, ['Fecha', 'fecha', 'Fecha de recojo', 'Mes', 'mes']);
     const leadsDateColumn = getColumnByCandidates(leadsColumns, ['Fecha Lead Ganado', 'fecha_lead_ganado']);
 
     const enviosInRange = filterRowsByRange(enviosRows, enviosDateColumn, dateFrom, dateTo);
@@ -183,7 +183,7 @@ export function DashboardOverview() {
     const recojoGratisId = findTipoRecojoBusinessId(tipoRecojoRows, ['gratis', 'recojo gratis']) ?? 2;
 
     const idTipoRecojoColumn = getColumnByCandidates(recojosColumns, ['idTipoRecojo', 'id tipo recojo']);
-    const tipoRecojoColumn = getColumnByCandidates(recojosColumns, ['Tipo de Recojo', 'tipo de recojo']);
+    const tipoRecojoColumn = getColumnByCandidates(recojosColumns, ['Tipo de cobro', 'tipo de cobro', 'Tipo de Recojo', 'tipo de recojo']);
     const vecesRecojoColumn = getColumnByCandidates(recojosColumns, ['Veces', 'veces']);
 
     const recojoRowsByType = recojosInRange.map((row) => {
