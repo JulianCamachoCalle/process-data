@@ -96,19 +96,15 @@ interface RecojoRecord {
 interface LeadGanadoRecord {
   stable_id: string;
   business_id: number;
-  id_tienda: number | null;
-  id_vendedor: number | null;
   fecha_ingreso_lead: string | null;
   fecha_registro_lead: string | null;
   fecha_lead_ganado: string | null;
   dias_lead_a_registro: number;
   dias_registro_a_ganado: number;
   dias_lead_a_ganado: number;
-  id_fullfilment: number | null;
   notas: string | null;
   distrito: string | null;
   cantidad_envios: number;
-  id_origen: number | null;
   anulados_fullfilment: number;
   ingreso_anulados_fullfilment: number;
   kommo_lead_id?: number | null;
@@ -244,7 +240,6 @@ function normalizeDistritoValue(raw: unknown): string {
 
 let lastSupabaseSessionCheckAt = 0;
 let cachedSupabaseSessionAvailable = false;
-let lastOutboxSyncTriggerAt = 0;
 
 export const SHEET_QUERY_STALE_TIME_MS = 60 * 1000;
 export const SHEET_QUERY_REFETCH_INTERVAL_MS = 5 * 60 * 1000;
@@ -548,34 +543,43 @@ function toRecojoSheetRow(record: RecojoRecord, refs: RecojoReferenceData): Shee
   };
 }
 
-interface LeadReferenceData {
-  tiendaLabelById: Map<number, string>;
-  fullfilmentLabelById: Map<number, string>;
-  origenLabelById: Map<number, string>;
-}
-
 function getLatestLeadGanadoVendorMaps(rows: Array<{
   business_id: number | null;
-  id_tienda: number | null;
+  tienda_nombre_snapshot: string | null;
   vendedor_nombre_snapshot: string | null;
-}>) {
+}>, tiendaLabelById: Map<number, string>) {
   const vendedorSnapshotByLeadGanadoId = new Map<number, string>();
+  const latestLeadGanadoByTiendaNombre = new Map<string, { leadGanadoId: number; vendedorSnapshot: string }>();
   const latestLeadGanadoByTiendaId = new Map<number, { leadGanadoId: number; vendedorSnapshot: string }>();
 
   for (const row of rows) {
     const leadGanadoId = Number(row.business_id ?? 0);
-    const tiendaId = Number(row.id_tienda ?? 0);
+    const tiendaSnapshot = String(row.tienda_nombre_snapshot ?? '').trim();
+    const tiendaSnapshotKey = normalizeLookupKey(tiendaSnapshot);
     const vendedorSnapshot = String(row.vendedor_nombre_snapshot ?? '').trim();
 
     if (leadGanadoId > 0 && vendedorSnapshot) {
       vendedorSnapshotByLeadGanadoId.set(leadGanadoId, vendedorSnapshot);
     }
 
-    if (tiendaId > 0 && leadGanadoId > 0 && vendedorSnapshot && !latestLeadGanadoByTiendaId.has(tiendaId)) {
-      latestLeadGanadoByTiendaId.set(tiendaId, {
+    if (
+      tiendaSnapshotKey &&
+      leadGanadoId > 0 &&
+      vendedorSnapshot &&
+      !latestLeadGanadoByTiendaNombre.has(tiendaSnapshotKey)
+    ) {
+      latestLeadGanadoByTiendaNombre.set(tiendaSnapshotKey, {
         leadGanadoId,
         vendedorSnapshot,
       });
+    }
+  }
+
+  for (const [tiendaId, tiendaLabel] of tiendaLabelById.entries()) {
+    const tiendaKey = normalizeLookupKey(tiendaLabel);
+    const latest = latestLeadGanadoByTiendaNombre.get(tiendaKey);
+    if (latest) {
+      latestLeadGanadoByTiendaId.set(tiendaId, latest);
     }
   }
 
@@ -597,46 +601,29 @@ function toFullfilmentSnapshotLabel(value: unknown): string {
   return raw;
 }
 
-function toLeadGanadoSheetRow(record: LeadGanadoRecord, refs: LeadReferenceData): SheetRow {
+function toLeadGanadoSheetRow(record: LeadGanadoRecord): SheetRow {
   const tiendaFromSnapshot = String(record.tienda_nombre_snapshot ?? '').trim();
   const vendedorFromSnapshot = String(record.vendedor_nombre_snapshot ?? '').trim();
   const origenFromSnapshot = String(record.origen_snapshot ?? '').trim();
   const fullfilmentFromSnapshot = toFullfilmentSnapshotLabel(record.fullfilment_snapshot);
 
-  const tiendaFromId =
-    typeof record.id_tienda === 'number'
-      ? refs.tiendaLabelById.get(record.id_tienda) ?? `#${record.id_tienda}`
-      : '';
-  const vendedorFromId =
-    typeof record.id_vendedor === 'number'
-      ? ''
-      : '';
-  const fullfilmentFromId =
-    typeof record.id_fullfilment === 'number'
-      ? refs.fullfilmentLabelById.get(record.id_fullfilment) ?? `#${record.id_fullfilment}`
-      : '';
-  const origenFromId =
-    typeof record.id_origen === 'number'
-      ? refs.origenLabelById.get(record.id_origen) ?? `#${record.id_origen}`
-      : '';
-
   return {
     _id: record.stable_id,
     idLeadGanado: record.business_id,
-    Tienda: tiendaFromSnapshot || tiendaFromId,
-    Vendedor: vendedorFromSnapshot || vendedorFromId,
+    Tienda: tiendaFromSnapshot,
+    Vendedor: vendedorFromSnapshot,
     'Fecha ingreso lead': toDmyDisplayDate(record.fecha_ingreso_lead),
     'Fecha registro lead': toDmyDisplayDate(record.fecha_registro_lead),
     'Fecha Lead Ganado': toDmyDisplayDate(record.fecha_lead_ganado),
     'Dias Lead a Registro': String(record.dias_lead_a_registro ?? 0),
     'Dias Registro a Ganado': String(record.dias_registro_a_ganado ?? 0),
     'Dias lead a ganado': String(record.dias_lead_a_ganado ?? 0),
-    FullFilment: fullfilmentFromSnapshot || fullfilmentFromId,
+    FullFilment: fullfilmentFromSnapshot,
     'Lead ganado en periodo?': '',
     Notas: record.notas ?? '',
     Distrito: record.distrito ?? '',
     'Cantidad de envios': String(record.cantidad_envios ?? 0),
-    Origen: origenFromSnapshot || origenFromId,
+    Origen: origenFromSnapshot,
     'Anulados Fullfilment': formatCostForDisplay(record.anulados_fullfilment),
     'Ingreso anulados fullfilment': formatCostForDisplay(record.ingreso_anulados_fullfilment),
   };
@@ -673,29 +660,7 @@ function getTextValueFromRowData(rowData: Record<string, unknown>, config: BaseS
 }
 
 function triggerOutboxSyncBestEffort() {
-  if (import.meta.env.DEV && import.meta.env.VITE_ENABLE_OUTBOX_SYNC_IN_DEV !== 'true') {
-    return;
-  }
-
-  const now = Date.now();
-
-  // Evita disparar demasiados POST seguidos en operaciones encadenadas.
-  if (now - lastOutboxSyncTriggerAt < 1_500) {
-    return;
-  }
-
-  lastOutboxSyncTriggerAt = now;
-
-  void fetch('/api/sync-outbox', {
-    method: 'POST',
-    credentials: 'include',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({ limit: 50 }),
-  }).catch(() => {
-    // Silencioso por diseño: el cron sigue como red de seguridad.
-  });
+  // Google Sheets quedó desacoplado del flujo operativo.
 }
 
 async function requireSupabaseSession(force = false): Promise<void> {
@@ -732,19 +697,6 @@ async function requireSupabaseSession(force = false): Promise<void> {
   }
 
   cachedSupabaseSessionAvailable = true;
-}
-
-async function fetchSheetFromApi(name: string): Promise<SheetData> {
-  const response = await fetch(`/api/sheet?name=${encodeURIComponent(name)}`, {
-    credentials: 'include',
-  });
-
-  if (!response.ok) {
-    const errorData = await response.json().catch(() => ({}));
-    throw new Error(errorData.error || `No se pudieron cargar los datos de: ${name}`);
-  }
-
-  return response.json();
 }
 
 async function fetchBaseSheetFromSupabase(sheetName: string): Promise<SheetData> {
@@ -915,13 +867,18 @@ async function fetchEnvioReferenceData(): Promise<EnvioReferenceData> {
 
   const { data: leadsData, error: leadsError } = await supabase
     .from('leads_ganados')
-    .select('business_id,id_tienda,vendedor_nombre_snapshot')
+    .select('business_id,tienda_nombre_snapshot,vendedor_nombre_snapshot')
     .order('business_id', { ascending: false })
     .limit(20000);
 
   const { vendedorSnapshotByLeadGanadoId, latestLeadGanadoByTiendaId } =
     getLatestLeadGanadoVendorMaps(
-      (leadsData ?? []) as Array<{ business_id: number | null; id_tienda: number | null; vendedor_nombre_snapshot: string | null }>,
+      (leadsData ?? []) as Array<{
+        business_id: number | null;
+        tienda_nombre_snapshot: string | null;
+        vendedor_nombre_snapshot: string | null;
+      }>,
+      tiendaLabelById,
     );
 
   if (leadsError) {
@@ -956,13 +913,18 @@ async function fetchRecojoReferenceData(): Promise<RecojoReferenceData> {
 
   const { data: leadsData, error: leadsError } = await supabase
     .from('leads_ganados')
-    .select('business_id,id_tienda,vendedor_nombre_snapshot')
+    .select('business_id,tienda_nombre_snapshot,vendedor_nombre_snapshot')
     .order('business_id', { ascending: false })
     .limit(20000);
 
   const { vendedorSnapshotByLeadGanadoId, latestLeadGanadoByTiendaId } =
     getLatestLeadGanadoVendorMaps(
-      (leadsData ?? []) as Array<{ business_id: number | null; id_tienda: number | null; vendedor_nombre_snapshot: string | null }>,
+      (leadsData ?? []) as Array<{
+        business_id: number | null;
+        tienda_nombre_snapshot: string | null;
+        vendedor_nombre_snapshot: string | null;
+      }>,
+      tiendaLabelById,
     );
 
   if (leadsError) {
@@ -1030,34 +992,17 @@ async function fetchRecojosFromSupabase(): Promise<SheetData> {
   };
 }
 
-async function fetchLeadReferenceData(): Promise<LeadReferenceData> {
-  const [tiendaLabelById, fullfilmentLabelById, origenLabelById] = await Promise.all([
-    fetchReferenceMap('tiendas', ['business_id', 'id'], ['nombre']),
-    fetchReferenceMap('fullfilment', ['business_id', 'id'], ['es_fullfilment']),
-    fetchReferenceMap('origen', ['business_id', 'id'], ['opcion']),
-  ]);
-
-  return {
-    tiendaLabelById,
-    fullfilmentLabelById,
-    origenLabelById,
-  };
-}
-
 async function fetchLeadsGanadosFromSupabase(): Promise<SheetData> {
   if (!supabase) throw new Error('Supabase no está configurado');
 
   await requireSupabaseSession();
 
-  const [refs, leadsResponse] = await Promise.all([
-    fetchLeadReferenceData(),
-    supabase
-      .from('leads_ganados')
-      .select(
-        'stable_id,business_id,id_tienda,id_vendedor,fecha_ingreso_lead,fecha_registro_lead,fecha_lead_ganado,dias_lead_a_registro,dias_registro_a_ganado,dias_lead_a_ganado,id_fullfilment,notas,distrito,cantidad_envios,id_origen,anulados_fullfilment,ingreso_anulados_fullfilment,kommo_lead_id,tienda_nombre_snapshot,vendedor_nombre_snapshot,pipeline_id_snapshot,origen_snapshot,fullfilment_snapshot',
-      )
-      .order('business_id', { ascending: true }),
-  ]);
+  const leadsResponse = await supabase
+    .from('leads_ganados')
+    .select(
+      'stable_id,business_id,fecha_ingreso_lead,fecha_registro_lead,fecha_lead_ganado,dias_lead_a_registro,dias_registro_a_ganado,dias_lead_a_ganado,notas,distrito,cantidad_envios,anulados_fullfilment,ingreso_anulados_fullfilment,kommo_lead_id,tienda_nombre_snapshot,vendedor_nombre_snapshot,pipeline_id_snapshot,origen_snapshot,fullfilment_snapshot',
+    )
+    .order('business_id', { ascending: true });
 
   const { data, error } = leadsResponse;
   if (error) {
@@ -1066,7 +1011,7 @@ async function fetchLeadsGanadosFromSupabase(): Promise<SheetData> {
 
   return {
     columns: [...LEADS_GANADOS_COLUMNS],
-    rows: ((data ?? []) as LeadGanadoRecord[]).map((record) => toLeadGanadoSheetRow(record, refs)),
+    rows: ((data ?? []) as LeadGanadoRecord[]).map((record) => toLeadGanadoSheetRow(record)),
   };
 }
 
@@ -1101,7 +1046,7 @@ export async function fetchSheet(name: string): Promise<SheetData> {
     return data;
   }
 
-  return fetchSheetFromApi(name);
+  throw new Error(`La tabla ${name} no está habilitada en Supabase.`);
 }
 
 export function prefetchSheetData(queryClient: QueryClient, sheetName: string) {
@@ -1126,11 +1071,7 @@ export function useDestinoOptions(enabled: boolean) {
   return useQuery({
     queryKey: ['sheet-options', 'DESTINOS'],
     queryFn: async () => {
-      if (shouldUseSupabaseForSheet('DESTINOS')) {
-        return fetchBaseSheetFromSupabase('DESTINOS');
-      }
-
-      return fetchSheetFromApi('DESTINOS');
+      return fetchBaseSheetFromSupabase('DESTINOS');
     },
     enabled,
     staleTime: SHEET_QUERY_STALE_TIME_MS,
@@ -1527,16 +1468,6 @@ function findIdByLabelOrThrow(map: Map<number, string>, label: unknown, entityLa
   return found[0];
 }
 
-function findIdByLabelOptional(map: Map<number, string>, label: unknown): number | null {
-  const normalizedTarget = normalizeLookupKey(label);
-  if (!normalizedTarget) {
-    return null;
-  }
-
-  const found = Array.from(map.entries()).find(([, currentLabel]) => normalizeLookupKey(currentLabel) === normalizedTarget);
-  return found?.[0] ?? null;
-}
-
 function calculateEnvioDerivedValues(input: {
   idDestino: number;
   idResultado: number;
@@ -1804,19 +1735,23 @@ async function addLeadGanadoSupabase(rowData: Record<string, unknown>): Promise<
   if (!supabase) throw new Error('Supabase no está configurado');
   await requireSupabaseSession();
 
-  const refs = await fetchLeadReferenceData();
-
   const tiendaSnapshot = String(rowData.Tienda ?? '').trim();
   if (!tiendaSnapshot) {
     throw new Error('El campo Tienda es obligatorio');
   }
 
-  const idTienda = findIdByLabelOptional(refs.tiendaLabelById, tiendaSnapshot);
+  const fullfilmentLabel = String(rowData.FullFilment ?? '').trim();
+  const origenLabel = String(rowData.Origen ?? '').trim();
   const vendedorLabel = String(rowData.Vendedor ?? '').trim();
-  const idVendedor = null;
-  const idFullfilment = findIdByLabelOrThrow(refs.fullfilmentLabelById, rowData.FullFilment, 'FullFilment');
-  const idOrigen = findIdByLabelOrThrow(refs.origenLabelById, rowData.Origen, 'Origen');
   const distrito = normalizeDistritoValue(rowData.Distrito);
+
+  if (!fullfilmentLabel) {
+    throw new Error('El campo FullFilment es obligatorio');
+  }
+
+  if (!origenLabel) {
+    throw new Error('El campo Origen es obligatorio');
+  }
 
   const derived = calculateLeadDerivedValues({
     fechaIngresoLead: rowData['Fecha ingreso lead'],
@@ -1829,20 +1764,16 @@ async function addLeadGanadoSupabase(rowData: Record<string, unknown>): Promise<
   const { data, error } = await supabase
     .from('leads_ganados')
     .insert({
-      id_tienda: idTienda,
-      id_vendedor: idVendedor,
-      id_fullfilment: idFullfilment,
-      id_origen: idOrigen,
       tienda_nombre_snapshot: tiendaSnapshot,
       vendedor_nombre_snapshot: vendedorLabel || null,
-      origen_snapshot: String(rowData.Origen ?? '').trim() || null,
-      fullfilment_snapshot: normalizeLookupKey(rowData.FullFilment).includes('si') || normalizeLookupKey(rowData.FullFilment).includes('sí'),
+      origen_snapshot: origenLabel || null,
+      fullfilment_snapshot: normalizeLookupKey(fullfilmentLabel).includes('si') || normalizeLookupKey(fullfilmentLabel).includes('sí'),
       notas: String(rowData.Notas ?? '').trim() || null,
       distrito: distrito || null,
       ...derived,
     })
     .select(
-      'stable_id,business_id,id_tienda,id_vendedor,fecha_ingreso_lead,fecha_registro_lead,fecha_lead_ganado,dias_lead_a_registro,dias_registro_a_ganado,dias_lead_a_ganado,id_fullfilment,notas,distrito,cantidad_envios,id_origen,anulados_fullfilment,ingreso_anulados_fullfilment,kommo_lead_id,tienda_nombre_snapshot,vendedor_nombre_snapshot,pipeline_id_snapshot,origen_snapshot,fullfilment_snapshot',
+      'stable_id,business_id,fecha_ingreso_lead,fecha_registro_lead,fecha_lead_ganado,dias_lead_a_registro,dias_registro_a_ganado,dias_lead_a_ganado,notas,distrito,cantidad_envios,anulados_fullfilment,ingreso_anulados_fullfilment,kommo_lead_id,tienda_nombre_snapshot,vendedor_nombre_snapshot,pipeline_id_snapshot,origen_snapshot,fullfilment_snapshot',
     )
     .single();
 
@@ -1852,7 +1783,7 @@ async function addLeadGanadoSupabase(rowData: Record<string, unknown>): Promise<
 
   return {
     success: true,
-    row: toLeadGanadoSheetRow(data as LeadGanadoRecord, refs),
+    row: toLeadGanadoSheetRow(data as LeadGanadoRecord),
   };
 }
 
@@ -1860,19 +1791,23 @@ async function updateLeadGanadoSupabase(rowData: UpdateMutationPayload): Promise
   if (!supabase) throw new Error('Supabase no está configurado');
   await requireSupabaseSession();
 
-  const refs = await fetchLeadReferenceData();
-
   const tiendaSnapshot = String(rowData.Tienda ?? '').trim();
   if (!tiendaSnapshot) {
     throw new Error('El campo Tienda es obligatorio');
   }
 
-  const idTienda = findIdByLabelOptional(refs.tiendaLabelById, tiendaSnapshot);
+  const fullfilmentLabel = String(rowData.FullFilment ?? '').trim();
+  const origenLabel = String(rowData.Origen ?? '').trim();
   const vendedorLabel = String(rowData.Vendedor ?? '').trim();
-  const idVendedor = null;
-  const idFullfilment = findIdByLabelOrThrow(refs.fullfilmentLabelById, rowData.FullFilment, 'FullFilment');
-  const idOrigen = findIdByLabelOrThrow(refs.origenLabelById, rowData.Origen, 'Origen');
   const distrito = normalizeDistritoValue(rowData.Distrito);
+
+  if (!fullfilmentLabel) {
+    throw new Error('El campo FullFilment es obligatorio');
+  }
+
+  if (!origenLabel) {
+    throw new Error('El campo Origen es obligatorio');
+  }
 
   const derived = calculateLeadDerivedValues({
     fechaIngresoLead: rowData['Fecha ingreso lead'],
@@ -1885,21 +1820,17 @@ async function updateLeadGanadoSupabase(rowData: UpdateMutationPayload): Promise
   const { data, error } = await supabase
     .from('leads_ganados')
     .update({
-      id_tienda: idTienda,
-      id_vendedor: idVendedor,
-      id_fullfilment: idFullfilment,
-      id_origen: idOrigen,
       tienda_nombre_snapshot: tiendaSnapshot,
       vendedor_nombre_snapshot: vendedorLabel || null,
-      origen_snapshot: String(rowData.Origen ?? '').trim() || null,
-      fullfilment_snapshot: normalizeLookupKey(rowData.FullFilment).includes('si') || normalizeLookupKey(rowData.FullFilment).includes('sí'),
+      origen_snapshot: origenLabel || null,
+      fullfilment_snapshot: normalizeLookupKey(fullfilmentLabel).includes('si') || normalizeLookupKey(fullfilmentLabel).includes('sí'),
       notas: String(rowData.Notas ?? '').trim() || null,
       distrito: distrito || null,
       ...derived,
     })
     .eq('stable_id', rowData._id)
     .select(
-      'stable_id,business_id,id_tienda,id_vendedor,fecha_ingreso_lead,fecha_registro_lead,fecha_lead_ganado,dias_lead_a_registro,dias_registro_a_ganado,dias_lead_a_ganado,id_fullfilment,notas,distrito,cantidad_envios,id_origen,anulados_fullfilment,ingreso_anulados_fullfilment,kommo_lead_id,tienda_nombre_snapshot,vendedor_nombre_snapshot,pipeline_id_snapshot,origen_snapshot,fullfilment_snapshot',
+      'stable_id,business_id,fecha_ingreso_lead,fecha_registro_lead,fecha_lead_ganado,dias_lead_a_registro,dias_registro_a_ganado,dias_lead_a_ganado,notas,distrito,cantidad_envios,anulados_fullfilment,ingreso_anulados_fullfilment,kommo_lead_id,tienda_nombre_snapshot,vendedor_nombre_snapshot,pipeline_id_snapshot,origen_snapshot,fullfilment_snapshot',
     )
     .single();
 
@@ -1909,7 +1840,7 @@ async function updateLeadGanadoSupabase(rowData: UpdateMutationPayload): Promise
 
   return {
     success: true,
-    row: toLeadGanadoSheetRow(data as LeadGanadoRecord, refs),
+    row: toLeadGanadoSheetRow(data as LeadGanadoRecord),
   };
 }
 
