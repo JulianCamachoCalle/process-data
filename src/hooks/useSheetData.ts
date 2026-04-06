@@ -235,11 +235,11 @@ function normalizeDistritoValue(raw: unknown): string {
   }
 
   const normalized = DISTRITO_LOOKUP.get(normalizeText(value));
-  if (!normalized) {
-    throw new Error(`Distrito inválido: "${value}"`);
+  if (normalized) {
+    return normalized;
   }
 
-  return normalized;
+  return value;
 }
 
 let lastSupabaseSessionCheckAt = 0;
@@ -410,7 +410,7 @@ function toEnvioSheetRow(record: EnvioRecord, refs: EnvioReferenceData): SheetRo
       return explicitSnapshot;
     }
 
-    return record.id_vendedor ? `#${record.id_vendedor}` : '';
+    return '';
   })();
   const tipoPunto = refs.tipoPuntoLabelById.get(record.id_tipo_punto) ?? `#${record.id_tipo_punto}`;
   const fullfilment = refs.fullfilmentLabelById.get(record.id_fullfilment) ?? `#${record.id_fullfilment}`;
@@ -529,7 +529,7 @@ function toRecojoSheetRow(record: RecojoRecord, refs: RecojoReferenceData): Shee
       return explicitSnapshot;
     }
 
-    return record.id_vendedor ? `#${record.id_vendedor}` : '';
+    return '';
   })();
 
   return {
@@ -609,7 +609,7 @@ function toLeadGanadoSheetRow(record: LeadGanadoRecord, refs: LeadReferenceData)
       : '';
   const vendedorFromId =
     typeof record.id_vendedor === 'number'
-      ? `#${record.id_vendedor}`
+      ? ''
       : '';
   const fullfilmentFromId =
     typeof record.id_fullfilment === 'number'
@@ -988,7 +988,7 @@ async function fetchEnviosFromSupabase(): Promise<SheetData> {
     supabase
       .from('envios')
       .select(
-        'stable_id,business_id,mes,id_tienda,id_destino,id_resultado,cobro_entrega,pago_moto,excedente_pagado_moto,ingreso_total_fila,costo_total_fila,observaciones,id_vendedor,id_tipo_punto,id_fullfilment,extra_punto_moto,extra_punto_empresa',
+        'stable_id,business_id,mes,id_tienda,id_lead_ganado,id_destino,id_resultado,cobro_entrega,pago_moto,excedente_pagado_moto,ingreso_total_fila,costo_total_fila,observaciones,id_vendedor,id_tipo_punto,id_fullfilment,extra_punto_moto,extra_punto_empresa',
       )
       .order('business_id', { ascending: true }),
   ]);
@@ -1527,6 +1527,16 @@ function findIdByLabelOrThrow(map: Map<number, string>, label: unknown, entityLa
   return found[0];
 }
 
+function findIdByLabelOptional(map: Map<number, string>, label: unknown): number | null {
+  const normalizedTarget = normalizeLookupKey(label);
+  if (!normalizedTarget) {
+    return null;
+  }
+
+  const found = Array.from(map.entries()).find(([, currentLabel]) => normalizeLookupKey(currentLabel) === normalizedTarget);
+  return found?.[0] ?? null;
+}
+
 function calculateEnvioDerivedValues(input: {
   idDestino: number;
   idResultado: number;
@@ -1571,6 +1581,7 @@ async function addEnvioSupabase(rowData: Record<string, unknown>): Promise<Mutat
   const refs = await fetchEnvioReferenceData();
 
   const idTienda = findIdByLabelOrThrow(refs.tiendaLabelById, rowData.Tienda, 'Tienda');
+  const idLeadGanado = refs.latestLeadGanadoByTiendaId.get(idTienda)?.leadGanadoId ?? null;
   const idDestino = findIdByLabelOrThrow(refs.destinoLabelById, rowData.Destino, 'Destino');
   const idResultado = findIdByLabelOrThrow(refs.resultadoLabelById, rowData.Resultado, 'Resultado');
   const idTipoPunto = findIdByLabelOrThrow(refs.tipoPuntoLabelById, rowData['Tipo Punto'], 'Tipo Punto');
@@ -1591,6 +1602,7 @@ async function addEnvioSupabase(rowData: Record<string, unknown>): Promise<Mutat
     .insert({
       mes: formatMonthForStorage(rowData.Mes),
       id_tienda: idTienda,
+      id_lead_ganado: idLeadGanado,
       id_destino: idDestino,
       id_resultado: idResultado,
       id_vendedor: idVendedor,
@@ -1600,7 +1612,7 @@ async function addEnvioSupabase(rowData: Record<string, unknown>): Promise<Mutat
       ...derived,
     })
     .select(
-      'stable_id,business_id,mes,id_tienda,id_destino,id_resultado,cobro_entrega,pago_moto,excedente_pagado_moto,ingreso_total_fila,costo_total_fila,observaciones,id_vendedor,id_tipo_punto,id_fullfilment,extra_punto_moto,extra_punto_empresa',
+      'stable_id,business_id,mes,id_tienda,id_lead_ganado,id_destino,id_resultado,cobro_entrega,pago_moto,excedente_pagado_moto,ingreso_total_fila,costo_total_fila,observaciones,id_vendedor,id_tipo_punto,id_fullfilment,extra_punto_moto,extra_punto_empresa',
     )
     .single();
 
@@ -1621,6 +1633,7 @@ async function updateEnvioSupabase(rowData: UpdateMutationPayload): Promise<Muta
   const refs = await fetchEnvioReferenceData();
 
   const idTienda = findIdByLabelOrThrow(refs.tiendaLabelById, rowData.Tienda, 'Tienda');
+  const idLeadGanado = refs.latestLeadGanadoByTiendaId.get(idTienda)?.leadGanadoId ?? null;
   const idDestino = findIdByLabelOrThrow(refs.destinoLabelById, rowData.Destino, 'Destino');
   const idResultado = findIdByLabelOrThrow(refs.resultadoLabelById, rowData.Resultado, 'Resultado');
   const idTipoPunto = findIdByLabelOrThrow(refs.tipoPuntoLabelById, rowData['Tipo Punto'], 'Tipo Punto');
@@ -1641,6 +1654,7 @@ async function updateEnvioSupabase(rowData: UpdateMutationPayload): Promise<Muta
     .update({
       mes: formatMonthForStorage(rowData.Mes),
       id_tienda: idTienda,
+      id_lead_ganado: idLeadGanado,
       id_destino: idDestino,
       id_resultado: idResultado,
       id_vendedor: idVendedor,
@@ -1651,7 +1665,7 @@ async function updateEnvioSupabase(rowData: UpdateMutationPayload): Promise<Muta
     })
     .eq('stable_id', rowData._id)
     .select(
-      'stable_id,business_id,mes,id_tienda,id_destino,id_resultado,cobro_entrega,pago_moto,excedente_pagado_moto,ingreso_total_fila,costo_total_fila,observaciones,id_vendedor,id_tipo_punto,id_fullfilment,extra_punto_moto,extra_punto_empresa',
+      'stable_id,business_id,mes,id_tienda,id_lead_ganado,id_destino,id_resultado,cobro_entrega,pago_moto,excedente_pagado_moto,ingreso_total_fila,costo_total_fila,observaciones,id_vendedor,id_tipo_punto,id_fullfilment,extra_punto_moto,extra_punto_empresa',
     )
     .single();
 
@@ -1792,7 +1806,12 @@ async function addLeadGanadoSupabase(rowData: Record<string, unknown>): Promise<
 
   const refs = await fetchLeadReferenceData();
 
-  const idTienda = findIdByLabelOrThrow(refs.tiendaLabelById, rowData.Tienda, 'Tienda');
+  const tiendaSnapshot = String(rowData.Tienda ?? '').trim();
+  if (!tiendaSnapshot) {
+    throw new Error('El campo Tienda es obligatorio');
+  }
+
+  const idTienda = findIdByLabelOptional(refs.tiendaLabelById, tiendaSnapshot);
   const vendedorLabel = String(rowData.Vendedor ?? '').trim();
   const idVendedor = null;
   const idFullfilment = findIdByLabelOrThrow(refs.fullfilmentLabelById, rowData.FullFilment, 'FullFilment');
@@ -1814,7 +1833,7 @@ async function addLeadGanadoSupabase(rowData: Record<string, unknown>): Promise<
       id_vendedor: idVendedor,
       id_fullfilment: idFullfilment,
       id_origen: idOrigen,
-      tienda_nombre_snapshot: String(rowData.Tienda ?? '').trim() || null,
+      tienda_nombre_snapshot: tiendaSnapshot,
       vendedor_nombre_snapshot: vendedorLabel || null,
       origen_snapshot: String(rowData.Origen ?? '').trim() || null,
       fullfilment_snapshot: normalizeLookupKey(rowData.FullFilment).includes('si') || normalizeLookupKey(rowData.FullFilment).includes('sí'),
@@ -1843,7 +1862,12 @@ async function updateLeadGanadoSupabase(rowData: UpdateMutationPayload): Promise
 
   const refs = await fetchLeadReferenceData();
 
-  const idTienda = findIdByLabelOrThrow(refs.tiendaLabelById, rowData.Tienda, 'Tienda');
+  const tiendaSnapshot = String(rowData.Tienda ?? '').trim();
+  if (!tiendaSnapshot) {
+    throw new Error('El campo Tienda es obligatorio');
+  }
+
+  const idTienda = findIdByLabelOptional(refs.tiendaLabelById, tiendaSnapshot);
   const vendedorLabel = String(rowData.Vendedor ?? '').trim();
   const idVendedor = null;
   const idFullfilment = findIdByLabelOrThrow(refs.fullfilmentLabelById, rowData.FullFilment, 'FullFilment');
@@ -1865,7 +1889,7 @@ async function updateLeadGanadoSupabase(rowData: UpdateMutationPayload): Promise
       id_vendedor: idVendedor,
       id_fullfilment: idFullfilment,
       id_origen: idOrigen,
-      tienda_nombre_snapshot: String(rowData.Tienda ?? '').trim() || null,
+      tienda_nombre_snapshot: tiendaSnapshot,
       vendedor_nombre_snapshot: vendedorLabel || null,
       origen_snapshot: String(rowData.Origen ?? '').trim() || null,
       fullfilment_snapshot: normalizeLookupKey(rowData.FullFilment).includes('si') || normalizeLookupKey(rowData.FullFilment).includes('sí'),

@@ -9,7 +9,6 @@ import {
   useRecojoFormOptions,
   useRecojoAutoPreview,
   useLeadGanadoAutoPreview,
-  useDistritoOptions,
 } from '../hooks/useSheetData';
 import type { SheetRow } from '../hooks/useSheetData';
 import { DynamicTable } from './DynamicTable';
@@ -33,10 +32,8 @@ export function SheetView({ sheetName }: SheetViewProps) {
 
   const { data: envioFormOptions } = useEnvioFormOptions(sheetName === 'ENVIOS');
   const { data: recojoFormOptions } = useRecojoFormOptions(sheetName === 'RECOJOS');
-  const { data: leadsTiendasData } = useSheetData(sheetName === 'LEADS GANADOS' ? 'TIENDAS' : '');
   const { data: leadsFullfilmentData } = useSheetData(sheetName === 'LEADS GANADOS' ? 'FULLFILMENT' : '');
   const { data: leadsOrigenData } = useSheetData(sheetName === 'LEADS GANADOS' ? 'ORIGEN' : '');
-  const { data: distritoOptions } = useDistritoOptions(sheetName === 'LEADS GANADOS');
   const addMutation = useAddRow(sheetName);
   const updateMutation = useUpdateRow(sheetName);
 
@@ -88,10 +85,8 @@ export function SheetView({ sheetName }: SheetViewProps) {
           }
         : sheetName === 'LEADS GANADOS'
           ? {
-              Tienda: Array.from(new Set((leadsTiendasData?.rows ?? []).map((row) => String(row.Nombre ?? '').trim()).filter(Boolean))),
               FullFilment: Array.from(new Set((leadsFullfilmentData?.rows ?? []).map((row) => String(row['¿Es FullFilment?'] ?? '').trim()).filter(Boolean))),
               Origen: Array.from(new Set((leadsOrigenData?.rows ?? []).map((row) => String(row.Opcion ?? '').trim()).filter(Boolean))),
-              Distrito: distritoOptions ?? [],
             }
         : sheetName === 'RECOJOS'
           ? {
@@ -309,7 +304,7 @@ export function SheetView({ sheetName }: SheetViewProps) {
     }
 
     if (sheetName === 'LEADS GANADOS') {
-      const requiredSelects = ['Tienda', 'FullFilment', 'Origen', 'Distrito'];
+      const requiredSelects = ['Tienda', 'FullFilment', 'Origen'];
       const missingField = requiredSelects.find((field) => !String(normalizedFormData[field] ?? '').trim());
 
       if (missingField) {
