@@ -49,7 +49,7 @@ export function Sidebar({
         </div>
 
         {groupSheets.map((sheet) => {
-          const path = `/sheet/${encodeURIComponent(sheet)}`;
+          const path = `/tabla/${encodeURIComponent(sheet)}`;
           const isActive = location.pathname === path;
 
           return (
