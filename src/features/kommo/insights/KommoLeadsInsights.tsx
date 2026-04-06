@@ -1,8 +1,6 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
-import html2canvas from 'html2canvas';
-import { jsPDF } from 'jspdf';
 import {
   Activity,
   BarChart3,
@@ -101,114 +99,6 @@ type LeadsInsightsPayload = {
 
 const COLORS = ['#dc2626', '#ef4444', '#f97316', '#f59e0b', '#8b5cf6', '#14b8a6', '#22c55e'];
 
-const EXPORT_COLOR_PROPERTIES = [
-  'color',
-  'background-color',
-  'border-top-color',
-  'border-right-color',
-  'border-bottom-color',
-  'border-left-color',
-  'outline-color',
-  'text-decoration-color',
-  'fill',
-  'stroke',
-  'stop-color',
-] as const;
-
-const EXPORT_LAYOUT_PROPERTIES = [
-  'background-image',
-  'border-top-width',
-  'border-right-width',
-  'border-bottom-width',
-  'border-left-width',
-  'border-top-style',
-  'border-right-style',
-  'border-bottom-style',
-  'border-left-style',
-  'border-top-left-radius',
-  'border-top-right-radius',
-  'border-bottom-right-radius',
-  'border-bottom-left-radius',
-  'box-shadow',
-  'text-shadow',
-  'opacity',
-] as const;
-
-function hasUnsupportedColorFunction(value: string) {
-  return /oklch\s*\(|oklab\s*\(/i.test(value);
-}
-
-function applyExportSafeStyles(sourceElement: Element, targetElement: Element) {
-  if (!(targetElement instanceof HTMLElement || targetElement instanceof SVGElement)) return;
-
-  const computedStyle = window.getComputedStyle(sourceElement);
-
-  for (const property of EXPORT_COLOR_PROPERTIES) {
-    const value = computedStyle.getPropertyValue(property);
-    if (!value || hasUnsupportedColorFunction(value)) continue;
-    targetElement.style.setProperty(property, value);
-  }
-
-  for (const property of EXPORT_LAYOUT_PROPERTIES) {
-    const value = computedStyle.getPropertyValue(property);
-    if (!value) continue;
-
-    if (property === 'background-image' && hasUnsupportedColorFunction(value)) {
-      targetElement.style.setProperty(property, 'none');
-      continue;
-    }
-
-    if ((property === 'box-shadow' || property === 'text-shadow') && hasUnsupportedColorFunction(value)) {
-      targetElement.style.setProperty(property, 'none');
-      continue;
-    }
-
-    targetElement.style.setProperty(property, value);
-  }
-
-  targetElement.style.setProperty('transition', 'none');
-  targetElement.style.setProperty('animation', 'none');
-}
-
-function createSafeExportClone(sourceNode: HTMLDivElement) {
-  const host = document.createElement('div');
-  host.setAttribute('aria-hidden', 'true');
-  host.style.position = 'fixed';
-  host.style.left = '-100000px';
-  host.style.top = '0';
-  host.style.width = `${sourceNode.scrollWidth}px`;
-  host.style.pointerEvents = 'none';
-  host.style.opacity = '1';
-  host.style.zIndex = '-1';
-  host.style.background = '#ffffff';
-
-  const clone = sourceNode.cloneNode(true) as HTMLDivElement;
-  clone.style.width = `${sourceNode.scrollWidth}px`;
-  clone.style.maxWidth = 'none';
-  clone.style.background = '#ffffff';
-
-  const sourceElements = [sourceNode, ...Array.from(sourceNode.querySelectorAll('*'))];
-  const cloneElements = [clone, ...Array.from(clone.querySelectorAll('*'))];
-
-  for (let index = 0; index < sourceElements.length; index += 1) {
-    const sourceElement = sourceElements[index];
-    const cloneElement = cloneElements[index];
-    if (!sourceElement || !cloneElement) continue;
-    applyExportSafeStyles(sourceElement, cloneElement);
-  }
-
-  host.appendChild(clone);
-  document.body.appendChild(host);
-
-  return {
-    host,
-    clone,
-    cleanup: () => {
-      host.remove();
-    },
-  };
-}
-
 function formatNumber(value: number) {
   return new Intl.NumberFormat('es-PE').format(value);
 }
@@ -272,6 +162,277 @@ function truncateLabel(value: string, maxLength = 24) {
   return `${value.slice(0, maxLength - 1)}…`;
 }
 
+function escapeHtml(value: string) {
+  return value
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#39;');
+}
+
+function formatPercent(value: number | null) {
+  return value === null ? 'N/D' : `${value}%`;
+}
+
+function renderHorizontalBarChartSvg(
+  items: Array<{ label: string; value: number; color?: string }>,
+  options?: { width?: number; rowHeight?: number; valueFormatter?: (value: number) => string },
+) {
+  if (items.length === 0) {
+    return '<p class="export-empty">Sin datos disponibles.</p>';
+  }
+
+  const width = options?.width ?? 720;
+  const rowHeight = options?.rowHeight ?? 32;
+  const leftPadding = 220;
+  const rightPadding = 80;
+  const topPadding = 24;
+  const bottomPadding = 16;
+  const height = topPadding + bottomPadding + items.length * rowHeight;
+  const maxValue = Math.max(...items.map((item) => item.value), 1);
+  const barWidth = width - leftPadding - rightPadding;
+  const valueFormatter = options?.valueFormatter ?? ((value: number) => formatNumber(value));
+
+  const rows = items.map((item, index) => {
+    const y = topPadding + index * rowHeight;
+    const barLength = Math.max(8, (item.value / maxValue) * barWidth);
+    const label = escapeHtml(truncateLabel(item.label, 30));
+    const value = escapeHtml(valueFormatter(item.value));
+    const color = item.color ?? COLORS[index % COLORS.length] ?? '#dc2626';
+
+    return `
+      <text x="8" y="${y + 14}" font-size="12" fill="#334155">${label}</text>
+      <rect x="${leftPadding}" y="${y}" width="${barWidth}" height="14" rx="7" fill="#e2e8f0" />
+      <rect x="${leftPadding}" y="${y}" width="${barLength}" height="14" rx="7" fill="${color}" />
+      <text x="${leftPadding + barWidth + 8}" y="${y + 12}" font-size="12" fill="#0f172a">${value}</text>
+    `;
+  }).join('');
+
+  return `
+    <svg viewBox="0 0 ${width} ${height}" role="img" aria-label="Gráfico de barras" class="export-chart-svg">
+      ${rows}
+    </svg>
+  `;
+}
+
+function renderLineChartSvg(items: HourlyIncomingInsight[]) {
+  if (items.length === 0) {
+    return '<p class="export-empty">Sin datos disponibles.</p>';
+  }
+
+  const width = 720;
+  const height = 260;
+  const paddingX = 48;
+  const paddingY = 28;
+  const maxValue = Math.max(...items.map((item) => item.total_incoming), 1);
+  const usableWidth = width - paddingX * 2;
+  const usableHeight = height - paddingY * 2;
+  const stepX = items.length > 1 ? usableWidth / (items.length - 1) : 0;
+
+  const points = items.map((item, index) => {
+    const x = paddingX + stepX * index;
+    const y = height - paddingY - (item.total_incoming / maxValue) * usableHeight;
+    return { x, y, item };
+  });
+
+  const polyline = points.map((point) => `${point.x},${point.y}`).join(' ');
+  const labels = points.map((point) => `
+    <circle cx="${point.x}" cy="${point.y}" r="3.5" fill="#dc2626" />
+    <text x="${point.x}" y="${height - 8}" text-anchor="middle" font-size="11" fill="#475569">${escapeHtml(formatHour(point.item.hour))}</text>
+  `).join('');
+
+  return `
+    <svg viewBox="0 0 ${width} ${height}" role="img" aria-label="Gráfico de línea" class="export-chart-svg">
+      <line x1="${paddingX}" y1="${height - paddingY}" x2="${width - paddingX}" y2="${height - paddingY}" stroke="#cbd5e1" stroke-width="1" />
+      <line x1="${paddingX}" y1="${paddingY}" x2="${paddingX}" y2="${height - paddingY}" stroke="#cbd5e1" stroke-width="1" />
+      <polyline fill="none" stroke="#dc2626" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" points="${polyline}" />
+      ${labels}
+      <text x="${paddingX}" y="16" font-size="12" fill="#475569">Máximo: ${escapeHtml(formatNumber(maxValue))}</text>
+    </svg>
+  `;
+}
+
+function renderTable(headers: string[], rows: string[][]) {
+  if (rows.length === 0) {
+    return '<p class="export-empty">Sin datos disponibles.</p>';
+  }
+
+  const headerHtml = headers.map((header) => `<th>${escapeHtml(header)}</th>`).join('');
+  const rowsHtml = rows.map((row) => `<tr>${row.map((cell) => `<td>${escapeHtml(cell)}</td>`).join('')}</tr>`).join('');
+
+  return `<table><thead><tr>${headerHtml}</tr></thead><tbody>${rowsHtml}</tbody></table>`;
+}
+
+function buildExportDocument({
+  data,
+  generatedAt,
+  appliedRangeLabel,
+  selectedPipelineA,
+  selectedPipelineB,
+  pipelineComparisonChartData,
+  statusesByNameForPie,
+}: {
+  data: LeadsInsightsPayload;
+  generatedAt: string;
+  appliedRangeLabel: string;
+  selectedPipelineA: LeadsInsightsPayload['pipelinePerformance'][number] | null;
+  selectedPipelineB: LeadsInsightsPayload['pipelinePerformance'][number] | null;
+  pipelineComparisonChartData: Array<{ metric: string; pipelineA: number; pipelineB: number }>;
+  statusesByNameForPie: StatusByNameInsight[];
+}) {
+  const summaryCards = [
+    ['Leads totales', formatNumber(data.summary.total_leads)],
+    ['Leads abiertos', formatNumber(data.summary.total_open)],
+    ['Leads cerrados', formatNumber(data.summary.total_closed)],
+    ['Ticket promedio', formatCurrency(data.summary.avg_price)],
+  ].map(([label, value]) => `
+    <article class="kpi-card">
+      <p class="kpi-label">${escapeHtml(label)}</p>
+      <p class="kpi-value">${escapeHtml(value)}</p>
+    </article>
+  `).join('');
+
+  const comparisonSvg = selectedPipelineA && selectedPipelineB
+    ? renderHorizontalBarChartSvg(
+        pipelineComparisonChartData.flatMap((item) => [
+          { label: `${item.metric} — ${selectedPipelineA.pipeline_name}`, value: item.pipelineA, color: '#dc2626' },
+          { label: `${item.metric} — ${selectedPipelineB.pipeline_name}`, value: item.pipelineB, color: '#f97316' },
+        ]),
+        { rowHeight: 26 },
+      )
+    : '<p class="export-empty">No hay suficientes pipelines para comparar.</p>';
+
+  const pipelinesSvg = renderHorizontalBarChartSvg(
+    data.pipelines.slice(0, 8).map((pipeline, index) => ({
+      label: pipeline.pipeline_name,
+      value: pipeline.total_leads,
+      color: COLORS[index % COLORS.length],
+    })),
+  );
+
+  return `
+    <!doctype html>
+    <html lang="es">
+      <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>Leads Insights PDF</title>
+        <style>
+          :root { color-scheme: light; }
+          * { box-sizing: border-box; }
+          body { margin: 0; font-family: Inter, Arial, sans-serif; color: #0f172a; background: #f8fafc; }
+          .page { max-width: 1120px; margin: 0 auto; padding: 32px 28px 40px; }
+          .hero, .panel, .chart-panel { background: #ffffff; border: 1px solid #e2e8f0; border-radius: 20px; }
+          .hero, .panel { padding: 24px; }
+          .hero h1 { margin: 0; font-size: 28px; }
+          .hero p { margin: 8px 0 0; color: #475569; }
+          .section-title { margin: 0 0 16px; font-size: 16px; font-weight: 700; }
+          .kpi-grid, .panel-grid, .chart-grid { display: grid; gap: 16px; }
+          .kpi-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); margin-top: 16px; }
+          .panel-grid, .chart-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); margin-top: 16px; }
+          .kpi-card { border: 1px solid #e2e8f0; border-radius: 16px; padding: 18px; background: #fff; }
+          .kpi-label { margin: 0; font-size: 12px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: #64748b; }
+          .kpi-value { margin: 8px 0 0; font-size: 24px; font-weight: 800; }
+          .list { margin: 0; padding-left: 18px; }
+          .list li { margin: 0 0 10px; }
+          .chart-panel { padding: 20px; break-inside: avoid; }
+          .export-chart-svg { width: 100%; height: auto; display: block; }
+          .export-empty { margin: 0; color: #64748b; }
+          table { width: 100%; border-collapse: collapse; font-size: 13px; }
+          th, td { border: 1px solid #e2e8f0; padding: 10px 12px; text-align: left; vertical-align: top; }
+          th { background: #f8fafc; color: #334155; }
+          .stack { display: grid; gap: 16px; margin-top: 16px; }
+          @page { size: A4 landscape; margin: 12mm; }
+          @media print {
+            body { background: #ffffff; }
+            .page { max-width: none; padding: 0; }
+            .hero, .panel, .chart-panel { box-shadow: none; }
+          }
+        </style>
+      </head>
+      <body>
+        <main class="page">
+          <section class="hero">
+            <h1>Leads Insights — Reporte PDF</h1>
+            <p>Rango aplicado: ${escapeHtml(appliedRangeLabel)}</p>
+            <p>Generado: ${escapeHtml(generatedAt)}</p>
+            <p>Zona horaria de entrada: ${escapeHtml(data.timezone ?? 'America/Lima')}</p>
+            <div class="kpi-grid">${summaryCards}</div>
+          </section>
+
+          <section class="panel-grid">
+            <section class="panel">
+              <h2 class="section-title">Insights ejecutivos</h2>
+              <ul class="list">
+                <li>Personal top: <strong>${escapeHtml(data.summary.top_pipeline?.pipeline_name ?? 'N/D')}</strong></li>
+                <li>Hora pico incoming: <strong>${escapeHtml(data.insights.busiest_hour ? formatHour(data.insights.busiest_hour.hour) : 'N/D')}</strong></li>
+                <li>Estado más frecuente: <strong>${escapeHtml(data.insights.top_status?.status_name ?? 'N/D')}</strong></li>
+                <li>Win rate sobre cerrados: <strong>${escapeHtml(formatPercent(data.insights.won_rate_over_closed))}</strong></li>
+                <li>Leads sin pipeline: <strong>${escapeHtml(formatNumber(data.insights.orphan_pipeline_leads))}</strong></li>
+              </ul>
+            </section>
+            <section class="panel">
+              <h2 class="section-title">Top personal</h2>
+              ${renderTable(
+                ['Personal', 'Leads'],
+                data.owners.slice(0, 5).map((owner) => [owner.responsible_user_name, formatNumber(owner.total_leads)]),
+              )}
+            </section>
+          </section>
+
+          <section class="chart-grid">
+            <section class="chart-panel">
+              <h2 class="section-title">Comparación de personal</h2>
+              ${comparisonSvg}
+            </section>
+            <section class="chart-panel">
+              <h2 class="section-title">Leads según personal</h2>
+              ${pipelinesSvg}
+            </section>
+            <section class="chart-panel">
+              <h2 class="section-title">Horas con más leads entrantes</h2>
+              ${renderLineChartSvg(data.hourlyIncoming)}
+            </section>
+            <section class="chart-panel">
+              <h2 class="section-title">Leads según estado</h2>
+              ${renderTable(
+                ['Estado', 'Leads'],
+                statusesByNameForPie.map((status) => [status.status_name, formatNumber(status.total_leads)]),
+              )}
+            </section>
+          </section>
+
+          <section class="stack">
+            <section class="panel">
+              <h2 class="section-title">Performance por personal</h2>
+              ${renderTable(
+                ['Personal', 'Total', 'Abiertos', 'Cerrados', 'Ganados', 'Perdidos', 'Ticket promedio'],
+                data.pipelinePerformance.map((pipeline) => [
+                  pipeline.pipeline_name,
+                  formatNumber(pipeline.total_leads),
+                  formatNumber(pipeline.open_leads),
+                  formatNumber(pipeline.closed_leads),
+                  formatNumber(pipeline.won_leads),
+                  formatNumber(pipeline.lost_leads),
+                  formatCurrency(pipeline.avg_price),
+                ]),
+              )}
+            </section>
+            <section class="panel">
+              <h2 class="section-title">Estados por personal</h2>
+              ${renderTable(
+                ['Personal', 'Estado', 'Leads'],
+                data.statuses.slice(0, 24).map((status) => [status.pipeline_name, status.status_name, formatNumber(status.total_leads)]),
+              )}
+            </section>
+          </section>
+        </main>
+      </body>
+    </html>
+  `;
+}
+
 export function KommoLeadsInsights() {
   const [draftStartDate, setDraftStartDate] = useState<string | null>(null);
   const [draftEndDate, setDraftEndDate] = useState<string | null>(null);
@@ -279,9 +440,7 @@ export function KommoLeadsInsights() {
   const [appliedEndDate, setAppliedEndDate] = useState<string | null>(null);
   const [pipelineAKey, setPipelineAKey] = useState<string>('');
   const [pipelineBKey, setPipelineBKey] = useState<string>('');
-  const [exportTimestamp, setExportTimestamp] = useState<string>('');
   const [isExportingPdf, setIsExportingPdf] = useState(false);
-  const exportContentRef = useRef<HTMLDivElement | null>(null);
 
   const insightsQuery = useQuery({
     queryKey: ['kommo-leads-insights', appliedStartDate, appliedEndDate],
@@ -415,7 +574,13 @@ export function KommoLeadsInsights() {
   };
 
   const handleExportPdf = useCallback(async () => {
-    if (!exportContentRef.current || isExportingPdf) return;
+    if (isExportingPdf) return;
+
+    const currentData = insightsQuery.data;
+    if (!currentData || currentData.success === false) return;
+
+    const currentAppliedRangeLabel = `${currentData.filters.start_date ?? 'sin inicio'} — ${currentData.filters.end_date ?? 'sin fin'}`;
+    const currentStatusesByNameForPie = (currentData.statusesByName ?? []).slice(0, 8);
 
     const generatedAt = new Intl.DateTimeFormat('es-PE', {
       dateStyle: 'medium',
@@ -423,78 +588,52 @@ export function KommoLeadsInsights() {
     }).format(new Date());
 
     setIsExportingPdf(true);
-    setExportTimestamp(generatedAt);
 
     try {
-      await new Promise<void>((resolve) => {
-        window.requestAnimationFrame(() => {
-          window.requestAnimationFrame(() => resolve());
-        });
-      });
-      if (document.fonts?.ready) {
-        await document.fonts.ready;
+      const exportWindow = window.open('', '_blank', 'noopener,noreferrer');
+      if (!exportWindow) {
+        throw new Error('El navegador bloqueó la ventana de exportación.');
       }
 
-      const exportNode = exportContentRef.current;
-      if (!exportNode) return;
-
-      const { clone, cleanup } = createSafeExportClone(exportNode);
-
-      let canvas: HTMLCanvasElement;
-
-      try {
-        canvas = await html2canvas(clone, {
-          backgroundColor: '#ffffff',
-          scale: 2,
-          useCORS: true,
-          logging: false,
-          width: clone.scrollWidth,
-          height: clone.scrollHeight,
-          windowWidth: clone.scrollWidth,
-          windowHeight: clone.scrollHeight,
-        });
-      } finally {
-        cleanup();
-      }
-
-      const pdf = new jsPDF({
-        orientation: 'landscape',
-        unit: 'mm',
-        format: 'a4',
-        compress: true,
+      const documentMarkup = buildExportDocument({
+        data: currentData,
+        generatedAt,
+        appliedRangeLabel: currentAppliedRangeLabel,
+        selectedPipelineA,
+        selectedPipelineB,
+        pipelineComparisonChartData,
+        statusesByNameForPie: currentStatusesByNameForPie,
       });
 
-      const pageWidth = pdf.internal.pageSize.getWidth();
-      const pageHeight = pdf.internal.pageSize.getHeight();
-      const margin = 10;
-      const printableWidth = pageWidth - margin * 2;
-      const printableHeight = pageHeight - margin * 2;
-      const imageData = canvas.toDataURL('image/png');
-      const imageHeight = (canvas.height * printableWidth) / canvas.width;
+      exportWindow.document.open();
+      exportWindow.document.write(documentMarkup);
+      exportWindow.document.close();
 
-      let remainingHeight = imageHeight;
-      let offsetY = margin;
+      const finalizePrint = () => {
+        exportWindow.focus();
+        window.setTimeout(() => {
+          exportWindow.print();
+          setIsExportingPdf(false);
+        }, 150);
+      };
 
-      pdf.addImage(imageData, 'PNG', margin, offsetY, printableWidth, imageHeight, undefined, 'FAST');
-      remainingHeight -= printableHeight;
-
-      while (remainingHeight > 0) {
-        pdf.addPage('a4', 'landscape');
-        offsetY = margin - (imageHeight - remainingHeight);
-        pdf.addImage(imageData, 'PNG', margin, offsetY, printableWidth, imageHeight, undefined, 'FAST');
-        remainingHeight -= printableHeight;
+      if (exportWindow.document.readyState === 'complete') {
+        finalizePrint();
+      } else {
+        exportWindow.addEventListener('load', finalizePrint, { once: true });
       }
-
-      const filenameStart = appliedStartDate ?? 'sin-inicio';
-      const filenameEnd = appliedEndDate ?? 'sin-fin';
-      pdf.save(`leads-insights-${filenameStart}-${filenameEnd}.pdf`);
     } catch (error) {
       console.error('No se pudo exportar Leads Insights a PDF', error);
       window.alert('No se pudo exportar el PDF. Probá nuevamente.');
-    } finally {
       setIsExportingPdf(false);
     }
-  }, [appliedEndDate, appliedStartDate, isExportingPdf]);
+  }, [
+    insightsQuery.data,
+    isExportingPdf,
+    pipelineComparisonChartData,
+    selectedPipelineA,
+    selectedPipelineB,
+  ]);
 
   const statusByPipelineData = useMemo(() => {
     const source = insightsQuery.data?.statuses ?? [];
@@ -551,8 +690,7 @@ export function KommoLeadsInsights() {
   const appliedRangeLabel = `${data.filters.start_date ?? 'sin inicio'} — ${data.filters.end_date ?? 'sin fin'}`;
 
   return (
-    <>
-      <div className="space-y-6">
+    <div className="space-y-6">
       <header className="rounded-2xl border border-gray-200 bg-white px-6 py-5 shadow-[0_24px_44px_-30px_rgba(15,23,42,0.65)] flex items-center justify-between gap-4 flex-wrap">
         <div>
           <h1 className="text-2xl font-extrabold text-gray-900 inline-flex items-center gap-2">
@@ -645,33 +783,6 @@ export function KommoLeadsInsights() {
         statusByPipelineData={statusByPipelineData}
       />
     </div>
-      <div className="pointer-events-none fixed -left-[200vw] top-0 w-[1280px] bg-white p-8 text-gray-900">
-        <div ref={exportContentRef} className="space-y-6 bg-white">
-          <section className="rounded-2xl border border-gray-200 bg-white px-6 py-5 shadow-[0_24px_44px_-30px_rgba(15,23,42,0.2)]">
-            <h2 className="text-2xl font-extrabold text-gray-900 inline-flex items-center gap-2">
-              <Activity className="text-red-600" size={22} />
-              Leads Insights — Exportación PDF
-            </h2>
-            <p className="mt-2 text-sm text-gray-600">Rango aplicado: {appliedRangeLabel}</p>
-            <p className="text-sm text-gray-600">Generado: {exportTimestamp || 'en este momento'}</p>
-            <p className="text-sm text-gray-600">Zona horaria de entrada: {data.timezone ?? 'America/Lima'}.</p>
-          </section>
-
-          <InsightsReportSections
-            data={data}
-            pipelineAKey={pipelineAKey}
-            pipelineBKey={pipelineBKey}
-            onPipelineAChange={setPipelineAKey}
-            onPipelineBChange={setPipelineBKey}
-            selectedPipelineA={selectedPipelineA}
-            selectedPipelineB={selectedPipelineB}
-            pipelineComparisonChartData={pipelineComparisonChartData}
-            statusesByNameForPie={statusesByNameForPie}
-            statusByPipelineData={statusByPipelineData}
-          />
-        </div>
-      </div>
-    </>
   );
 }
 
