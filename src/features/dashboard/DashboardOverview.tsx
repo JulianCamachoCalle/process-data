@@ -130,7 +130,7 @@ export function DashboardOverview() {
 
     const enviosDateColumn = getColumnByCandidates(enviosColumns, ['Mes', 'mes', 'Fecha', 'Fecha de envio', 'Fecha envío']);
     const recojosDateColumn = getColumnByCandidates(recojosColumns, ['Mes', 'mes', 'Fecha', 'Fecha de recojo']);
-    const leadsDateColumn = getColumnByCandidates(leadsColumns, ['Fecha Lead Ganado', 'fecha_lead_ganado', 'Fecha registro lead']);
+    const leadsDateColumn = getColumnByCandidates(leadsColumns, ['Fecha Lead Ganado', 'fecha_lead_ganado']);
 
     const enviosInRange = filterRowsByRange(enviosRows, enviosDateColumn, dateFrom, dateTo);
     const recojosInRange = filterRowsByRange(recojosRows, recojosDateColumn, dateFrom, dateTo);
@@ -149,7 +149,8 @@ export function DashboardOverview() {
       leadsInRange.map((row) => normalizeText(getStringValue(row, tiendaLeadCol))).filter(Boolean),
     ).size;
 
-    const leadsGanados = leadsInRange.length;
+    const leadsGanados = leadsRows.length;
+    const leadsGanadosDelPeriodo = leadsInRange.length;
 
     const enviosTotales = enviosInRange.length;
     const promedioTE = safeDivide(enviosTotales, tiendasRegistradas);
@@ -175,8 +176,8 @@ export function DashboardOverview() {
 
     const margenTotalOperativo = ingresoTotalOperativo - costoTotalOperativo;
     const ticketPromedioMes = safeDivide(ingresoTotalOperativo, enviosTotales);
-    const costoOperativoPorLeadGanado = safeDivide(costoTotalOperativo, leadsGanados);
-    const ingresoPorLeadGanado = safeDivide(ingresoTotalOperativo, leadsGanados);
+    const costoOperativoPorLeadGanado = safeDivide(costoTotalOperativo, leadsGanadosDelPeriodo);
+    const ingresoPorLeadGanado = safeDivide(ingresoTotalOperativo, leadsGanadosDelPeriodo);
 
     const recojoCobradoId = findTipoRecojoBusinessId(tipoRecojoRows, ['cobrado', 'recojo cobrado']) ?? 1;
     const recojoGratisId = findTipoRecojoBusinessId(tipoRecojoRows, ['gratis', 'recojo gratis']) ?? 2;
@@ -301,7 +302,6 @@ export function DashboardOverview() {
 
       <Section title="KPIS DEL PERIODO">
         <KpiGrid>
-          <KpiCard title="Tiendas Registradas" value={formatNumberEs(metrics.tiendasRegistradas)} />
           <KpiCard title="Leads Ganados" value={formatNumberEs(metrics.leadsGanados)} />
           <KpiCard title="Envíos Totales" value={formatNumberEs(metrics.enviosTotales)} />
           <KpiCard title="Promedio T. E." value={formatNumberEs(metrics.promedioTE)} />
