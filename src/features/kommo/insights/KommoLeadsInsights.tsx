@@ -101,6 +101,114 @@ type LeadsInsightsPayload = {
 
 const COLORS = ['#dc2626', '#ef4444', '#f97316', '#f59e0b', '#8b5cf6', '#14b8a6', '#22c55e'];
 
+const EXPORT_COLOR_PROPERTIES = [
+  'color',
+  'background-color',
+  'border-top-color',
+  'border-right-color',
+  'border-bottom-color',
+  'border-left-color',
+  'outline-color',
+  'text-decoration-color',
+  'fill',
+  'stroke',
+  'stop-color',
+] as const;
+
+const EXPORT_LAYOUT_PROPERTIES = [
+  'background-image',
+  'border-top-width',
+  'border-right-width',
+  'border-bottom-width',
+  'border-left-width',
+  'border-top-style',
+  'border-right-style',
+  'border-bottom-style',
+  'border-left-style',
+  'border-top-left-radius',
+  'border-top-right-radius',
+  'border-bottom-right-radius',
+  'border-bottom-left-radius',
+  'box-shadow',
+  'text-shadow',
+  'opacity',
+] as const;
+
+function hasUnsupportedColorFunction(value: string) {
+  return /oklch\s*\(|oklab\s*\(/i.test(value);
+}
+
+function applyExportSafeStyles(sourceElement: Element, targetElement: Element) {
+  if (!(targetElement instanceof HTMLElement || targetElement instanceof SVGElement)) return;
+
+  const computedStyle = window.getComputedStyle(sourceElement);
+
+  for (const property of EXPORT_COLOR_PROPERTIES) {
+    const value = computedStyle.getPropertyValue(property);
+    if (!value || hasUnsupportedColorFunction(value)) continue;
+    targetElement.style.setProperty(property, value);
+  }
+
+  for (const property of EXPORT_LAYOUT_PROPERTIES) {
+    const value = computedStyle.getPropertyValue(property);
+    if (!value) continue;
+
+    if (property === 'background-image' && hasUnsupportedColorFunction(value)) {
+      targetElement.style.setProperty(property, 'none');
+      continue;
+    }
+
+    if ((property === 'box-shadow' || property === 'text-shadow') && hasUnsupportedColorFunction(value)) {
+      targetElement.style.setProperty(property, 'none');
+      continue;
+    }
+
+    targetElement.style.setProperty(property, value);
+  }
+
+  targetElement.style.setProperty('transition', 'none');
+  targetElement.style.setProperty('animation', 'none');
+}
+
+function createSafeExportClone(sourceNode: HTMLDivElement) {
+  const host = document.createElement('div');
+  host.setAttribute('aria-hidden', 'true');
+  host.style.position = 'fixed';
+  host.style.left = '-100000px';
+  host.style.top = '0';
+  host.style.width = `${sourceNode.scrollWidth}px`;
+  host.style.pointerEvents = 'none';
+  host.style.opacity = '1';
+  host.style.zIndex = '-1';
+  host.style.background = '#ffffff';
+
+  const clone = sourceNode.cloneNode(true) as HTMLDivElement;
+  clone.style.width = `${sourceNode.scrollWidth}px`;
+  clone.style.maxWidth = 'none';
+  clone.style.background = '#ffffff';
+
+  const sourceElements = [sourceNode, ...Array.from(sourceNode.querySelectorAll('*'))];
+  const cloneElements = [clone, ...Array.from(clone.querySelectorAll('*'))];
+
+  for (let index = 0; index < sourceElements.length; index += 1) {
+    const sourceElement = sourceElements[index];
+    const cloneElement = cloneElements[index];
+    if (!sourceElement || !cloneElement) continue;
+    applyExportSafeStyles(sourceElement, cloneElement);
+  }
+
+  host.appendChild(clone);
+  document.body.appendChild(host);
+
+  return {
+    host,
+    clone,
+    cleanup: () => {
+      host.remove();
+    },
+  };
+}
+
 function formatNumber(value: number) {
   return new Intl.NumberFormat('es-PE').format(value);
 }
@@ -330,16 +438,24 @@ export function KommoLeadsInsights() {
       const exportNode = exportContentRef.current;
       if (!exportNode) return;
 
-      const canvas = await html2canvas(exportNode, {
-        backgroundColor: '#ffffff',
-        scale: 2,
-        useCORS: true,
-        logging: false,
-        width: exportNode.scrollWidth,
-        height: exportNode.scrollHeight,
-        windowWidth: exportNode.scrollWidth,
-        windowHeight: exportNode.scrollHeight,
-      });
+      const { clone, cleanup } = createSafeExportClone(exportNode);
+
+      let canvas: HTMLCanvasElement;
+
+      try {
+        canvas = await html2canvas(clone, {
+          backgroundColor: '#ffffff',
+          scale: 2,
+          useCORS: true,
+          logging: false,
+          width: clone.scrollWidth,
+          height: clone.scrollHeight,
+          windowWidth: clone.scrollWidth,
+          windowHeight: clone.scrollHeight,
+        });
+      } finally {
+        cleanup();
+      }
 
       const pdf = new jsPDF({
         orientation: 'landscape',
