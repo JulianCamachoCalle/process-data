@@ -1,11 +1,8 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { createRequire } from 'node:module';
 import { z, ZodError } from 'zod';
 import { getSupabaseAdminClient } from './kommo/_shared.js';
+import { verifyAdminSession } from './_auth.js';
 import { KOMMO_RESOURCE_CONFIG, type KommoResourceKey } from '../src/features/kommo/config/kommoResourceConfig.js';
-
-const require = createRequire(import.meta.url);
-const jwt = require('jsonwebtoken') as typeof import('jsonwebtoken');
 import {
   createStableRowId,
   getGoogleSheet,
@@ -29,23 +26,6 @@ function getSheetCacheKey(sheet: Awaited<ReturnType<typeof getRawSheet>>) {
 
 function getBusinessIdCacheKey(sheet: Awaited<ReturnType<typeof getRawSheet>>, businessIdColumn: string) {
   return `${getSheetCacheKey(sheet)}::${businessIdColumn}`;
-}
-
-function parseCookies(cookieHeader: string | undefined) {
-  if (!cookieHeader) return {} as Record<string, string>;
-
-  return cookieHeader.split(';').reduce<Record<string, string>>((acc, part) => {
-    const [rawKey, ...rawValue] = part.trim().split('=');
-    if (!rawKey) return acc;
-
-    acc[rawKey] = decodeURIComponent(rawValue.join('='));
-    return acc;
-  }, {});
-}
-
-function getTokenFromRequest(req: VercelRequest) {
-  const cookieToken = parseCookies(req.headers.cookie).auth_token;
-  return typeof cookieToken === 'string' && cookieToken.trim() ? cookieToken : null;
 }
 
 function sanitizeUpdatePayload(data: Record<string, unknown>) {
@@ -711,20 +691,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
     const { name } = querySchema.parse(req.query);
 
-    const jwtSecret = process.env.JWT_SECRET;
-    if (!jwtSecret) {
-      return res.status(500).json({ error: 'Falta la variable de entorno requerida: JWT_SECRET' });
-    }
-
-    const token = getTokenFromRequest(req);
-    if (!token) {
-      return res.status(401).json({ error: 'No autorizado: falta la cookie auth_token' });
-    }
-
-    try {
-      jwt.verify(token, jwtSecret);
-    } catch {
-      return res.status(401).json({ error: 'No autorizado: cookie auth_token inválida o expirada' });
+    const auth = verifyAdminSession(req);
+    if (!auth.ok) {
+      return res.status(auth.status).json({ error: auth.error });
     }
 
     if (req.method === 'GET') {

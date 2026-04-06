@@ -1,82 +1,126 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { createRequire } from 'node:module';
 import { z, ZodError } from 'zod';
-
-const require = createRequire(import.meta.url);
-const jwt = require('jsonwebtoken') as typeof import('jsonwebtoken');
-
-const AUTH_COOKIE_NAME = 'auth_token';
-const AUTH_MAX_AGE_SECONDS = 60 * 60 * 8;
+import { getSupabaseAdminClient } from './kommo/_shared.js';
+import {
+  buildAuthCookie,
+  buildLogoutCookie,
+  getAuthTokenFromRequest,
+  getJwtSecretOrThrow,
+  signAdminJwt,
+  verifyAdminToken,
+} from './_auth.js';
+import { verifyPasswordWithScrypt } from './_password.js';
 
 const authBodySchema = z.object({
-  password: z.string().min(1, 'La contraseña es obligatoria'),
+  email: z.string().trim().email('El email es inválido'),
+  password: z.string().min(8, 'La contraseña debe tener al menos 8 caracteres'),
 });
 
-function parseCookies(cookieHeader: string | undefined) {
-  if (!cookieHeader) return {} as Record<string, string>;
+const ADMIN_LOGIN_RATE_WINDOW_MS = 15 * 60 * 1000;
+const ADMIN_LOGIN_MAX_ATTEMPTS = 8;
+const ADMIN_LOGIN_LOCKOUT_MS = 15 * 60 * 1000;
 
-  return cookieHeader.split(';').reduce<Record<string, string>>((acc, part) => {
-    const [rawKey, ...rawValue] = part.trim().split('=');
-    if (!rawKey) return acc;
-
-    acc[rawKey] = decodeURIComponent(rawValue.join('='));
-    return acc;
-  }, {});
+interface LoginAttemptRecord {
+  attempts: number;
+  firstAttemptAt: number;
+  lockUntil: number;
 }
 
-function getCookieToken(req: VercelRequest) {
-  const cookies = parseCookies(req.headers.cookie);
-  return cookies[AUTH_COOKIE_NAME];
-}
+const loginAttemptsByKey = new Map<string, LoginAttemptRecord>();
 
-function buildAuthCookie(token: string) {
-  const parts = [
-    `${AUTH_COOKIE_NAME}=${encodeURIComponent(token)}`,
-    'Path=/',
-    `Max-Age=${AUTH_MAX_AGE_SECONDS}`,
-    'HttpOnly',
-    'SameSite=Lax',
-  ];
-
-  if (process.env.NODE_ENV === 'production') {
-    parts.push('Secure');
+function getRequestIp(req: VercelRequest) {
+  const xff = req.headers['x-forwarded-for'];
+  if (typeof xff === 'string' && xff.trim()) {
+    return xff.split(',')[0]?.trim() ?? 'unknown-ip';
+  }
+  if (Array.isArray(xff) && xff[0]?.trim()) {
+    return xff[0].split(',')[0]?.trim() ?? 'unknown-ip';
   }
 
-  return parts.join('; ');
+  return req.socket?.remoteAddress ?? 'unknown-ip';
 }
 
-function buildLogoutCookie() {
-  const parts = [
-    `${AUTH_COOKIE_NAME}=`,
-    'Path=/',
-    'Max-Age=0',
-    'HttpOnly',
-    'SameSite=Lax',
-  ];
+function getRateLimitKey(req: VercelRequest, email: string) {
+  return `${getRequestIp(req)}::${email.toLowerCase()}`;
+}
 
-  if (process.env.NODE_ENV === 'production') {
-    parts.push('Secure');
+function canAttemptLogin(rateKey: string, now: number) {
+  const current = loginAttemptsByKey.get(rateKey);
+  if (!current) return { allowed: true };
+
+  if (current.lockUntil > now) {
+    const retryAfterSeconds = Math.ceil((current.lockUntil - now) / 1000);
+    return { allowed: false, retryAfterSeconds };
   }
 
-  return parts.join('; ');
+  if (now - current.firstAttemptAt > ADMIN_LOGIN_RATE_WINDOW_MS) {
+    loginAttemptsByKey.delete(rateKey);
+    return { allowed: true };
+  }
+
+  return { allowed: true };
+}
+
+function registerFailedLoginAttempt(rateKey: string, now: number) {
+  const current = loginAttemptsByKey.get(rateKey);
+
+  if (!current || now - current.firstAttemptAt > ADMIN_LOGIN_RATE_WINDOW_MS) {
+    loginAttemptsByKey.set(rateKey, {
+      attempts: 1,
+      firstAttemptAt: now,
+      lockUntil: 0,
+    });
+    return;
+  }
+
+  const attempts = current.attempts + 1;
+  const shouldLock = attempts >= ADMIN_LOGIN_MAX_ATTEMPTS;
+
+  loginAttemptsByKey.set(rateKey, {
+    attempts,
+    firstAttemptAt: current.firstAttemptAt,
+    lockUntil: shouldLock ? now + ADMIN_LOGIN_LOCKOUT_MS : 0,
+  });
+}
+
+function clearFailedLoginAttempts(rateKey: string) {
+  loginAttemptsByKey.delete(rateKey);
+}
+
+function isMissingAdminUsersTableError(error: unknown) {
+  if (!error || typeof error !== 'object') return false;
+  const message = (error as { message?: unknown }).message;
+  return typeof message === 'string' && message.includes("Could not find the table 'public.admin_access_users'");
+}
+
+function normalizeEmail(email: string) {
+  return email.trim().toLowerCase();
+}
+
+function getInvalidCredentialsError() {
+  return { error: 'Credenciales inválidas' };
+}
+
+interface AdminAccessUserRow {
+  id: string | number;
+  email: string;
+  password_hash: string;
+  is_active: boolean;
+  role: string;
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
-    const jwtSecret = process.env.JWT_SECRET;
-
-    if (!jwtSecret) {
-      return res.status(500).json({ error: 'Falta la variable de entorno requerida: JWT_SECRET' });
-    }
+    const jwtSecret = getJwtSecretOrThrow();
 
     if (req.method === 'GET') {
-      const token = getCookieToken(req);
+      const token = getAuthTokenFromRequest(req);
       if (!token) {
         return res.status(401).json({ authenticated: false });
       }
 
       try {
-        jwt.verify(token, jwtSecret);
+        verifyAdminToken(token, jwtSecret);
         return res.status(200).json({ authenticated: true });
       } catch {
         return res.status(401).json({ authenticated: false });
@@ -92,19 +136,55 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(405).json({ error: 'Método no permitido' });
     }
 
-    const adminPassword = process.env.ADMIN_PASSWORD;
-    if (!adminPassword) {
-      return res.status(500).json({ error: 'Falta la variable de entorno requerida: ADMIN_PASSWORD' });
-    }
-
     const rawBody = typeof req.body === 'string' ? JSON.parse(req.body) : req.body;
-    const { password } = authBodySchema.parse(rawBody ?? {});
+    const { email, password } = authBodySchema.parse(rawBody ?? {});
 
-    if (password !== adminPassword) {
-      return res.status(401).json({ error: 'Contraseña inválida' });
+    const normalizedEmail = normalizeEmail(email);
+    const rateKey = getRateLimitKey(req, normalizedEmail);
+    const now = Date.now();
+
+    const attemptState = canAttemptLogin(rateKey, now);
+    if (!attemptState.allowed) {
+      if (typeof attemptState.retryAfterSeconds === 'number' && attemptState.retryAfterSeconds > 0) {
+        res.setHeader('Retry-After', String(attemptState.retryAfterSeconds));
+      }
+
+      return res.status(429).json({ error: 'Demasiados intentos. Probá nuevamente más tarde.' });
     }
 
-    const token = jwt.sign({ role: 'admin' }, jwtSecret, { expiresIn: '8h' });
+    const supabase = getSupabaseAdminClient();
+    const { data, error } = await supabase
+      .from('admin_access_users' as never)
+      .select('id,email,password_hash,is_active,role' as never)
+      .eq('email' as never, normalizedEmail as never)
+      .limit(1);
+
+    if (error) {
+      if (isMissingAdminUsersTableError(error)) {
+        return res.status(500).json({
+          error: 'No existe la tabla admin_access_users. Ejecutá la configuración de seguridad en la base de datos.',
+        });
+      }
+
+      throw new Error(error.message || 'No se pudo validar usuario administrador');
+    }
+
+    const user = ((data ?? []) as AdminAccessUserRow[])[0] ?? null;
+    const isUserActive = user?.is_active === true;
+    const hasAdminRole = user?.role === 'admin';
+    const isValidPassword =
+      typeof user?.password_hash === 'string' && user.password_hash.length > 0
+        ? verifyPasswordWithScrypt(password, user.password_hash)
+        : false;
+
+    if (!user || !isUserActive || !hasAdminRole || !isValidPassword) {
+      registerFailedLoginAttempt(rateKey, now);
+      return res.status(401).json(getInvalidCredentialsError());
+    }
+
+    clearFailedLoginAttempts(rateKey);
+
+    const token = signAdminJwt(String(user.id), jwtSecret);
     res.setHeader('Set-Cookie', buildAuthCookie(token));
     return res.status(200).json({ success: true });
   } catch (error: unknown) {

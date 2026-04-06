@@ -1,26 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { createRequire } from 'node:module';
 import { ensureRowsHaveStableIdsWithSummary, getAllRawSheets } from '../src/lib/google-sheets.js';
-
-const require = createRequire(import.meta.url);
-const jwt = require('jsonwebtoken') as typeof import('jsonwebtoken');
-
-function parseCookies(cookieHeader: string | undefined) {
-  if (!cookieHeader) return {} as Record<string, string>;
-
-  return cookieHeader.split(';').reduce<Record<string, string>>((acc, part) => {
-    const [rawKey, ...rawValue] = part.trim().split('=');
-    if (!rawKey) return acc;
-
-    acc[rawKey] = decodeURIComponent(rawValue.join('='));
-    return acc;
-  }, {});
-}
-
-function getTokenFromRequest(req: VercelRequest) {
-  const cookieToken = parseCookies(req.headers.cookie).auth_token;
-  return typeof cookieToken === 'string' && cookieToken.trim() ? cookieToken : null;
-}
+import { verifyAdminSession } from './_auth.js';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
@@ -28,20 +8,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(405).json({ error: 'Método no permitido' });
     }
 
-    const jwtSecret = process.env.JWT_SECRET;
-    if (!jwtSecret) {
-      return res.status(500).json({ error: 'Falta la variable de entorno requerida: JWT_SECRET' });
-    }
-
-    const token = getTokenFromRequest(req);
-    if (!token) {
-      return res.status(401).json({ error: 'No autorizado: falta la cookie auth_token' });
-    }
-
-    try {
-      jwt.verify(token, jwtSecret);
-    } catch {
-      return res.status(401).json({ error: 'No autorizado: cookie auth_token inválida o expirada' });
+    const auth = verifyAdminSession(req);
+    if (!auth.ok) {
+      return res.status(auth.status).json({ error: auth.error });
     }
 
     const startedAt = Date.now();
