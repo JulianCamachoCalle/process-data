@@ -128,7 +128,7 @@ export function DashboardOverview() {
     const leadsRows = (leadsQuery.data?.rows ?? []) as Row[];
     const tipoRecojoRows = (tipoRecojoQuery.data?.rows ?? []) as Row[];
 
-    const enviosDateColumn = getColumnByCandidates(enviosColumns, ['Mes', 'mes', 'Fecha', 'Fecha de envio', 'Fecha envío']);
+    const enviosDateColumn = getColumnByCandidates(enviosColumns, ['Fecha envio', 'Fecha envío', 'fecha_envio', 'Mes', 'mes', 'Fecha']);
     const recojosDateColumn = getColumnByCandidates(recojosColumns, ['Mes', 'mes', 'Fecha', 'Fecha de recojo']);
     const leadsDateColumn = getColumnByCandidates(leadsColumns, ['Fecha Lead Ganado', 'fecha_lead_ganado']);
 

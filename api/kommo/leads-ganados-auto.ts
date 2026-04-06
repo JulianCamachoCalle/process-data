@@ -411,14 +411,15 @@ export async function recalculateLeadGanadoCountersByBusinessId(
 
   const { data: enviosData, error: enviosError } = await supabase
     .from('envios' as never)
-    .select('id_resultado')
+    // Nuevo modelo ENVIOS: el vínculo operativo es exclusivamente `id_lead_ganado`.
+    .select('id_lead_ganado,id_resultado')
     .eq('id_lead_ganado', leadGanadoBusinessId);
 
   if (enviosError) {
     throw new Error(enviosError.message || 'No se pudieron leer envíos para recalcular lead ganado');
   }
 
-  const envios = ((enviosData ?? []) as Array<{ id_resultado: number | null }>);
+  const envios = ((enviosData ?? []) as Array<{ id_lead_ganado: number | null; id_resultado: number | null }>);
   const cantidadEnvios = envios.length;
   const resultadoIds = Array.from(new Set(envios.map((row) => Number(row.id_resultado ?? 0)).filter((id) => id > 0)));
 

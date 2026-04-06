@@ -41,12 +41,12 @@ export function SheetView({ sheetName }: SheetViewProps) {
   const [editingRow, setEditingRow] = useState<SheetRow | null>(null);
   const [modalInstance, setModalInstance] = useState(0);
   const [previewInput, setPreviewInput] = useState({
+    leadGanado: '',
     destino: '',
     resultado: '',
     tipoPunto: '',
-    tienda: '',
     excedentePagadoMoto: '0',
-    mes: '',
+    fechaEnvio: '',
   });
   const [leadPreviewInput, setLeadPreviewInput] = useState({
     fechaIngresoLead: '',
@@ -76,11 +76,10 @@ export function SheetView({ sheetName }: SheetViewProps) {
         }
       : sheetName === 'ENVIOS'
         ? {
-            Tienda: envioFormOptions?.tiendas ?? [],
+            'Lead Ganado': envioFormOptions?.leadsGanados ?? [],
             Destino: envioFormOptions?.destinos ?? [],
             Resultado: envioFormOptions?.resultados ?? [],
             'Tipo Punto': envioFormOptions?.tipoPunto ?? [],
-            FullFilment: envioFormOptions?.fullfilment ?? [],
           }
         : sheetName === 'LEADS GANADOS'
           ? {
@@ -96,10 +95,10 @@ export function SheetView({ sheetName }: SheetViewProps) {
 
   const { data: envioPreviewData } = useEnvioAutoPreview({
     enabled: isModalOpen && sheetName === 'ENVIOS',
+    leadGanado: previewInput.leadGanado,
     destino: previewInput.destino,
     resultado: previewInput.resultado,
     tipoPunto: previewInput.tipoPunto,
-    tienda: previewInput.tienda,
     excedentePagadoMoto: previewInput.excedentePagadoMoto,
   });
 
@@ -167,15 +166,13 @@ export function SheetView({ sheetName }: SheetViewProps) {
 
   const handleOpenAdd = () => {
     setEditingRow(null);
-    const now = new Date();
-    const currentMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
     setPreviewInput({
+      leadGanado: '',
       destino: '',
       resultado: '',
       tipoPunto: '',
-      tienda: '',
       excedentePagadoMoto: '0',
-      mes: currentMonth,
+      fechaEnvio: '',
     });
     setLeadPreviewInput({
       fechaIngresoLead: '',
@@ -195,12 +192,12 @@ export function SheetView({ sheetName }: SheetViewProps) {
   const handleOpenEdit = (row: SheetRow) => {
     setEditingRow(row);
     setPreviewInput({
+      leadGanado: String(row['Lead Ganado'] ?? '').trim(),
       destino: String(row.Destino ?? '').trim(),
       resultado: String(row.Resultado ?? '').trim(),
       tipoPunto: String(row['Tipo Punto'] ?? '').trim(),
-      tienda: String(row.Tienda ?? '').trim(),
       excedentePagadoMoto: String(parseNumericValue(row['Excedente pagado moto']) ?? 0),
-      mes: String(row.Mes ?? '').trim(),
+      fechaEnvio: String(row['Fecha envio'] ?? '').trim(),
     });
     setLeadPreviewInput({
       fechaIngresoLead: String(row['Fecha ingreso lead'] ?? '').trim(),
@@ -276,8 +273,8 @@ export function SheetView({ sheetName }: SheetViewProps) {
     }
 
     if (sheetName === 'ENVIOS') {
-      const requiredSelects = ['Tienda', 'Destino', 'Resultado', 'Tipo Punto', 'FullFilment'];
-      const missingField = requiredSelects.find((field) => !String(normalizedFormData[field] ?? '').trim());
+      const requiredFields = ['Fecha envio', 'Lead Ganado', 'Destino', 'Resultado', 'Tipo Punto'];
+      const missingField = requiredFields.find((field) => !String(normalizedFormData[field] ?? '').trim());
 
       if (missingField) {
         Swal.fire('Validación', `${missingField} es obligatorio.`, 'warning');
@@ -288,11 +285,6 @@ export function SheetView({ sheetName }: SheetViewProps) {
       if (excedenteText && !/^\d+(?:[.,]\d{1,2})?$/.test(excedenteText)) {
         Swal.fire('Validación', 'Excedente pagado moto acepta máximo 2 decimales.', 'warning');
         return;
-      }
-
-      if (!String(normalizedFormData.Mes ?? '').trim()) {
-        const now = new Date();
-        normalizedFormData.Mes = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
       }
 
       normalizedFormData['Excedente pagado moto'] = String(parseNumericValue(normalizedFormData['Excedente pagado moto']) ?? 0);
@@ -452,18 +444,18 @@ export function SheetView({ sheetName }: SheetViewProps) {
           previewValuesByColumn={previewValuesByColumn}
           onFormValueChange={(column: string, value: string) => {
             if (sheetName === 'ENVIOS') {
-              if (column === 'Destino') {
+              if (column === 'Lead Ganado') {
+                setPreviewInput((prev) => ({ ...prev, leadGanado: value }));
+              } else if (column === 'Destino') {
                 setPreviewInput((prev) => ({ ...prev, destino: value }));
               } else if (column === 'Resultado') {
                 setPreviewInput((prev) => ({ ...prev, resultado: value }));
               } else if (column === 'Tipo Punto') {
                 setPreviewInput((prev) => ({ ...prev, tipoPunto: value }));
-              } else if (column === 'Tienda') {
-                setPreviewInput((prev) => ({ ...prev, tienda: value }));
               } else if (column === 'Excedente pagado moto') {
                 setPreviewInput((prev) => ({ ...prev, excedentePagadoMoto: value }));
-              } else if (column === 'Mes') {
-                setPreviewInput((prev) => ({ ...prev, mes: value }));
+              } else if (column === 'Fecha envio') {
+                setPreviewInput((prev) => ({ ...prev, fechaEnvio: value }));
               }
               return;
             }
