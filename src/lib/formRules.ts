@@ -120,7 +120,6 @@ export const SHEET_FORM_RULES: Record<string, SheetFormRule> = {
       'Dias Lead a Registro',
       'Dias Registro a Ganado',
       'Dias lead a ganado',
-      'Lead ganado en periodo?',
       'Cantidad de envios',
       'Ingreso anulados fullfilment',
     ],

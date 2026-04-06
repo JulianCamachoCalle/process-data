@@ -213,7 +213,6 @@ const LEADS_GANADOS_COLUMNS = [
   'Dias Registro a Ganado',
   'Dias lead a ganado',
   'FullFilment',
-  'Lead ganado en periodo?',
   'Notas',
   'Distrito',
   'Cantidad de envios',
@@ -619,7 +618,6 @@ function toLeadGanadoSheetRow(record: LeadGanadoRecord): SheetRow {
     'Dias Registro a Ganado': String(record.dias_registro_a_ganado ?? 0),
     'Dias lead a ganado': String(record.dias_lead_a_ganado ?? 0),
     FullFilment: fullfilmentFromSnapshot,
-    'Lead ganado en periodo?': '',
     Notas: record.notas ?? '',
     Distrito: record.distrito ?? '',
     'Cantidad de envios': String(record.cantidad_envios ?? 0),
@@ -1213,7 +1211,6 @@ export function useLeadGanadoAutoPreview(input: {
         'Dias Lead a Registro': String(derived.dias_lead_a_registro),
         'Dias Registro a Ganado': String(derived.dias_registro_a_ganado),
         'Dias lead a ganado': String(derived.dias_lead_a_ganado),
-        'Lead ganado en periodo?': '',
         'Cantidad de envios': String(derived.cantidad_envios),
         'Ingreso anulados fullfilment': formatCostForDisplay(derived.ingreso_anulados_fullfilment),
       };

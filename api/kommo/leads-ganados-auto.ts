@@ -343,7 +343,7 @@ export async function syncLeadsGanadosFromKommoLeadIds(
       continue;
     }
 
-    const fechaIngresoLead = ingresoLeadDateByLeadId.get(leadId) ?? '';
+    const fechaIngresoLead = ingresoLeadDateByLeadId.get(leadId) ?? toDateOnlyIso(lead.created_at);
     const fechaRegistroLead = toDateOnlyIso(lead.created_at);
     const fechaLeadGanado = toDateOnlyIso(lead.closed_at);
     const tags = extractLeadTagNames(lead);
