@@ -139,7 +139,7 @@ function Layout() {
   };
 
   return (
-    <div className="relative flex min-h-screen min-h-[100dvh] bg-transparent text-gray-900 font-sans selection:bg-red-100 selection:text-red-900 md:h-screen md:overflow-hidden print:h-auto print:overflow-visible">
+    <div className="relative flex min-h-screen min-h-[100dvh] flex-col overflow-x-hidden bg-transparent text-gray-900 font-sans selection:bg-red-100 selection:text-red-900 md:h-screen md:flex-row md:overflow-hidden print:h-auto print:overflow-visible">
       {mobileSidebarOpen && (
         <button
           aria-label="Cerrar menú lateral"
@@ -183,7 +183,7 @@ function Layout() {
             Cerrar sesión
           </button>
         </header>
-        <main className="relative flex-1 overflow-y-auto p-4 sm:p-6 md:p-8 lg:p-10 print:overflow-visible print:p-0">
+        <main className="relative flex-1 overflow-x-hidden overflow-y-auto p-4 sm:p-6 md:p-8 lg:p-10 print:overflow-visible print:p-0">
           <div className="mx-auto w-full max-w-7xl print:max-w-none">
             <Routes>
               <Route path="/" element={<DashboardOverview />} />

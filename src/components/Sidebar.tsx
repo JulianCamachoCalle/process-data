@@ -75,28 +75,22 @@ export function Sidebar({
     );
   };
 
-  return (
-    <aside
-      className={`
-        fixed inset-y-0 left-0 z-40 flex h-[100dvh] min-h-[100dvh] flex-col text-white border-r border-red-900/40
-        bg-gradient-to-b from-[#101218] via-[#0f1219] to-[#0a0c12] shadow-[8px_0_30px_-14px_rgba(0,0,0,0.75)]
-        backdrop-blur-xl relative overflow-hidden transition-all duration-300 transform
-        ${isMobileOpen ? 'translate-x-0' : '-translate-x-full'}
-        md:static md:z-10 md:h-screen md:min-h-screen md:translate-x-0 ${collapsed ? 'md:w-20' : 'md:w-72'} w-[min(85vw,18rem)] max-w-[18rem] print:hidden
-      `}
-    >
+  const renderSidebarShell = (className: string, showCloseButton: boolean) => (
+    <aside className={className}>
       <div className="pointer-events-none absolute -top-14 -right-12 h-36 w-36 rounded-full bg-red-500/20 blur-3xl" />
       <div className="pointer-events-none absolute bottom-16 -left-14 h-36 w-36 rounded-full bg-white/10 blur-3xl" />
 
       <div className={`border-b border-white/10 p-5 sm:p-6 ${collapsed ? 'md:px-3' : ''}`}>
         <div className="mb-3 flex items-center justify-between md:justify-start">
-          <button
-            onClick={onCloseMobile}
-            className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-white/20 text-gray-200 hover:bg-white/10 md:hidden"
-            aria-label="Cerrar menú"
-          >
-            <X size={16} />
-          </button>
+          {showCloseButton ? (
+            <button
+              onClick={onCloseMobile}
+              className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-white/20 text-gray-200 hover:bg-white/10 md:hidden"
+              aria-label="Cerrar menú"
+            >
+              <X size={16} />
+            </button>
+          ) : <div className="md:hidden" />}
           <button
             onClick={onToggleCollapsed}
             className="group hidden md:inline-flex md:absolute md:right-3 md:top-3 md:h-7 md:w-7 md:items-center md:justify-center md:rounded-full md:border md:border-white/0 md:bg-white/0 md:text-gray-500/60 md:opacity-35 md:transition-all md:hover:border-white/10 md:hover:bg-white/5 md:hover:text-gray-100 md:hover:opacity-100 focus-visible:opacity-100"
@@ -200,5 +194,18 @@ export function Sidebar({
         </button>
       </div>
     </aside>
+  );
+
+  return (
+    <>
+      {renderSidebarShell(
+        `hidden print:hidden md:relative md:z-10 md:flex md:h-screen md:min-h-screen md:flex-col md:overflow-hidden md:border-r md:border-red-900/40 md:bg-gradient-to-b md:from-[#101218] md:via-[#0f1219] md:to-[#0a0c12] md:text-white md:shadow-[8px_0_30px_-14px_rgba(0,0,0,0.75)] md:backdrop-blur-xl md:transition-[width] md:duration-300 ${collapsed ? 'md:w-20' : 'md:w-72'}`,
+        false,
+      )}
+      {renderSidebarShell(
+        `fixed inset-y-0 left-0 z-40 flex h-[100dvh] min-h-[100dvh] w-[min(85vw,18rem)] max-w-[18rem] flex-col overflow-hidden border-r border-red-900/40 bg-gradient-to-b from-[#101218] via-[#0f1219] to-[#0a0c12] text-white shadow-[8px_0_30px_-14px_rgba(0,0,0,0.75)] backdrop-blur-xl transition-transform duration-300 md:hidden print:hidden ${isMobileOpen ? 'translate-x-0' : '-translate-x-full'}`,
+        true,
+      )}
+    </>
   );
 }
