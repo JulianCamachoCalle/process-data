@@ -165,7 +165,8 @@ function Layout() {
           <div className="mx-auto max-w-7xl print:max-w-none">
             <Routes>
               <Route path="/" element={<DashboardOverview />} />
-              <Route path="/sheet/:sheetName" element={<SheetRouteWrapper />} />
+              <Route path="/tabla/:sheetName" element={<SheetRouteWrapper />} />
+              <Route path="/sheet/:sheetName" element={<LegacySheetRedirect />} />
               <Route path="/kommo" element={<KommoExplorer />} />
               <Route path="/kommo/leads-insights" element={<KommoLeadsInsights />} />
               <Route path="/kommo/:resource" element={<KommoExplorer />} />
@@ -193,6 +194,12 @@ export default function App() {
 
 function SheetRouteWrapper() {
   const { sheetName } = useParams<{ sheetName: string }>();
-  if (!sheetName) return <div>No hay ninguna hoja seleccionada.</div>;
+  if (!sheetName) return <div>No hay ninguna tabla seleccionada.</div>;
   return <SheetView key={sheetName} sheetName={sheetName} />;
+}
+
+function LegacySheetRedirect() {
+  const { sheetName } = useParams<{ sheetName: string }>();
+  if (!sheetName) return <Navigate to="/" replace />;
+  return <Navigate to={`/tabla/${encodeURIComponent(sheetName)}`} replace />;
 }
