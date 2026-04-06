@@ -1,12 +1,9 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createClient } from '@supabase/supabase-js';
-import { createRequire } from 'node:module';
 import { z } from 'zod';
+import { verifyAdminSession } from './_auth.js';
 import { getRawSheet, STABLE_ROW_ID_COLUMN } from '../src/lib/google-sheets.js';
 import { normalizeText } from '../src/lib/tableHelpers.js';
-
-const require = createRequire(import.meta.url);
-const jwt = require('jsonwebtoken') as typeof import('jsonwebtoken');
 
 const bodySchema = z
   .object({
@@ -258,23 +255,6 @@ function isMissingSyncOutboxTableError(error: unknown) {
   const maybeMessage = (error as { message?: unknown }).message;
   if (typeof maybeMessage !== 'string') return false;
   return maybeMessage.includes("Could not find the table 'public.sync_outbox'");
-}
-
-function parseCookies(cookieHeader: string | undefined) {
-  if (!cookieHeader) return {} as Record<string, string>;
-
-  return cookieHeader.split(';').reduce<Record<string, string>>((acc, part) => {
-    const [rawKey, ...rawValue] = part.trim().split('=');
-    if (!rawKey) return acc;
-
-    acc[rawKey] = decodeURIComponent(rawValue.join('='));
-    return acc;
-  }, {});
-}
-
-function getTokenFromRequest(req: VercelRequest) {
-  const cookieToken = parseCookies(req.headers.cookie).auth_token;
-  return typeof cookieToken === 'string' && cookieToken.trim() ? cookieToken : null;
 }
 
 function isCronAuthorized(req: VercelRequest) {
@@ -1148,23 +1128,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   try {
-    const jwtSecret = process.env.JWT_SECRET;
-    if (!jwtSecret) {
-      return res.status(500).json({ error: 'Falta JWT_SECRET' });
-    }
-
     const cronAuthorized = isCronAuthorized(req);
 
     if (!cronAuthorized) {
-      const token = getTokenFromRequest(req);
-      if (!token) {
-        return res.status(401).json({ error: 'No autorizado: falta auth_token o x-sync-secret' });
-      }
-
-      try {
-        jwt.verify(token, jwtSecret);
-      } catch {
-        return res.status(401).json({ error: 'No autorizado: auth_token inválida o expirada' });
+      const auth = verifyAdminSession(req);
+      if (!auth.ok) {
+        return res.status(auth.status).json({ error: auth.error ?? 'No autorizado' });
       }
     }
 
