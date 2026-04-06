@@ -55,8 +55,8 @@ export function SheetView({ sheetName }: SheetViewProps) {
     tienda: '',
   });
   const [recojoPreviewInput, setRecojoPreviewInput] = useState({
-    tipoRecojo: '',
-    tienda: '',
+    leadGanado: '',
+    tipoCobro: '',
     veces: '1',
   });
 
@@ -88,8 +88,8 @@ export function SheetView({ sheetName }: SheetViewProps) {
             }
         : sheetName === 'RECOJOS'
           ? {
-              Tienda: recojoFormOptions?.tiendas ?? [],
-              'Tipo de Recojo': recojoFormOptions?.tipoRecojo ?? [],
+              'Lead Ganado': recojoFormOptions?.leadsGanados ?? [],
+              'Tipo de cobro': recojoFormOptions?.tipoCobro ?? [],
             }
         : {};
 
@@ -112,8 +112,8 @@ export function SheetView({ sheetName }: SheetViewProps) {
 
   const { data: recojoPreviewData } = useRecojoAutoPreview({
     enabled: isModalOpen && sheetName === 'RECOJOS',
-    tipoRecojo: recojoPreviewInput.tipoRecojo,
-    tienda: recojoPreviewInput.tienda,
+    leadGanado: recojoPreviewInput.leadGanado,
+    tipoCobro: recojoPreviewInput.tipoCobro,
     veces: recojoPreviewInput.veces,
   });
 
@@ -181,8 +181,8 @@ export function SheetView({ sheetName }: SheetViewProps) {
       tienda: '',
     });
     setRecojoPreviewInput({
-      tipoRecojo: '',
-      tienda: '',
+      leadGanado: '',
+      tipoCobro: '',
       veces: '1',
     });
     setModalInstance((prev) => prev + 1);
@@ -206,8 +206,8 @@ export function SheetView({ sheetName }: SheetViewProps) {
       tienda: String(row.Tienda ?? '').trim(),
     });
     setRecojoPreviewInput({
-      tipoRecojo: String(row['Tipo de Recojo'] ?? '').trim(),
-      tienda: String(row.Tienda ?? '').trim(),
+      leadGanado: String(row['Lead Ganado'] ?? '').trim(),
+      tipoCobro: String(row['Tipo de cobro'] ?? '').trim(),
       veces: String(parseNumericValue(row.Veces) ?? 1),
     });
     setModalInstance((prev) => prev + 1);
@@ -324,17 +324,12 @@ export function SheetView({ sheetName }: SheetViewProps) {
     }
 
     if (sheetName === 'RECOJOS') {
-      const requiredSelects = ['Tienda', 'Tipo de Recojo'];
-      const missingField = requiredSelects.find((field) => !String(normalizedFormData[field] ?? '').trim());
+      const requiredFields = ['Fecha', 'Lead Ganado', 'Tipo de cobro', 'Veces'];
+      const missingField = requiredFields.find((field) => !String(normalizedFormData[field] ?? '').trim());
 
       if (missingField) {
         Swal.fire('Validación', `${missingField} es obligatorio.`, 'warning');
         return;
-      }
-
-      if (!String(normalizedFormData.Mes ?? '').trim()) {
-        const now = new Date();
-        normalizedFormData.Mes = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
       }
 
       const veces = parseNumericValue(normalizedFormData.Veces);
@@ -351,6 +346,7 @@ export function SheetView({ sheetName }: SheetViewProps) {
 
       normalizedFormData.Veces = String(vecesRedondeadas);
       normalizedFormData.Observaciones = String(normalizedFormData.Observaciones ?? normalizedFormData.observaciones ?? '').trim();
+      normalizedFormData['Tipo de cobro'] = String(normalizedFormData['Tipo de cobro'] ?? '').trim();
     }
 
     if (editingRow) {
@@ -474,10 +470,10 @@ export function SheetView({ sheetName }: SheetViewProps) {
             }
 
             if (sheetName === 'RECOJOS') {
-              if (column === 'Tipo de Recojo') {
-                setRecojoPreviewInput((prev) => ({ ...prev, tipoRecojo: value }));
-              } else if (column === 'Tienda') {
-                setRecojoPreviewInput((prev) => ({ ...prev, tienda: value }));
+              if (column === 'Lead Ganado') {
+                setRecojoPreviewInput((prev) => ({ ...prev, leadGanado: value }));
+              } else if (column === 'Tipo de cobro') {
+                setRecojoPreviewInput((prev) => ({ ...prev, tipoCobro: value }));
               } else if (column === 'Veces') {
                 setRecojoPreviewInput((prev) => ({ ...prev, veces: value }));
               }

@@ -303,7 +303,7 @@ export function DynamicTable({ sheetName, columns, rows, onEdit }: DynamicTableP
     }
 
     if (sheetName === 'RECOJOS') {
-      const tipoCol = getColumnByCandidates(['Tipo de Recojo', 'tipo de recojo']);
+      const tipoCol = getColumnByCandidates(['Tipo de cobro', 'tipo de cobro', 'Tipo de Recojo', 'tipo de recojo']);
       const vecesCol = getColumnByCandidates(['Veces', 'veces']);
       const ingresoCol = getColumnByCandidates(['Ingreso recojo total', 'ingreso recojo total']);
       const costoCol = getColumnByCandidates(['Costo recojo total', 'costo recojo total']);

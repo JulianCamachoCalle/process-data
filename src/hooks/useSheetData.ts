@@ -75,18 +75,15 @@ interface EnvioRecord {
 interface RecojoRecord {
   stable_id: string;
   business_id: number;
-  mes: string | null;
-  id_tienda: number;
-  id_tipo_recojo: number;
+  fecha: string | null;
+  id_lead_ganado: number;
+  tipo_cobro: string | null;
   veces: number;
-  cobro_a_tienda_por_recojo: number;
-  pago_moto_por_recojo: number;
+  cobro_a_tienda: number;
+  pago_a_moto: number;
   ingreso_recojo_total: number;
   costo_recojo_total: number;
   observaciones: string | null;
-  id_vendedor: number | null;
-  id_lead_ganado: number | null;
-  vendedor_nombre_snapshot?: string | null;
 }
 
 interface LeadGanadoRecord {
@@ -184,16 +181,17 @@ const ENVIOS_COLUMNS = [
 const RECOJOS_SHEET_NAME = 'RECOJOS';
 const RECOJOS_COLUMNS = [
   'idRecojo',
-  'Mes',
+  'Fecha',
+  'Lead Ganado',
   'Tienda',
-  'Tipo de Recojo',
+  'Vendedor',
+  'Tipo de cobro',
   'Veces',
-  'Cobro a tienda por recojo',
-  'Pago moto por recojo',
+  'Cobro a tienda',
+  'Pago a moto',
   'Ingreso recojo total',
   'Costo recojo total',
   'Observaciones',
-  'Vendedor',
 ] as const;
 const LEADS_GANADOS_SHEET_NAME = 'LEADS GANADOS';
 const LEADS_GANADOS_COLUMNS = [
@@ -310,33 +308,6 @@ function toDestinoOptionLabel(value: unknown) {
   return String(value ?? '').trim();
 }
 
-function parseMonthInput(raw: unknown): string {
-  const value = String(raw ?? '').trim();
-  if (!value) {
-    const now = new Date();
-    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
-  }
-
-  const monthMatch = value.match(/^(\d{4})-(\d{2})(?:-\d{2})?$/);
-  if (!monthMatch) {
-    throw new Error('Mes debe tener formato YYYY-MM');
-  }
-
-  return `${monthMatch[1]}-${monthMatch[2]}`;
-}
-
-function formatMonthForDisplay(raw: unknown): string {
-  const value = String(raw ?? '').trim();
-  if (!value) return '';
-  const monthMatch = value.match(/^(\d{4})-(\d{2})(?:-\d{2})?$/);
-  if (!monthMatch) return value;
-  return `${monthMatch[1]}-${monthMatch[2]}`;
-}
-
-function formatMonthForStorage(raw: unknown): string {
-  return parseMonthInput(raw);
-}
-
 function normalizeLookupKey(value: unknown): string {
   return normalizeText(String(value ?? ''));
 }
@@ -367,11 +338,9 @@ interface EnvioReferenceData {
 }
 
 interface RecojoReferenceData {
-  tiendaLabelById: Map<number, string>;
-  tipoRecojoLabelById: Map<number, string>;
-  vendedorSnapshotByLeadGanadoId: Map<number, string>;
-  latestLeadGanadoByTiendaId: Map<number, { leadGanadoId: number; vendedorSnapshot: string }>;
-  recojoGratisId: number | null;
+  leadGanadoLabelById: Map<number, string>;
+  leadGanadoSnapshotById: Map<number, { tienda: string; vendedor: string; fullfilment: string }>;
+  tipoCobroOptions: string[];
 }
 
 function toEnvioSheetRow(record: EnvioRecord, refs: EnvioReferenceData): SheetRow {
@@ -477,83 +446,23 @@ function calculateLeadDerivedValues(input: {
 }
 
 function toRecojoSheetRow(record: RecojoRecord, refs: RecojoReferenceData): SheetRow {
-  const vendedor = (() => {
-    if (record.id_lead_ganado && refs.vendedorSnapshotByLeadGanadoId.has(record.id_lead_ganado)) {
-      return refs.vendedorSnapshotByLeadGanadoId.get(record.id_lead_ganado) ?? '';
-    }
-
-    const latestByTienda = refs.latestLeadGanadoByTiendaId.get(record.id_tienda);
-    if (latestByTienda?.vendedorSnapshot) {
-      return latestByTienda.vendedorSnapshot;
-    }
-
-    const explicitSnapshot = String(record.vendedor_nombre_snapshot ?? '').trim();
-    if (explicitSnapshot) {
-      return explicitSnapshot;
-    }
-
-    return '';
-  })();
+  const leadGanado = refs.leadGanadoLabelById.get(record.id_lead_ganado) ?? `#${record.id_lead_ganado}`;
+  const snapshot = refs.leadGanadoSnapshotById.get(record.id_lead_ganado);
 
   return {
     _id: record.stable_id,
     idRecojo: record.business_id,
-    Mes: formatMonthForDisplay(record.mes),
-    Tienda: refs.tiendaLabelById.get(record.id_tienda) ?? `#${record.id_tienda}`,
-    'Tipo de Recojo': refs.tipoRecojoLabelById.get(record.id_tipo_recojo) ?? `#${record.id_tipo_recojo}`,
+    'Fecha': toDmyDisplayDate(record.fecha),
+    'Lead Ganado': leadGanado,
+    Tienda: snapshot?.tienda ?? '',
+    Vendedor: snapshot?.vendedor ?? '',
+    'Tipo de cobro': String(record.tipo_cobro ?? '').trim(),
     Veces: String(record.veces ?? 0),
-    'Cobro a tienda por recojo': formatCostForDisplay(record.cobro_a_tienda_por_recojo),
-    'Pago moto por recojo': formatCostForDisplay(record.pago_moto_por_recojo),
+    'Cobro a tienda': formatCostForDisplay(record.cobro_a_tienda),
+    'Pago a moto': formatCostForDisplay(record.pago_a_moto),
     'Ingreso recojo total': formatCostForDisplay(record.ingreso_recojo_total),
     'Costo recojo total': formatCostForDisplay(record.costo_recojo_total),
     Observaciones: record.observaciones ?? '',
-    Vendedor: vendedor,
-  };
-}
-
-function getLatestLeadGanadoVendorMaps(rows: Array<{
-  business_id: number | null;
-  tienda_nombre_snapshot: string | null;
-  vendedor_nombre_snapshot: string | null;
-}>, tiendaLabelById: Map<number, string>) {
-  const vendedorSnapshotByLeadGanadoId = new Map<number, string>();
-  const latestLeadGanadoByTiendaNombre = new Map<string, { leadGanadoId: number; vendedorSnapshot: string }>();
-  const latestLeadGanadoByTiendaId = new Map<number, { leadGanadoId: number; vendedorSnapshot: string }>();
-
-  for (const row of rows) {
-    const leadGanadoId = Number(row.business_id ?? 0);
-    const tiendaSnapshot = String(row.tienda_nombre_snapshot ?? '').trim();
-    const tiendaSnapshotKey = normalizeLookupKey(tiendaSnapshot);
-    const vendedorSnapshot = String(row.vendedor_nombre_snapshot ?? '').trim();
-
-    if (leadGanadoId > 0 && vendedorSnapshot) {
-      vendedorSnapshotByLeadGanadoId.set(leadGanadoId, vendedorSnapshot);
-    }
-
-    if (
-      tiendaSnapshotKey &&
-      leadGanadoId > 0 &&
-      vendedorSnapshot &&
-      !latestLeadGanadoByTiendaNombre.has(tiendaSnapshotKey)
-    ) {
-      latestLeadGanadoByTiendaNombre.set(tiendaSnapshotKey, {
-        leadGanadoId,
-        vendedorSnapshot,
-      });
-    }
-  }
-
-  for (const [tiendaId, tiendaLabel] of tiendaLabelById.entries()) {
-    const tiendaKey = normalizeLookupKey(tiendaLabel);
-    const latest = latestLeadGanadoByTiendaNombre.get(tiendaKey);
-    if (latest) {
-      latestLeadGanadoByTiendaId.set(tiendaId, latest);
-    }
-  }
-
-  return {
-    vendedorSnapshotByLeadGanadoId,
-    latestLeadGanadoByTiendaId,
   };
 }
 
@@ -899,41 +808,41 @@ async function fetchEnvioReferenceData(): Promise<EnvioReferenceData> {
 async function fetchRecojoReferenceData(): Promise<RecojoReferenceData> {
   if (!supabase) throw new Error('Supabase no está configurado');
 
-  const [tiendaLabelById, tipoRecojoLabelById] = await Promise.all([
-    fetchReferenceMap('tiendas', ['business_id', 'id'], ['nombre']),
+  const [tipoRecojoLabelById, leadsResponse] = await Promise.all([
     fetchReferenceMap('tipo_recojo', ['business_id', 'id'], ['tipo_recojo']),
+    supabase
+      .from('leads_ganados')
+      .select('business_id,tienda_nombre_snapshot,vendedor_nombre_snapshot,fullfilment_snapshot')
+      .order('business_id', { ascending: false })
+      .limit(20000),
   ]);
 
-  const recojoGratisId =
-    Array.from(tipoRecojoLabelById.entries()).find(([, label]) => normalizeLookupKey(label).includes(normalizeLookupKey('gratis')))?.[0] ??
-    null;
+  const { data: leadsData, error: leadsError } = leadsResponse;
+  const { leadGanadoLabelById, leadGanadoSnapshotById } = buildLeadGanadoEnvioMaps(
+    (leadsData ?? []) as Array<{
+      business_id: number | null;
+      tienda_nombre_snapshot: string | null;
+      vendedor_nombre_snapshot: string | null;
+      fullfilment_snapshot: boolean | string | null;
+    }>,
+  );
 
-  const { data: leadsData, error: leadsError } = await supabase
-    .from('leads_ganados')
-    .select('business_id,tienda_nombre_snapshot,vendedor_nombre_snapshot')
-    .order('business_id', { ascending: false })
-    .limit(20000);
-
-  const { vendedorSnapshotByLeadGanadoId, latestLeadGanadoByTiendaId } =
-    getLatestLeadGanadoVendorMaps(
-      (leadsData ?? []) as Array<{
-        business_id: number | null;
-        tienda_nombre_snapshot: string | null;
-        vendedor_nombre_snapshot: string | null;
-      }>,
-      tiendaLabelById,
-    );
+  const tipoCobroOptions = Array.from(
+    new Set([
+      ...Array.from(tipoRecojoLabelById.values()).map((value) => String(value ?? '').trim()).filter(Boolean),
+      'Cobrado',
+      'Gratis',
+    ]),
+  );
 
   if (leadsError) {
     // fallback sin romper flujo
   }
 
   return {
-    tiendaLabelById,
-    tipoRecojoLabelById,
-    vendedorSnapshotByLeadGanadoId,
-    latestLeadGanadoByTiendaId,
-    recojoGratisId,
+    leadGanadoLabelById,
+    leadGanadoSnapshotById,
+    tipoCobroOptions,
   };
 }
 
@@ -973,7 +882,7 @@ async function fetchRecojosFromSupabase(): Promise<SheetData> {
     supabase
       .from('recojos')
       .select(
-        'stable_id,business_id,mes,id_tienda,id_tipo_recojo,veces,cobro_a_tienda_por_recojo,pago_moto_por_recojo,ingreso_recojo_total,costo_recojo_total,observaciones,id_vendedor',
+        'stable_id,business_id,fecha,id_lead_ganado,tipo_cobro,veces,cobro_a_tienda,pago_a_moto,ingreso_recojo_total,costo_recojo_total,observaciones',
       )
       .order('business_id', { ascending: true }),
   ]);
@@ -1100,8 +1009,8 @@ export function useRecojoFormOptions(enabled: boolean) {
       const refs = await fetchRecojoReferenceData();
 
       return {
-        tiendas: Array.from(refs.tiendaLabelById.values()).sort((a, b) => a.localeCompare(b, 'es')),
-        tipoRecojo: Array.from(refs.tipoRecojoLabelById.values()).sort((a, b) => a.localeCompare(b, 'es')),
+        leadsGanados: Array.from(refs.leadGanadoLabelById.values()).sort((a, b) => a.localeCompare(b, 'es')),
+        tipoCobro: [...refs.tipoCobroOptions].sort((a, b) => a.localeCompare(b, 'es')),
       };
     },
     enabled,
@@ -1212,13 +1121,15 @@ export function useLeadGanadoAutoPreview(input: {
 }
 
 function calculateRecojoDerivedValues(input: {
-  idTipoRecojo: number;
+  tipoCobro: string;
   vecesRaw: unknown;
-  refs: RecojoReferenceData;
 }) {
+  // RECOJOS mantiene costos/totales calculados automáticamente en frontend,
+  // igual que el flujo anterior: no se editan manualmente en el formulario.
   const veces = Math.max(0, Math.round(parseNumericValue(input.vecesRaw) ?? 0));
   const pagoMotoPorRecojo = 4;
-  const isGratis = input.refs.recojoGratisId !== null && input.idTipoRecojo === input.refs.recojoGratisId;
+  const tipoCobro = normalizeLookupKey(input.tipoCobro);
+  const isGratis = tipoCobro.includes('gratis');
   const cobroATiendaPorRecojo = isGratis ? 0 : 8;
 
   const ingresoRecojoTotal = veces * cobroATiendaPorRecojo;
@@ -1226,8 +1137,8 @@ function calculateRecojoDerivedValues(input: {
 
   return {
     veces,
-    cobro_a_tienda_por_recojo: formatCostForStorage(cobroATiendaPorRecojo),
-    pago_moto_por_recojo: formatCostForStorage(pagoMotoPorRecojo),
+    cobro_a_tienda: formatCostForStorage(cobroATiendaPorRecojo),
+    pago_a_moto: formatCostForStorage(pagoMotoPorRecojo),
     ingreso_recojo_total: formatCostForStorage(ingresoRecojoTotal),
     costo_recojo_total: formatCostForStorage(costoRecojoTotal),
   };
@@ -1235,47 +1146,42 @@ function calculateRecojoDerivedValues(input: {
 
 export function useRecojoAutoPreview(input: {
   enabled: boolean;
-  tipoRecojo: string;
-  tienda: string;
+  leadGanado: string;
+  tipoCobro: string;
   veces: string;
 }) {
   return useQuery({
-    queryKey: ['sheet-preview', 'RECOJOS', input.tipoRecojo, input.tienda, input.veces],
+    queryKey: ['sheet-preview', 'RECOJOS', input.leadGanado, input.tipoCobro, input.veces],
     enabled: input.enabled,
     queryFn: async () => {
       const refs = await fetchRecojoReferenceData();
 
-      const idTipoRecojo = input.tipoRecojo ? findIdByLabelOrThrow(refs.tipoRecojoLabelById, input.tipoRecojo, 'Tipo de Recojo') : null;
-      const idTienda = input.tienda ? findIdByLabelOrThrow(refs.tiendaLabelById, input.tienda, 'Tienda') : null;
+      const idLeadGanado = input.leadGanado ? findIdByLabelOrThrow(refs.leadGanadoLabelById, input.leadGanado, 'Lead Ganado') : null;
+      const snapshot = idLeadGanado === null ? null : refs.leadGanadoSnapshotById.get(idLeadGanado) ?? null;
 
-      if (idTipoRecojo === null) {
+      if (!String(input.tipoCobro ?? '').trim()) {
         return {
-          'Cobro a tienda por recojo': '0.00',
-          'Pago moto por recojo': '4.00',
+          Tienda: snapshot?.tienda ?? '',
+          Vendedor: snapshot?.vendedor ?? '',
+          'Cobro a tienda': '0.00',
+          'Pago a moto': '4.00',
           'Ingreso recojo total': '0.00',
           'Costo recojo total': '0.00',
-          Vendedor: 'Se asigna por Tienda (Leads Ganados)',
         };
       }
 
       const derived = calculateRecojoDerivedValues({
-        idTipoRecojo,
+        tipoCobro: input.tipoCobro,
         vecesRaw: input.veces,
-        refs,
       });
 
-      const vendedorLabel = (() => {
-        if (idTienda === null) return 'Se asigna por Tienda (Leads Ganados)';
-        const latest = refs.latestLeadGanadoByTiendaId.get(idTienda);
-        return latest?.vendedorSnapshot || 'Se asigna por Tienda (Leads Ganados)';
-      })();
-
       return {
-        'Cobro a tienda por recojo': formatCostForDisplay(derived.cobro_a_tienda_por_recojo),
-        'Pago moto por recojo': formatCostForDisplay(derived.pago_moto_por_recojo),
+        Tienda: snapshot?.tienda ?? '',
+        Vendedor: snapshot?.vendedor ?? '',
+        'Cobro a tienda': formatCostForDisplay(derived.cobro_a_tienda),
+        'Pago a moto': formatCostForDisplay(derived.pago_a_moto),
         'Ingreso recojo total': formatCostForDisplay(derived.ingreso_recojo_total),
         'Costo recojo total': formatCostForDisplay(derived.costo_recojo_total),
-        Vendedor: vendedorLabel,
       };
     },
     staleTime: 5_000,
@@ -1610,28 +1516,25 @@ async function addRecojoSupabase(rowData: Record<string, unknown>): Promise<Muta
 
   const refs = await fetchRecojoReferenceData();
 
-  const idTienda = findIdByLabelOrThrow(refs.tiendaLabelById, rowData.Tienda, 'Tienda');
-  const idTipoRecojo = findIdByLabelOrThrow(refs.tipoRecojoLabelById, rowData['Tipo de Recojo'], 'Tipo de Recojo');
-  const idVendedor = null;
+  const idLeadGanado = findIdByLabelOrThrow(refs.leadGanadoLabelById, rowData['Lead Ganado'], 'Lead Ganado');
+  const tipoCobro = String(rowData['Tipo de cobro'] ?? '').trim();
 
   const derived = calculateRecojoDerivedValues({
-    idTipoRecojo,
+    tipoCobro,
     vecesRaw: rowData.Veces,
-    refs,
   });
 
   const { data, error } = await supabase
     .from('recojos')
     .insert({
-      mes: formatMonthForStorage(rowData.Mes),
-      id_tienda: idTienda,
-      id_tipo_recojo: idTipoRecojo,
-      id_vendedor: idVendedor,
+      fecha: toIsoDateInput(rowData.Fecha) || null,
+      id_lead_ganado: idLeadGanado,
+      tipo_cobro: tipoCobro,
       observaciones: String(rowData.Observaciones ?? rowData.observaciones ?? '').trim() || null,
       ...derived,
     })
     .select(
-      'stable_id,business_id,mes,id_tienda,id_tipo_recojo,veces,cobro_a_tienda_por_recojo,pago_moto_por_recojo,ingreso_recojo_total,costo_recojo_total,observaciones,id_vendedor',
+      'stable_id,business_id,fecha,id_lead_ganado,tipo_cobro,veces,cobro_a_tienda,pago_a_moto,ingreso_recojo_total,costo_recojo_total,observaciones',
     )
     .single();
 
@@ -1651,29 +1554,26 @@ async function updateRecojoSupabase(rowData: UpdateMutationPayload): Promise<Mut
 
   const refs = await fetchRecojoReferenceData();
 
-  const idTienda = findIdByLabelOrThrow(refs.tiendaLabelById, rowData.Tienda, 'Tienda');
-  const idTipoRecojo = findIdByLabelOrThrow(refs.tipoRecojoLabelById, rowData['Tipo de Recojo'], 'Tipo de Recojo');
-  const idVendedor = null;
+  const idLeadGanado = findIdByLabelOrThrow(refs.leadGanadoLabelById, rowData['Lead Ganado'], 'Lead Ganado');
+  const tipoCobro = String(rowData['Tipo de cobro'] ?? '').trim();
 
   const derived = calculateRecojoDerivedValues({
-    idTipoRecojo,
+    tipoCobro,
     vecesRaw: rowData.Veces,
-    refs,
   });
 
   const { data, error } = await supabase
     .from('recojos')
     .update({
-      mes: formatMonthForStorage(rowData.Mes),
-      id_tienda: idTienda,
-      id_tipo_recojo: idTipoRecojo,
-      id_vendedor: idVendedor,
+      fecha: toIsoDateInput(rowData.Fecha) || null,
+      id_lead_ganado: idLeadGanado,
+      tipo_cobro: tipoCobro,
       observaciones: String(rowData.Observaciones ?? rowData.observaciones ?? '').trim() || null,
       ...derived,
     })
     .eq('stable_id', rowData._id)
     .select(
-      'stable_id,business_id,mes,id_tienda,id_tipo_recojo,veces,cobro_a_tienda_por_recojo,pago_moto_por_recojo,ingreso_recojo_total,costo_recojo_total,observaciones,id_vendedor',
+      'stable_id,business_id,fecha,id_lead_ganado,tipo_cobro,veces,cobro_a_tienda,pago_a_moto,ingreso_recojo_total,costo_recojo_total,observaciones',
     )
     .single();
 
