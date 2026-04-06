@@ -49,9 +49,6 @@ export const SHEET_FORM_RULES: Record<string, SheetFormRule> = {
   COURIER: {
     uniqueColumns: ['Nombre'],
   },
-  VENDEDORES: {
-    uniqueColumns: ['Nombre'],
-  },
   FULLFILMENT: {
     uniqueColumns: ['¿Es FullFilment?'],
   },
