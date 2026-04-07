@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { Activity, BadgeDollarSign, BarChart3, LineChart as LineChartIcon, Megaphone, MousePointerClick, PieChart as PieChartIcon, Target } from 'lucide-react';
 import { Bar, BarChart, CartesianGrid, Cell, Line, LineChart, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { formatNumberEs } from '../../../lib/tableHelpers';
-import { ChartCard, KpiCard, KpiGrid, LeaderboardList, MetaAdsFiltersPanel, MetaAdsPageHero, Section, SyncStatusCard } from './metaAdsShared';
+import { ChartCard, KpiCard, KpiGrid, LeaderboardList, MetaAdsFiltersPanel, MetaAdsPageHero, Section } from './metaAdsShared';
 import { aggregateBreakdown, aggregateLeaderboard, aggregateTrendRows, formatCompactMetric, safeDivide, sumBy } from './metaAdsUtils';
 import { useMetaAdsReporting } from './useMetaAdsReporting';
 
@@ -12,6 +12,9 @@ export function MetaAdsDashboard() {
   const [accountId, setAccountId] = useState('');
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
+  const [draftAccountId, setDraftAccountId] = useState('');
+  const [draftDateFrom, setDraftDateFrom] = useState('');
+  const [draftDateTo, setDraftDateTo] = useState('');
 
   const reportingQuery = useMetaAdsReporting({ accountId, dateFrom, dateTo });
 
@@ -85,35 +88,43 @@ export function MetaAdsDashboard() {
   }
 
   const accounts = reportingQuery.data?.accounts ?? [];
-  const latestSyncRun = reportingQuery.data?.latestSyncRun ?? null;
+  const isFiltersDirty = accountId !== draftAccountId || dateFrom !== draftDateFrom || dateTo !== draftDateTo;
 
   return (
     <div className="space-y-6">
       <MetaAdsPageHero
         title="Meta Ads Dashboard"
-        description="Vista ejecutiva de performance, tendencia diaria y último sync persistido en Supabase."
+        description="Vista ejecutiva de performance y tendencia diaria con filtros aplicados de forma intencional."
         badge="Dashboard ejecutivo"
         icon={<Megaphone className="text-red-600" size={24} />}
       />
 
       <MetaAdsFiltersPanel
         accounts={accounts}
-        accountId={accountId}
-        dateFrom={dateFrom}
-        dateTo={dateTo}
-        onAccountIdChange={setAccountId}
-        onDateFromChange={setDateFrom}
-        onDateToChange={setDateTo}
+        appliedAccountId={accountId}
+        appliedDateFrom={dateFrom}
+        appliedDateTo={dateTo}
+        draftAccountId={draftAccountId}
+        draftDateFrom={draftDateFrom}
+        draftDateTo={draftDateTo}
+        onDraftAccountIdChange={setDraftAccountId}
+        onDraftDateFromChange={setDraftDateFrom}
+        onDraftDateToChange={setDraftDateTo}
+        onApply={() => {
+          setAccountId(draftAccountId);
+          setDateFrom(draftDateFrom);
+          setDateTo(draftDateTo);
+        }}
         onClear={() => {
           setAccountId('');
           setDateFrom('');
           setDateTo('');
+          setDraftAccountId('');
+          setDraftDateFrom('');
+          setDraftDateTo('');
         }}
+        isApplyDisabled={!isFiltersDirty}
       />
-
-      <Section title="Sync status">
-        <SyncStatusCard latestSyncRun={latestSyncRun} />
-      </Section>
 
       <Section title="KPI">
         <KpiGrid>

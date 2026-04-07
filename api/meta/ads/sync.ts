@@ -2,6 +2,7 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 import {
   getSupabaseAdminClient,
   isSecretAuthorized,
+  isVercelCronAuthorized,
   verifyAdminSession,
 } from '../../kommo/_shared.js';
 
@@ -9,6 +10,7 @@ const META_GRAPH_VERSION = 'v22.0';
 const META_GRAPH_BASE_URL = `https://graph.facebook.com/${META_GRAPH_VERSION}`;
 const SYNC_SECRET_HEADER = 'x-meta-sync-secret';
 const SYNC_SECRET_ENV = 'META_SYNC_SECRET';
+const DEFAULT_ACCOUNT_ID_ENV = 'META_ADS_ACCOUNT_ID';
 const DEFAULT_LIMIT = 100;
 const DEFAULT_MAX_PAGES = 10;
 const DEFAULT_MAX_RUNTIME_MS = 45_000;
@@ -177,6 +179,20 @@ function normalizeAccountId(accountIdRaw: string) {
   }
 
   return trimmed.startsWith('act_') ? trimmed : `act_${trimmed}`;
+}
+
+function resolveAccountId(req: VercelRequest, body: JsonRecord) {
+  const requestValue = getRequestParam(req, body, 'account_id');
+  if (requestValue?.trim()) {
+    return normalizeAccountId(requestValue);
+  }
+
+  const envValue = process.env[DEFAULT_ACCOUNT_ID_ENV];
+  if (envValue?.trim()) {
+    return normalizeAccountId(envValue);
+  }
+
+  throw new Error('El parámetro account_id es obligatorio. También podés configurar META_ADS_ACCOUNT_ID para corridas automáticas.');
 }
 
 function requireMetaAccessToken() {
@@ -503,7 +519,8 @@ export default async function metaAdsSyncHandler(req: VercelRequest, res: Vercel
 
   try {
     const secretAuthorized = isSecretAuthorized(req, SYNC_SECRET_ENV, SYNC_SECRET_HEADER);
-    if (!secretAuthorized) {
+    const cronAuthorized = isVercelCronAuthorized(req);
+    if (!secretAuthorized && !cronAuthorized) {
       const auth = verifyAdminSession(req);
       if (!auth.ok) {
         return res.status(auth.status).json({ error: auth.error ?? 'No autorizado' });
@@ -511,12 +528,7 @@ export default async function metaAdsSyncHandler(req: VercelRequest, res: Vercel
     }
 
     const body = parseBodyObject(req);
-    const accountIdRaw = getRequestParam(req, body, 'account_id');
-    if (!accountIdRaw?.trim()) {
-      return res.status(400).json({ error: 'El parámetro account_id es obligatorio.' });
-    }
-
-    const accountBusinessId = normalizeAccountId(accountIdRaw);
+    const accountBusinessId = resolveAccountId(req, body);
     accountBusinessIdForRun = accountBusinessId;
     const datePreset = getRequestParam(req, body, 'date_preset')?.trim() || 'last_30d';
     const timeIncrement = getRequestParam(req, body, 'time_increment')?.trim() || '1';
