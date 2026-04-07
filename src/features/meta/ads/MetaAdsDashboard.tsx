@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useState, type ReactNode } from 'react';
 import { Activity, BadgeDollarSign, BarChart3, LineChart as LineChartIcon, Megaphone, MousePointerClick, PieChart as PieChartIcon, Sparkles, Target, Trophy } from 'lucide-react';
 import { Bar, BarChart, CartesianGrid, Cell, Line, LineChart, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { formatNumberEs } from '../../../lib/tableHelpers';
@@ -31,6 +31,8 @@ export function MetaAdsDashboard() {
   const [draftAccountId, setDraftAccountId] = useState('');
   const [draftDateFrom, setDraftDateFrom] = useState('');
   const [draftDateTo, setDraftDateTo] = useState('');
+  const [campaignCompareIds, setCampaignCompareIds] = useState({ left: '', right: '' });
+  const [adCompareIds, setAdCompareIds] = useState({ left: '', right: '' });
 
   const reportingQuery = useMetaAdsReporting({ accountId, dateFrom, dateTo });
 
@@ -75,10 +77,6 @@ export function MetaAdsDashboard() {
       getSubtitle: (row) => row.campaign_name ?? row.campaign_business_id,
       getCreativeName: (row) => row.creative_name ?? row.creative_id ?? 'Sin creative',
     });
-    const campaignComparison = pickComparisonPair(campaignPerformance);
-    const adComparison = pickComparisonPair(adPerformance);
-    const campaignComparisonMetrics = buildComparisonMetrics(campaignComparison[0], campaignComparison[1]);
-    const adComparisonMetrics = buildComparisonMetrics(adComparison[0], adComparison[1]);
     const adDecisionSignals = buildDecisionSignals(adPerformance);
     const weakAds = getWeakPerformers(adPerformance).slice(0, 5);
     const creativeInsights = getCreativeInsightEntries(adPerformance, 5);
@@ -100,15 +98,44 @@ export function MetaAdsDashboard() {
       topAds,
       campaignPerformance,
       adPerformance,
-      campaignComparison,
-      adComparison,
-      campaignComparisonMetrics,
-      adComparisonMetrics,
       adDecisionSignals,
       weakAds,
       creativeInsights,
     };
   }, [reportingQuery.data?.rows]);
+
+  const accounts = reportingQuery.data?.accounts ?? [];
+  const isFiltersDirty = accountId !== draftAccountId || dateFrom !== draftDateFrom || dateTo !== draftDateTo;
+
+  const resolvedCampaignCompareIds = useMemo(
+    () => resolveComparisonSelection(dashboard.campaignPerformance, campaignCompareIds),
+    [dashboard.campaignPerformance, campaignCompareIds],
+  );
+
+  const resolvedAdCompareIds = useMemo(
+    () => resolveComparisonSelection(dashboard.adPerformance, adCompareIds),
+    [dashboard.adPerformance, adCompareIds],
+  );
+
+  const selectedCampaignComparison = useMemo(
+    () => resolveComparisonEntries(dashboard.campaignPerformance, resolvedCampaignCompareIds),
+    [dashboard.campaignPerformance, resolvedCampaignCompareIds],
+  );
+
+  const selectedAdComparison = useMemo(
+    () => resolveComparisonEntries(dashboard.adPerformance, resolvedAdCompareIds),
+    [dashboard.adPerformance, resolvedAdCompareIds],
+  );
+
+  const selectedCampaignComparisonMetrics = useMemo(
+    () => buildComparisonMetrics(selectedCampaignComparison[0], selectedCampaignComparison[1]),
+    [selectedCampaignComparison],
+  );
+
+  const selectedAdComparisonMetrics = useMemo(
+    () => buildComparisonMetrics(selectedAdComparison[0], selectedAdComparison[1]),
+    [selectedAdComparison],
+  );
 
   if (reportingQuery.isLoading) {
     return (
@@ -130,9 +157,6 @@ export function MetaAdsDashboard() {
       </div>
     );
   }
-
-  const accounts = reportingQuery.data?.accounts ?? [];
-  const isFiltersDirty = accountId !== draftAccountId || dateFrom !== draftDateFrom || dateTo !== draftDateTo;
 
   return (
     <div className="space-y-6">
@@ -264,18 +288,40 @@ export function MetaAdsDashboard() {
         <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
           <HeadToHeadCard
             title="Campaña vs campaña"
-            description="Compará las dos campañas con mayor inversión para entender dónde ganó la eficiencia y dónde sólo ganó el presupuesto."
-            left={dashboard.campaignComparison[0]}
-            right={dashboard.campaignComparison[1]}
-            metrics={dashboard.campaignComparisonMetrics}
+            description="Arranca con la dupla de mayor spend del filtro actual, pero podés cambiarla para revisar cualquier campaña contra otra sin volver a pedir data al servidor."
+            controls={(
+              <ComparisonSelectorRow
+                leftLabel="Campaña A"
+                rightLabel="Campaña B"
+                leftValue={resolvedCampaignCompareIds.left}
+                rightValue={resolvedCampaignCompareIds.right}
+                options={dashboard.campaignPerformance}
+                onLeftChange={(value) => setCampaignCompareIds((current) => resolveComparisonSelection(dashboard.campaignPerformance, { ...current, left: value }))}
+                onRightChange={(value) => setCampaignCompareIds((current) => resolveComparisonSelection(dashboard.campaignPerformance, { ...current, right: value }))}
+              />
+            )}
+            left={selectedCampaignComparison[0]}
+            right={selectedCampaignComparison[1]}
+            metrics={selectedCampaignComparisonMetrics}
             emptyMessage="Todavía no hay suficientes campañas con data para comparar."
           />
           <HeadToHeadCard
             title="Ad vs ad"
-            description="Poné frente a frente las dos piezas con más peso para ver cuál conviene escalar y cuál revisar."
-            left={dashboard.adComparison[0]}
-            right={dashboard.adComparison[1]}
-            metrics={dashboard.adComparisonMetrics}
+            description="La comparación empieza con los ads líderes en spend del dataset filtrado y después queda completamente manual para que pruebes hipótesis."
+            controls={(
+              <ComparisonSelectorRow
+                leftLabel="Ad A"
+                rightLabel="Ad B"
+                leftValue={resolvedAdCompareIds.left}
+                rightValue={resolvedAdCompareIds.right}
+                options={dashboard.adPerformance}
+                onLeftChange={(value) => setAdCompareIds((current) => resolveComparisonSelection(dashboard.adPerformance, { ...current, left: value }))}
+                onRightChange={(value) => setAdCompareIds((current) => resolveComparisonSelection(dashboard.adPerformance, { ...current, right: value }))}
+              />
+            )}
+            left={selectedAdComparison[0]}
+            right={selectedAdComparison[1]}
+            metrics={selectedAdComparisonMetrics}
             emptyMessage="Todavía no hay suficientes ads con data para comparar."
           />
         </div>
@@ -331,6 +377,7 @@ export function MetaAdsDashboard() {
 function HeadToHeadCard({
   title,
   description,
+  controls,
   left,
   right,
   metrics,
@@ -338,6 +385,7 @@ function HeadToHeadCard({
 }: {
   title: string;
   description: string;
+  controls?: ReactNode;
   left?: MetaPerformanceEntry;
   right?: MetaPerformanceEntry;
   metrics: MetaComparisonMetric[];
@@ -350,6 +398,7 @@ function HeadToHeadCard({
   return (
     <ChartCard title={title} icon={<Trophy size={16} className="text-red-600" />}>
       <p className="text-sm text-gray-500">{description}</p>
+      {controls}
 
       <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
         {[left, right].map((entry, index) => (
@@ -389,6 +438,74 @@ function HeadToHeadCard({
         </table>
       </div>
     </ChartCard>
+  );
+}
+
+function ComparisonSelectorRow({
+  leftLabel,
+  rightLabel,
+  leftValue,
+  rightValue,
+  options,
+  onLeftChange,
+  onRightChange,
+}: {
+  leftLabel: string;
+  rightLabel: string;
+  leftValue: string;
+  rightValue: string;
+  options: MetaPerformanceEntry[];
+  onLeftChange: (value: string) => void;
+  onRightChange: (value: string) => void;
+}) {
+  return (
+    <div className="grid grid-cols-1 gap-3 rounded-2xl border border-gray-200 bg-gray-50/80 p-4 md:grid-cols-2">
+      <ComparisonSelect
+        label={leftLabel}
+        value={leftValue}
+        options={options}
+        selectedPeer={rightValue}
+        onChange={onLeftChange}
+      />
+      <ComparisonSelect
+        label={rightLabel}
+        value={rightValue}
+        options={options}
+        selectedPeer={leftValue}
+        onChange={onRightChange}
+      />
+    </div>
+  );
+}
+
+function ComparisonSelect({
+  label,
+  value,
+  options,
+  selectedPeer,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  options: MetaPerformanceEntry[];
+  selectedPeer: string;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <label className="rounded-2xl border border-gray-200 bg-white px-4 py-3 text-sm text-gray-600 shadow-inner shadow-white/50">
+      <span className="text-xs font-semibold uppercase tracking-wide text-gray-500">{label}</span>
+      <select
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        className="mt-2 w-full rounded-xl border border-gray-300 bg-white px-3 py-2.5 text-sm text-gray-800 outline-none transition focus:border-red-300 focus:ring-2 focus:ring-red-100"
+      >
+        {options.map((option) => (
+          <option key={option.id} value={option.id} disabled={option.id === selectedPeer}>
+            {option.title} · {option.subtitle}
+          </option>
+        ))}
+      </select>
+    </label>
   );
 }
 
@@ -531,4 +648,36 @@ function describeMetricWinner(metric: MetaComparisonMetric) {
   const side = metric.winner === 'left' ? 'Lado A' : 'Lado B';
   const verb = metric.better === 'lower' ? 'gana por menor valor' : 'gana por mayor valor';
   return `${side} ${verb}`;
+}
+
+function resolveComparisonEntries(
+  entries: MetaPerformanceEntry[],
+  selection: { left: string; right: string },
+): [MetaPerformanceEntry | undefined, MetaPerformanceEntry | undefined] {
+  const normalized = resolveComparisonSelection(entries, selection);
+  const left = entries.find((entry) => entry.id === normalized.left);
+  const right = entries.find((entry) => entry.id === normalized.right);
+  return [left, right];
+}
+
+function resolveComparisonSelection(
+  entries: MetaPerformanceEntry[],
+  selection: { left: string; right: string },
+) {
+  const [defaultLeft, defaultRight] = pickComparisonPair(entries);
+  const fallbackLeft = defaultLeft?.id ?? '';
+  const fallbackRight = defaultRight?.id ?? '';
+  const validIds = new Set(entries.map((entry) => entry.id));
+
+  const left = validIds.has(selection.left) ? selection.left : fallbackLeft;
+  const leftResolved = left || fallbackLeft;
+  const rightCandidate = validIds.has(selection.right) ? selection.right : fallbackRight;
+  const right = rightCandidate && rightCandidate !== leftResolved
+    ? rightCandidate
+    : entries.find((entry) => entry.id !== leftResolved)?.id ?? '';
+
+  return {
+    left: leftResolved,
+    right,
+  };
 }
