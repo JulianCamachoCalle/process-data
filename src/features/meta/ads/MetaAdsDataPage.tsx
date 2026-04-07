@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Activity, ChevronLeft, ChevronRight, Database, Megaphone, Search } from 'lucide-react';
+import { Activity, ChevronLeft, ChevronRight, Database, Search } from 'lucide-react';
 import { formatCurrencyPen, formatNumberEs, normalizeText } from '../../../lib/tableHelpers';
 import { KpiCard, KpiGrid, MetaAdsFiltersPanel, MetaAdsPageHero, Section } from './metaAdsShared';
 import { formatPercent, formatStatus } from './metaAdsUtils';
@@ -162,15 +162,6 @@ export function MetaAdsDataPage() {
                 ))}
               </select>
             </label>
-
-            <div className="rounded-2xl border border-red-100 bg-gradient-to-br from-red-50 via-white to-orange-50 px-4 py-3 flex items-center justify-between gap-3 shadow-[0_16px_30px_-24px_rgba(220,38,38,0.85)]">
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-wide text-red-600">Estado de la vista</p>
-                <p className="text-sm font-semibold text-gray-800 mt-1">{formatNumberEs(filteredRows.length)} fila(s) aplicadas</p>
-                <p className="mt-1 text-xs text-gray-500">Los cambios del formulario no impactan la tabla hasta aplicar.</p>
-              </div>
-              <Megaphone className="text-red-500" size={18} />
-            </div>
           </div>
         )}
       />

@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { Activity, CalendarRange, CheckCircle2, Clock3, Database, Filter, RefreshCw, Sparkles } from 'lucide-react';
+import { Activity, CheckCircle2, Clock3, Database, Filter, RefreshCw } from 'lucide-react';
 import { formatCurrencyPen, formatNumberEs } from '../../../lib/tableHelpers';
 import type { MetaAdAccountOption, MetaSyncRunRow } from './types';
 import { formatDateTime, formatDateRangeLabel, formatDurationMs, formatSyncResourceSummary } from './metaAdsUtils';
@@ -65,7 +65,6 @@ export function MetaAdsFiltersPanel({
   isApplyDisabled?: boolean;
   extra?: ReactNode;
 }) {
-  const hasAppliedFilters = Boolean(appliedAccountId || appliedDateFrom || appliedDateTo);
 
   return (
     <div className="rounded-[28px] border border-gray-200 bg-white/95 p-5 shadow-[0_24px_52px_-38px_rgba(15,23,42,0.95)] backdrop-blur-sm space-y-5">
@@ -79,15 +78,6 @@ export function MetaAdsFiltersPanel({
           <p className="mt-1 text-sm text-gray-500">
             Los cambios quedan en borrador hasta que presionás <span className="font-semibold text-gray-700">Aplicar filtros</span>.
           </p>
-        </div>
-
-        <div className="rounded-2xl border border-red-100 bg-gradient-to-br from-red-50 via-white to-orange-50 px-4 py-3 text-sm shadow-sm">
-          <p className="inline-flex items-center gap-2 font-semibold text-red-700">
-            <Sparkles size={15} />
-            Periodo aplicado
-          </p>
-          <p className="mt-2 text-sm font-medium text-gray-800">{formatDateRangeLabel(appliedDateFrom, appliedDateTo)}</p>
-          <p className="mt-1 text-xs text-gray-500">{hasAppliedFilters ? 'Filtro activo listo para reporting.' : 'Sin filtros remotos activos.'}</p>
         </div>
       </div>
 
@@ -127,17 +117,6 @@ export function MetaAdsFiltersPanel({
             className="mt-2 w-full rounded-xl border border-gray-300 bg-white px-3 py-2.5 text-sm text-gray-800 outline-none transition focus:border-red-300 focus:ring-2 focus:ring-red-100"
           />
         </label>
-
-        <div className="rounded-2xl border border-gray-200 bg-slate-900 px-4 py-3 text-white shadow-[0_18px_40px_-32px_rgba(15,23,42,1)]">
-          <div className="inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-300">
-            <CalendarRange size={14} />
-            Vista aplicada
-          </div>
-          <div className="mt-3 space-y-1">
-            <p className="text-sm font-semibold">{formatDateRangeLabel(appliedDateFrom, appliedDateTo)}</p>
-            <p className="text-xs text-slate-300">Cuenta: {appliedAccountId || 'Todas las cuentas'}</p>
-          </div>
-        </div>
       </div>
 
       {extra}
