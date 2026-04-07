@@ -44,4 +44,34 @@ export type MetaAdsOverviewFilters = {
 export type MetaAdsOverviewPayload = {
   accounts: MetaAdAccountOption[];
   rows: MetaAdsReportingRow[];
+  latestSyncRun: MetaSyncRunRow | null;
+};
+
+export type MetaSyncRunResourceSummary = {
+  pages_fetched?: number;
+  pulled?: number;
+  upserted?: number;
+  has_more?: boolean;
+};
+
+export type MetaSyncRunRow = {
+  id: string;
+  provider: string;
+  resource: string;
+  sync_type: string;
+  account_business_id: string | null;
+  started_at: string;
+  finished_at: string | null;
+  duration_ms: number | null;
+  success: boolean | null;
+  early_stop: Record<string, unknown> | null;
+  totals: {
+    pulled?: number;
+    upserted?: number;
+  } | null;
+  resources: Record<string, MetaSyncRunResourceSummary> | null;
+  request_params: Record<string, unknown> | null;
+  error_message: string | null;
+  created_at_db: string;
+  updated_at_db: string;
 };

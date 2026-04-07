@@ -17,6 +17,25 @@ const RUNTIME_BUFFER_MS = 1_500;
 
 type JsonRecord = Record<string, unknown>;
 
+type SyncRunInsertRow = {
+  provider: string;
+  resource: string;
+  sync_type: string;
+  account_business_id: string | null;
+  started_at: string;
+  request_params: JsonRecord;
+};
+
+type SyncRunUpdateRow = {
+  finished_at: string;
+  duration_ms: number;
+  success: boolean;
+  early_stop?: JsonRecord | null;
+  totals?: JsonRecord | null;
+  resources?: JsonRecord | null;
+  error_message?: string | null;
+};
+
 type SyncResourceSummary = {
   pages_fetched: number;
   pulled: number;
@@ -286,6 +305,45 @@ async function upsertRows(
   return processed;
 }
 
+async function createSyncRun(row: SyncRunInsertRow) {
+  try {
+    const supabase = getSupabaseAdminClient();
+    const { data, error } = await supabase
+      .from('meta_sync_runs')
+      .insert(row as never)
+      .select('id')
+      .single();
+
+    if (error) {
+      console.error('[meta-ads-sync] No se pudo crear meta_sync_runs:', error.message);
+      return null;
+    }
+
+    return toNullableText((data as { id?: unknown } | null)?.id);
+  } catch (error) {
+    console.error('[meta-ads-sync] Error creando meta_sync_runs:', error);
+    return null;
+  }
+}
+
+async function finalizeSyncRun(syncRunId: string | null, patch: SyncRunUpdateRow) {
+  if (!syncRunId) return;
+
+  try {
+    const supabase = getSupabaseAdminClient();
+    const { error } = await supabase
+      .from('meta_sync_runs')
+      .update(patch as never)
+      .eq('id', syncRunId);
+
+    if (error) {
+      console.error('[meta-ads-sync] No se pudo actualizar meta_sync_runs:', error.message);
+    }
+  } catch (error) {
+    console.error('[meta-ads-sync] Error actualizando meta_sync_runs:', error);
+  }
+}
+
 async function syncPagedResource<TItem, TRow extends JsonRecord>(options: {
   token: string;
   label: keyof SyncSummary;
@@ -439,6 +497,10 @@ export default async function metaAdsSyncHandler(req: VercelRequest, res: Vercel
     return res.status(405).json({ error: 'Método no permitido' });
   }
 
+  let syncRunId: string | null = null;
+  let startedAt = Date.now();
+  let accountBusinessIdForRun: string | null = null;
+
   try {
     const secretAuthorized = isSecretAuthorized(req, SYNC_SECRET_ENV, SYNC_SECRET_HEADER);
     if (!secretAuthorized) {
@@ -455,6 +517,7 @@ export default async function metaAdsSyncHandler(req: VercelRequest, res: Vercel
     }
 
     const accountBusinessId = normalizeAccountId(accountIdRaw);
+    accountBusinessIdForRun = accountBusinessId;
     const datePreset = getRequestParam(req, body, 'date_preset')?.trim() || 'last_30d';
     const timeIncrement = getRequestParam(req, body, 'time_increment')?.trim() || '1';
     const limit = parsePositiveInt(getRequestParam(req, body, 'limit'), DEFAULT_LIMIT, 500);
@@ -465,7 +528,23 @@ export default async function metaAdsSyncHandler(req: VercelRequest, res: Vercel
     );
 
     const token = requireMetaAccessToken();
-    const startedAt = Date.now();
+    startedAt = Date.now();
+
+    syncRunId = await createSyncRun({
+      provider: 'meta',
+      resource: 'ads',
+      sync_type: secretAuthorized ? 'secret' : 'manual',
+      account_business_id: accountBusinessId,
+      started_at: new Date(startedAt).toISOString(),
+      request_params: {
+        account_id: accountBusinessId,
+        date_preset: datePreset,
+        time_increment: timeIncrement,
+        limit,
+        max_pages: maxPages,
+        max_runtime_ms: maxRuntimeMs,
+      },
+    });
 
     const baseSummary: SyncSummary = {
       account: { pages_fetched: 1, pulled: 1, upserted: 0, has_more: false },
@@ -579,6 +658,16 @@ export default async function metaAdsSyncHandler(req: VercelRequest, res: Vercel
       { pulled: 0, upserted: 0 },
     );
 
+    await finalizeSyncRun(syncRunId, {
+      finished_at: new Date().toISOString(),
+      duration_ms: durationMs,
+      success: true,
+      early_stop: earlyStop,
+      totals,
+      resources: baseSummary,
+      error_message: null,
+    });
+
     return res.status(200).json({
       success: true,
       account_id: accountBusinessId,
@@ -593,8 +682,22 @@ export default async function metaAdsSyncHandler(req: VercelRequest, res: Vercel
       resources: baseSummary,
     });
   } catch (error) {
+    const durationMs = Date.now() - startedAt;
+    const message = error instanceof Error ? error.message : 'Error desconocido al sincronizar Meta Ads.';
+
+    await finalizeSyncRun(syncRunId, {
+      finished_at: new Date().toISOString(),
+      duration_ms: durationMs,
+      success: false,
+      early_stop: null,
+      totals: null,
+      resources: null,
+      error_message: message,
+    });
+
     return res.status(500).json({
-      error: error instanceof Error ? error.message : 'Error desconocido al sincronizar Meta Ads.',
+      error: message,
+      account_id: accountBusinessIdForRun,
     });
   }
 }
