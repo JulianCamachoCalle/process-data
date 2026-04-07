@@ -394,7 +394,7 @@ export function SheetView({ sheetName }: SheetViewProps) {
             <Table2 className="text-red-600" size={24} />
             {sheetLabel}
           </h2>
-          <p className="text-sm text-gray-500">Gestión de registros y operaciones de la hoja seleccionada.</p>
+          <p className="text-sm text-gray-500">Gestión de datos.</p>
         </div>
         <div className="flex gap-3">
           <button

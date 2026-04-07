@@ -1,5 +1,5 @@
-import { useMemo, useState, type ReactNode } from 'react';
-import { Activity, BadgeDollarSign, BarChart3, LineChart as LineChartIcon, Megaphone, MousePointerClick, PieChart as PieChartIcon, Sparkles, Target, Trophy } from 'lucide-react';
+import { useMemo, useState } from 'react';
+import { Activity, BadgeDollarSign, BarChart3, LineChart as LineChartIcon, Megaphone, MousePointerClick, PieChart as PieChartIcon, Sparkles, Target, TrendingUp, TriangleAlert, Trophy, Wrench } from 'lucide-react';
 import { Bar, BarChart, CartesianGrid, Cell, Line, LineChart, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { formatNumberEs } from '../../../lib/tableHelpers';
 import { ChartCard, InsightBadge, KpiCard, KpiGrid, LeaderboardList, MetaAdsFiltersPanel, MetaAdsPageHero, Section } from './metaAdsShared';
@@ -9,8 +9,8 @@ import {
   aggregatePerformanceEntries,
   aggregateTrendRows,
   buildComparisonMetrics,
-  buildComparisonNarrative,
   buildDecisionSignals,
+  buildRecommendationBuckets,
   formatCompactMetric,
   getCreativeInsightEntries,
   getWeakPerformers,
@@ -18,7 +18,6 @@ import {
   safeDivide,
   sumBy,
   type MetaComparisonMetric,
-  type MetaComparisonNarrative,
   type MetaDecisionSignal,
   type MetaPerformanceEntry,
 } from './metaAdsUtils';
@@ -33,6 +32,7 @@ export function MetaAdsDashboard() {
   const [draftAccountId, setDraftAccountId] = useState('');
   const [draftDateFrom, setDraftDateFrom] = useState('');
   const [draftDateTo, setDraftDateTo] = useState('');
+  const [comparisonType, setComparisonType] = useState<'campaigns' | 'ads'>('campaigns');
   const [campaignCompareIds, setCampaignCompareIds] = useState({ left: '', right: '' });
   const [adCompareIds, setAdCompareIds] = useState({ left: '', right: '' });
 
@@ -80,6 +80,7 @@ export function MetaAdsDashboard() {
       getCreativeName: (row) => row.creative_name ?? row.creative_id ?? 'Sin creative',
     });
     const adDecisionSignals = buildDecisionSignals(adPerformance);
+    const recommendationBuckets = buildRecommendationBuckets(adPerformance);
     const weakAds = getWeakPerformers(adPerformance).slice(0, 5);
     const creativeInsights = getCreativeInsightEntries(adPerformance, 5);
 
@@ -101,6 +102,7 @@ export function MetaAdsDashboard() {
       campaignPerformance,
       adPerformance,
       adDecisionSignals,
+      recommendationBuckets,
       weakAds,
       creativeInsights,
     };
@@ -139,15 +141,33 @@ export function MetaAdsDashboard() {
     [selectedAdComparison],
   );
 
-  const selectedCampaignNarrative = useMemo(
-    () => buildComparisonNarrative(selectedCampaignComparison[0], selectedCampaignComparison[1]),
-    [selectedCampaignComparison],
-  );
-
-  const selectedAdNarrative = useMemo(
-    () => buildComparisonNarrative(selectedAdComparison[0], selectedAdComparison[1]),
-    [selectedAdComparison],
-  );
+  const activeComparison = comparisonType === 'campaigns'
+    ? {
+        title: 'Comparación directa',
+        emptyMessage: 'Todavía no hay suficientes campañas con data para comparar.',
+        leftLabel: 'Campaña A',
+        rightLabel: 'Campaña B',
+        options: dashboard.campaignPerformance,
+        selection: resolvedCampaignCompareIds,
+        left: selectedCampaignComparison[0],
+        right: selectedCampaignComparison[1],
+        metrics: selectedCampaignComparisonMetrics,
+        onLeftChange: (value: string) => setCampaignCompareIds((current) => resolveComparisonSelection(dashboard.campaignPerformance, { ...current, left: value })),
+        onRightChange: (value: string) => setCampaignCompareIds((current) => resolveComparisonSelection(dashboard.campaignPerformance, { ...current, right: value })),
+      }
+    : {
+        title: 'Comparación directa',
+        emptyMessage: 'Todavía no hay suficientes ads con data para comparar.',
+        leftLabel: 'Ad A',
+        rightLabel: 'Ad B',
+        options: dashboard.adPerformance,
+        selection: resolvedAdCompareIds,
+        left: selectedAdComparison[0],
+        right: selectedAdComparison[1],
+        metrics: selectedAdComparisonMetrics,
+        onLeftChange: (value: string) => setAdCompareIds((current) => resolveComparisonSelection(dashboard.adPerformance, { ...current, left: value })),
+        onRightChange: (value: string) => setAdCompareIds((current) => resolveComparisonSelection(dashboard.adPerformance, { ...current, right: value })),
+      };
 
   if (reportingQuery.isLoading) {
     return (
@@ -174,7 +194,7 @@ export function MetaAdsDashboard() {
     <div className="space-y-6">
       <MetaAdsPageHero
         title="Meta Ads Dashboard"
-        description="Vista ejecutiva de performance y tendencia diaria con filtros aplicados de forma intencional."
+        description="Vista de performance y tendencia diaria."
         badge="Dashboard ejecutivo"
         icon={<Megaphone className="text-red-600" size={24} />}
       />
@@ -297,54 +317,36 @@ export function MetaAdsDashboard() {
       </Section>
 
       <Section title="Comparativas directas">
-        <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-          <HeadToHeadCard
-            title="Campaña vs campaña"
-            description="Arranca con la dupla de mayor spend del filtro actual, pero podés cambiarla para revisar cualquier campaña contra otra sin volver a pedir data al servidor."
-            controls={(
-              <ComparisonSelectorRow
-                leftLabel="Campaña A"
-                rightLabel="Campaña B"
-                leftValue={resolvedCampaignCompareIds.left}
-                rightValue={resolvedCampaignCompareIds.right}
-                options={dashboard.campaignPerformance}
-                onLeftChange={(value) => setCampaignCompareIds((current) => resolveComparisonSelection(dashboard.campaignPerformance, { ...current, left: value }))}
-                onRightChange={(value) => setCampaignCompareIds((current) => resolveComparisonSelection(dashboard.campaignPerformance, { ...current, right: value }))}
-              />
-            )}
-            left={selectedCampaignComparison[0]}
-            right={selectedCampaignComparison[1]}
-            metrics={selectedCampaignComparisonMetrics}
-            narrative={selectedCampaignNarrative}
-            emptyMessage="Todavía no hay suficientes campañas con data para comparar."
-          />
-          <HeadToHeadCard
-            title="Ad vs ad"
-            description="La comparación empieza con los ads líderes en spend del dataset filtrado y después queda completamente manual para que pruebes hipótesis."
-            controls={(
-              <ComparisonSelectorRow
-                leftLabel="Ad A"
-                rightLabel="Ad B"
-                leftValue={resolvedAdCompareIds.left}
-                rightValue={resolvedAdCompareIds.right}
-                options={dashboard.adPerformance}
-                onLeftChange={(value) => setAdCompareIds((current) => resolveComparisonSelection(dashboard.adPerformance, { ...current, left: value }))}
-                onRightChange={(value) => setAdCompareIds((current) => resolveComparisonSelection(dashboard.adPerformance, { ...current, right: value }))}
-              />
-            )}
-            left={selectedAdComparison[0]}
-            right={selectedAdComparison[1]}
-            metrics={selectedAdComparisonMetrics}
-            narrative={selectedAdNarrative}
-            emptyMessage="Todavía no hay suficientes ads con data para comparar."
-          />
-        </div>
+        <UnifiedComparisonCard
+          comparisonType={comparisonType}
+          onComparisonTypeChange={setComparisonType}
+          title={activeComparison.title}
+          leftLabel={activeComparison.leftLabel}
+          rightLabel={activeComparison.rightLabel}
+          leftValue={activeComparison.selection.left}
+          rightValue={activeComparison.selection.right}
+          options={activeComparison.options}
+          onLeftChange={activeComparison.onLeftChange}
+          onRightChange={activeComparison.onRightChange}
+          left={activeComparison.left}
+          right={activeComparison.right}
+          metrics={activeComparison.metrics}
+          emptyMessage={activeComparison.emptyMessage}
+        />
       </Section>
 
       <Section title="Señales para decidir">
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-5">
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
           {dashboard.adDecisionSignals.map((signal) => (
             <DecisionSignalCard key={signal.title} signal={signal} />
+          ))}
+        </div>
+      </Section>
+
+      <Section title="Recomendaciones accionables">
+        <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
+          {dashboard.recommendationBuckets.map((bucket) => (
+            <RecommendationBucketCard key={bucket.key} bucket={bucket} />
           ))}
         </div>
       </Section>
@@ -353,14 +355,14 @@ export function MetaAdsDashboard() {
         <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
           <PerformanceTableCard
             title="Ranking de campañas"
-            description="Ordenadas por spend para revisar dónde conviene defender presupuesto y dónde reasignar."
+            description="Ordenadas por gasto para revisar rápido dónde defender presupuesto y dónde reasignar."
             rows={dashboard.campaignPerformance.slice(0, 5)}
             emptyMessage="No hay campañas para rankear con los filtros actuales."
             showCreative={false}
           />
           <PerformanceTableCard
             title="Ranking de ads"
-            description="Lectura rápida para detectar qué pieza gana clicks y qué pieza se queda cara."
+            description="Lectura rápida para detectar qué pieza mueve volumen y cuál necesita revisión."
             rows={dashboard.adPerformance.slice(0, 5)}
             emptyMessage="No hay ads para rankear con los filtros actuales."
             showCreative
@@ -388,23 +390,35 @@ export function MetaAdsDashboard() {
   );
 }
 
-function HeadToHeadCard({
+function UnifiedComparisonCard({
+  comparisonType,
+  onComparisonTypeChange,
   title,
-  description,
-  controls,
+  leftLabel,
+  rightLabel,
+  leftValue,
+  rightValue,
+  options,
+  onLeftChange,
+  onRightChange,
   left,
   right,
   metrics,
-  narrative,
   emptyMessage,
 }: {
+  comparisonType: 'campaigns' | 'ads';
+  onComparisonTypeChange: (value: 'campaigns' | 'ads') => void;
   title: string;
-  description: string;
-  controls?: ReactNode;
+  leftLabel: string;
+  rightLabel: string;
+  leftValue: string;
+  rightValue: string;
+  options: MetaPerformanceEntry[];
+  onLeftChange: (value: string) => void;
+  onRightChange: (value: string) => void;
   left?: MetaPerformanceEntry;
   right?: MetaPerformanceEntry;
   metrics: MetaComparisonMetric[];
-  narrative: MetaComparisonNarrative | null;
   emptyMessage: string;
 }) {
   if (!left || !right) {
@@ -413,16 +427,42 @@ function HeadToHeadCard({
 
   return (
     <ChartCard title={title} icon={<Trophy size={16} className="text-red-600" />}>
-      <p className="text-sm text-gray-500">{description}</p>
-      {controls}
+      <ComparisonControls
+        comparisonType={comparisonType}
+        onComparisonTypeChange={onComparisonTypeChange}
+        leftLabel={leftLabel}
+        rightLabel={rightLabel}
+        leftValue={leftValue}
+        rightValue={rightValue}
+        options={options}
+        onLeftChange={onLeftChange}
+        onRightChange={onRightChange}
+      />
 
-      <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         {[left, right].map((entry, index) => (
-          <div key={entry.id} className="rounded-2xl border border-gray-200 bg-gray-50/70 px-4 py-4">
-            <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">{index === 0 ? 'Lado A' : 'Lado B'}</p>
-            <p className="mt-2 text-base font-bold text-gray-900">{entry.title}</p>
-            <p className="mt-1 text-xs text-gray-500">{entry.subtitle}</p>
-            <div className="mt-3 flex flex-wrap gap-2">
+          <div key={entry.id} className="rounded-[24px] border border-gray-200 bg-gradient-to-br from-white to-gray-50/80 p-5">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <span className={`inline-flex items-center rounded-full border px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] ${index === 0 ? 'border-red-200 bg-red-50 text-red-700' : 'border-slate-200 bg-slate-50 text-slate-700'}`}>
+                  {index === 0 ? 'Lado A' : 'Lado B'}
+                </span>
+                <p className="mt-3 text-lg font-bold text-gray-900">{entry.title}</p>
+                <p className="mt-1 text-sm text-gray-500">{entry.subtitle}</p>
+              </div>
+              <div className="shrink-0 rounded-2xl border border-gray-200 bg-white px-3 py-2 text-right">
+                <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-400">Gasto</p>
+                <p className="mt-1 text-sm font-bold text-gray-900">{formatCompactMetric(entry.spend, 'currency')}</p>
+              </div>
+            </div>
+
+            <div className="mt-4 grid grid-cols-3 gap-2 rounded-2xl bg-white/80 p-3 text-xs">
+              <MetricMiniCard label="Clicks" value={formatCompactMetric(entry.clicks, 'number')} />
+              <MetricMiniCard label="CTR" value={formatCompactMetric(entry.ctr, 'percent')} />
+              <MetricMiniCard label="CPC" value={formatCompactMetric(entry.cpc, 'currency')} />
+            </div>
+
+            <div className="mt-4 flex flex-wrap gap-2">
               {(entry.labels.length ? entry.labels : ['Sin alerta destacada']).map((label) => (
                 <InsightBadge key={label} label={label} tone={getBadgeTone(label)} />
               ))}
@@ -438,50 +478,35 @@ function HeadToHeadCard({
               <th className="pb-2 pr-3">Métrica</th>
               <th className="pb-2 px-3">{left.title}</th>
               <th className="pb-2 px-3">{right.title}</th>
-              <th className="pb-2 pl-3">Lectura</th>
             </tr>
           </thead>
           <tbody>
             {metrics.map((metric) => (
               <tr key={metric.label} className="border-t border-gray-100 text-gray-700">
                 <td className="py-3 pr-3 font-semibold text-gray-900">{metric.label}</td>
-                <td className={`py-3 px-3 ${metric.winner === 'left' ? 'font-bold text-emerald-700' : ''}`}>{formatCompactMetric(metric.leftValue, metric.format)}</td>
-                <td className={`py-3 px-3 ${metric.winner === 'right' ? 'font-bold text-emerald-700' : ''}`}>{formatCompactMetric(metric.rightValue, metric.format)}</td>
-                <td className="py-3 pl-3 text-xs text-gray-500">{describeMetricWinner(metric)}</td>
+                <td className={`py-3 px-3 ${getComparisonCellClassName(metric, 'left')}`}>{formatCompactMetric(metric.leftValue, metric.format)}</td>
+                <td className={`py-3 px-3 ${getComparisonCellClassName(metric, 'right')}`}>{formatCompactMetric(metric.rightValue, metric.format)}</td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
-
-      {narrative ? <ComparisonNarrativeCard narrative={narrative} /> : null}
     </ChartCard>
   );
 }
 
-function ComparisonNarrativeCard({ narrative }: { narrative: MetaComparisonNarrative }) {
+function MetricMiniCard({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-2xl border border-red-100 bg-gradient-to-br from-red-50 via-white to-orange-50 px-4 py-4">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-wide text-red-700">Resumen ejecutivo</p>
-          <p className="mt-2 text-sm font-semibold text-gray-900">{narrative.summary}</p>
-        </div>
-        <InsightBadge
-          label={narrative.recommendationTone === 'positive' ? 'Escalar' : narrative.recommendationTone === 'warning' ? 'Revisar' : 'Iterar'}
-          tone={narrative.recommendationTone}
-        />
-      </div>
-
-      <div className="mt-3 space-y-2 text-sm text-gray-600">
-        <p>{narrative.tradeoff}</p>
-        <p className="font-medium text-gray-800">{narrative.recommendation}</p>
-      </div>
+    <div className="rounded-xl border border-gray-200 bg-gray-50/80 px-3 py-2.5">
+      <p className="uppercase tracking-wide text-[11px] font-semibold text-gray-400">{label}</p>
+      <p className="mt-1 font-semibold text-gray-900">{value}</p>
     </div>
   );
 }
 
-function ComparisonSelectorRow({
+function ComparisonControls({
+  comparisonType,
+  onComparisonTypeChange,
   leftLabel,
   rightLabel,
   leftValue,
@@ -490,6 +515,8 @@ function ComparisonSelectorRow({
   onLeftChange,
   onRightChange,
 }: {
+  comparisonType: 'campaigns' | 'ads';
+  onComparisonTypeChange: (value: 'campaigns' | 'ads') => void;
   leftLabel: string;
   rightLabel: string;
   leftValue: string;
@@ -499,7 +526,27 @@ function ComparisonSelectorRow({
   onRightChange: (value: string) => void;
 }) {
   return (
-    <div className="grid grid-cols-1 gap-3 rounded-2xl border border-gray-200 bg-gray-50/80 p-4 md:grid-cols-2">
+    <div className="grid grid-cols-1 gap-3 rounded-[24px] border border-gray-200 bg-gray-50/80 p-4 xl:grid-cols-[auto_repeat(2,minmax(0,1fr))]">
+      <div className="rounded-2xl border border-gray-200 bg-white p-1">
+        <div className="grid grid-cols-2 gap-1">
+          {[
+            { key: 'campaigns', label: 'Campañas' },
+            { key: 'ads', label: 'Ads' },
+          ].map((option) => {
+            const isActive = option.key === comparisonType;
+            return (
+              <button
+                key={option.key}
+                type="button"
+                onClick={() => onComparisonTypeChange(option.key as 'campaigns' | 'ads')}
+                className={`rounded-xl px-4 py-2 text-sm font-semibold transition ${isActive ? 'bg-gray-900 text-white shadow-sm' : 'text-gray-600 hover:bg-gray-100'}`}
+              >
+                {option.label}
+              </button>
+            );
+          })}
+        </div>
+      </div>
       <ComparisonSelect
         label={leftLabel}
         value={leftValue}
@@ -550,13 +597,19 @@ function ComparisonSelect({
 }
 
 function DecisionSignalCard({ signal }: { signal: MetaDecisionSignal }) {
+  const toneClassName = signal.tone === 'positive'
+    ? 'border-emerald-200 bg-emerald-50/50'
+    : signal.tone === 'warning'
+      ? 'border-amber-200 bg-amber-50/60'
+      : 'border-gray-200 bg-white';
+
   return (
-    <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-[0_20px_36px_-30px_rgba(15,23,42,0.8)]">
+    <div className={`rounded-[24px] border p-5 shadow-[0_20px_36px_-30px_rgba(15,23,42,0.8)] ${toneClassName}`}>
       <div className="flex items-start justify-between gap-3">
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">{signal.title}</p>
-          <p className="mt-2 text-xl font-bold text-gray-900">{formatCompactMetric(signal.metricValue, signal.metricFormat)}</p>
-          <p className="mt-2 text-sm font-semibold text-gray-800">{signal.entry?.title ?? 'Sin data suficiente'}</p>
+        <div className="min-w-0">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-gray-500">{signal.title}</p>
+          <p className="mt-3 text-2xl font-bold text-gray-900">{formatCompactMetric(signal.metricValue, signal.metricFormat)}</p>
+          <p className="mt-2 truncate text-sm font-semibold text-gray-800">{signal.entry?.title ?? 'Sin data suficiente'}</p>
         </div>
         <InsightBadge
           label={signal.tone === 'warning' ? 'Revisar' : signal.tone === 'positive' ? 'Escalar' : 'Seguir de cerca'}
@@ -564,12 +617,98 @@ function DecisionSignalCard({ signal }: { signal: MetaDecisionSignal }) {
         />
       </div>
 
-      <p className="mt-2 text-xs text-gray-500">{signal.helper}</p>
+      <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
+        <p className="text-xs leading-5 text-gray-500">{signal.helper}</p>
+        <div className="rounded-2xl border border-white/80 bg-white/80 px-3 py-2 text-right">
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-400">{signal.metricLabel}</p>
+          <p className="mt-1 text-sm font-semibold text-gray-900">{formatCompactMetric(signal.metricValue, signal.metricFormat)}</p>
+        </div>
+      </div>
+
       {signal.entry ? (
         <p className="mt-3 text-xs text-gray-500">
-          {signal.metricLabel}: {formatCompactMetric(signal.metricValue, signal.metricFormat)} · {signal.entry.subtitle}
+          {signal.entry.subtitle}
         </p>
       ) : null}
+    </div>
+  );
+}
+
+function RecommendationBucketCard({
+  bucket,
+}: {
+  bucket: ReturnType<typeof buildRecommendationBuckets>[number];
+}) {
+  const toneClassName = bucket.tone === 'positive'
+    ? 'border-emerald-200 bg-emerald-50/70'
+    : bucket.tone === 'warning'
+      ? 'border-amber-200 bg-amber-50/80'
+      : 'border-gray-200 bg-gray-50/80';
+
+  const metricToneClassName = bucket.tone === 'positive'
+    ? 'text-emerald-700'
+    : bucket.tone === 'warning'
+      ? 'text-amber-700'
+      : 'text-slate-700';
+
+  const Icon = bucket.key === 'escalar' ? TrendingUp : bucket.key === 'revisar' ? TriangleAlert : Wrench;
+
+  return (
+    <div className={`rounded-2xl border p-5 shadow-[0_20px_36px_-30px_rgba(15,23,42,0.8)] ${toneClassName}`}>
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p className="inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.2em] text-gray-500">
+            <Icon size={14} />
+            {bucket.title}
+          </p>
+          <h3 className="mt-2 text-lg font-bold text-gray-900">{bucket.entries.length} ads</h3>
+          <p className="mt-2 text-sm text-gray-600">{bucket.description}</p>
+        </div>
+        <InsightBadge label={bucket.title} tone={bucket.tone} />
+      </div>
+
+      <p className="mt-3 rounded-2xl border border-white/70 bg-white/80 px-3 py-2 text-xs text-gray-600">
+        {bucket.helper}
+      </p>
+
+      {bucket.entries.length === 0 ? (
+        <div className="mt-4 rounded-xl border border-dashed border-gray-200 bg-white/70 px-4 py-5 text-sm text-gray-500">
+          No hay piezas para este bucket con los filtros actuales.
+        </div>
+      ) : (
+        <ul className="mt-4 space-y-3">
+          {bucket.entries.slice(0, 4).map((entry) => (
+            <li key={entry.id} className="rounded-2xl border border-white/80 bg-white/90 px-4 py-4">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="font-semibold text-gray-900">{entry.title}</p>
+                  <p className="mt-1 text-xs text-gray-500">{entry.subtitle}</p>
+                  <p className="mt-2 text-xs text-gray-500">Creative: {entry.creativeName}</p>
+                </div>
+                <div className={`shrink-0 text-right text-xs font-semibold ${metricToneClassName}`}>
+                  <p>{formatCompactMetric(entry.spend, 'currency')}</p>
+                  <p className="mt-1">{formatCompactMetric(entry.clicks, 'number')} clicks</p>
+                </div>
+              </div>
+
+              <div className="mt-3 grid grid-cols-3 gap-2 rounded-xl bg-gray-50/80 px-3 py-2 text-xs text-gray-600">
+                <div>
+                  <p className="uppercase tracking-wide text-gray-400">CTR</p>
+                  <p className="mt-1 font-semibold text-gray-900">{formatCompactMetric(entry.ctr, 'percent')}</p>
+                </div>
+                <div>
+                  <p className="uppercase tracking-wide text-gray-400">CPC</p>
+                  <p className="mt-1 font-semibold text-gray-900">{formatCompactMetric(entry.cpc, 'currency')}</p>
+                </div>
+                <div>
+                  <p className="uppercase tracking-wide text-gray-400">Imp.</p>
+                  <p className="mt-1 font-semibold text-gray-900">{formatCompactMetric(entry.impressions, 'number')}</p>
+                </div>
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }
@@ -593,40 +732,43 @@ function PerformanceTableCard({
       {rows.length === 0 ? (
         <EmptyState message={emptyMessage} />
       ) : (
-        <div className="overflow-x-auto">
-          <table className="min-w-full text-sm">
-            <thead>
-              <tr className="text-left text-xs uppercase tracking-wide text-gray-500">
-                <th className="pb-2 pr-3">Activo</th>
-                {showCreative ? <th className="pb-2 px-3">Creative</th> : null}
-                <th className="pb-2 px-3">Spend</th>
-                <th className="pb-2 px-3">Clicks</th>
-                <th className="pb-2 px-3">CTR</th>
-                <th className="pb-2 px-3">CPC</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((row) => (
-                <tr key={row.id} className="border-t border-gray-100 align-top text-gray-700">
-                  <td className="py-3 pr-3">
-                    <p className="font-semibold text-gray-900">{row.title}</p>
-                    <p className="mt-1 text-xs text-gray-500">{row.subtitle}</p>
-                    <div className="mt-2 flex flex-wrap gap-2">
-                      {row.labels.map((label) => (
-                        <InsightBadge key={label} label={label} tone={getBadgeTone(label)} />
-                      ))}
+        <ol className="space-y-3">
+          {rows.map((row, index) => (
+            <li key={row.id} className="rounded-[24px] border border-gray-200 bg-gray-50/70 p-4">
+              <div className="flex items-start justify-between gap-4">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-3">
+                    <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-gray-200 bg-white text-sm font-bold text-gray-700">
+                      {index + 1}
+                    </span>
+                    <div className="min-w-0">
+                      <p className="truncate font-semibold text-gray-900">{row.title}</p>
+                      <p className="mt-1 truncate text-xs text-gray-500">{row.subtitle}</p>
                     </div>
-                  </td>
-                  {showCreative ? <td className="py-3 px-3 text-xs text-gray-500">{row.creativeName}</td> : null}
-                  <td className="py-3 px-3 font-semibold text-gray-900">{formatCompactMetric(row.spend, 'currency')}</td>
-                  <td className="py-3 px-3">{formatCompactMetric(row.clicks, 'number')}</td>
-                  <td className="py-3 px-3">{formatCompactMetric(row.ctr, 'percent')}</td>
-                  <td className="py-3 px-3">{formatCompactMetric(row.cpc, 'currency')}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+                  </div>
+                  {showCreative ? <p className="mt-3 text-xs text-gray-500">Creative: {row.creativeName}</p> : null}
+                </div>
+                <div className="shrink-0 rounded-2xl border border-white/80 bg-white px-3 py-2 text-right">
+                  <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-400">Gasto</p>
+                  <p className="mt-1 text-sm font-bold text-gray-900">{formatCompactMetric(row.spend, 'currency')}</p>
+                </div>
+              </div>
+
+              <div className="mt-4 grid grid-cols-2 gap-2 md:grid-cols-4">
+                <MetricMiniCard label="Gasto" value={formatCompactMetric(row.spend, 'currency')} />
+                <MetricMiniCard label="Clicks" value={formatCompactMetric(row.clicks, 'number')} />
+                <MetricMiniCard label="CTR" value={formatCompactMetric(row.ctr, 'percent')} />
+                <MetricMiniCard label="CPC" value={formatCompactMetric(row.cpc, 'currency')} />
+              </div>
+
+              <div className="mt-4 flex flex-wrap gap-2">
+                {(row.labels.length ? row.labels : ['Sin alerta destacada']).map((label) => (
+                  <InsightBadge key={label} label={label} tone={getBadgeTone(label)} />
+                ))}
+              </div>
+            </li>
+          ))}
+        </ol>
       )}
     </ChartCard>
   );
@@ -682,12 +824,10 @@ function getBadgeTone(label: string): 'positive' | 'warning' | 'neutral' {
   return 'neutral';
 }
 
-function describeMetricWinner(metric: MetaComparisonMetric) {
-  if (metric.winner === 'tie') return 'Empate técnico';
-
-  const side = metric.winner === 'left' ? 'Lado A' : 'Lado B';
-  const verb = metric.better === 'lower' ? 'gana por menor valor' : 'gana por mayor valor';
-  return `${side} ${verb}`;
+function getComparisonCellClassName(metric: MetaComparisonMetric, side: 'left' | 'right') {
+  if (metric.winner === 'tie') return 'font-medium text-gray-700';
+  if (metric.winner === side) return 'font-bold text-emerald-700 bg-emerald-50';
+  return 'font-semibold text-red-600 bg-red-50';
 }
 
 function resolveComparisonEntries(

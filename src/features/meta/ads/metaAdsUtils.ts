@@ -34,15 +34,6 @@ export type MetaComparisonMetric = {
   winner: 'left' | 'right' | 'tie';
 };
 
-export type MetaComparisonNarrative = {
-  efficiencyWinner: 'left' | 'right' | 'tie';
-  volumeWinner: 'left' | 'right' | 'tie';
-  summary: string;
-  tradeoff: string;
-  recommendation: string;
-  recommendationTone: 'positive' | 'warning' | 'neutral';
-};
-
 export type MetaDecisionSignal = {
   title: string;
   helper: string;
@@ -51,6 +42,17 @@ export type MetaDecisionSignal = {
   metricLabel: string;
   metricValue: number;
   metricFormat: 'currency' | 'number' | 'percent';
+};
+
+export type MetaRecommendationBucketKey = 'escalar' | 'iterar' | 'revisar';
+
+export type MetaRecommendationBucket = {
+  key: MetaRecommendationBucketKey;
+  title: 'Escalar' | 'Iterar' | 'Revisar';
+  description: string;
+  helper: string;
+  tone: 'positive' | 'warning' | 'neutral';
+  entries: MetaPerformanceEntry[];
 };
 
 export type MetaBreakdownPoint = {
@@ -230,65 +232,11 @@ export function buildComparisonMetrics(left?: MetaPerformanceEntry, right?: Meta
   if (!left || !right) return [];
 
   return [
-    createComparisonMetric('Spend', left.spend, right.spend, 'currency', 'higher'),
+    createComparisonMetric('Gasto', left.spend, right.spend, 'currency', 'higher'),
     createComparisonMetric('Clicks', left.clicks, right.clicks, 'number', 'higher'),
     createComparisonMetric('CTR', left.ctr, right.ctr, 'percent', 'higher'),
     createComparisonMetric('CPC', left.cpc, right.cpc, 'currency', 'lower'),
   ];
-}
-
-export function buildComparisonNarrative(left?: MetaPerformanceEntry, right?: MetaPerformanceEntry): MetaComparisonNarrative | null {
-  if (!left || !right) return null;
-
-  const ctrWinner = pickWinner(left.ctr, right.ctr, 'higher');
-  const cpcWinner = pickWinner(left.cpc, right.cpc, 'lower');
-  const clicksWinner = pickWinner(left.clicks, right.clicks, 'higher');
-  const impressionWinner = pickWinner(left.impressions, right.impressions, 'higher');
-
-  const efficiencyWinner = ctrWinner === cpcWinner ? ctrWinner : 'tie';
-  const volumeWinner = clicksWinner !== 'tie' ? clicksWinner : impressionWinner;
-
-  const efficiencyLabel = describeEntrySide(efficiencyWinner, left, right);
-  const volumeLabel = describeEntrySide(volumeWinner, left, right);
-  const ctrLabel = describeEntrySide(ctrWinner, left, right);
-  const cpcLabel = describeEntrySide(cpcWinner, left, right);
-
-  const summary = efficiencyWinner === 'tie'
-    ? 'En eficiencia no hay un ganador absoluto: la comparación está partida entre atracción y costo.'
-    : `${efficiencyLabel} gana en eficiencia porque combina mejor respuesta del público con clicks más baratos.`;
-
-  const tradeoff = volumeWinner === 'tie'
-    ? 'En volumen están muy parejos, así que la decisión depende más de la calidad del tráfico que del alcance.'
-    : efficiencyWinner === volumeWinner
-      ? `${volumeLabel} también lidera en volumen, así que hoy es la apuesta más sólida para concentrar inversión.`
-      : efficiencyWinner === 'tie'
-        ? `${ctrLabel} muestra mejor CTR, pero ${cpcLabel} consigue clicks más baratos; conviene leerlo como un trade-off antes de mover presupuesto.`
-        : `${volumeLabel} trae más volumen, pero ${efficiencyLabel} es más eficiente; ahí está la tensión principal de la comparación.`;
-
-  const recommendation = efficiencyWinner !== 'tie' && efficiencyWinner === volumeWinner
-    ? `Recomendación: escalar ${efficiencyLabel} de forma gradual mientras sostenés seguimiento de CTR y CPC para validar que no se degrade.`
-    : efficiencyWinner !== 'tie' && volumeWinner !== 'tie' && efficiencyWinner !== volumeWinner
-      ? `Recomendación: iterar ${volumeLabel} para bajar costo o mover una parte del presupuesto hacia ${efficiencyLabel}, que hoy convierte mejor la inversión.`
-      : ctrWinner !== 'tie' && cpcWinner !== 'tie' && ctrWinner !== cpcWinner
-        ? `Recomendación: revisar antes de escalar. ${ctrLabel} llama mejor la atención, pero ${cpcLabel} está resolviendo el costo de forma más sana.`
-        : 'Recomendación: mantener la inversión estable y seguir testeando mensaje, segmentación o creative antes de tomar una decisión más agresiva.';
-
-  const hasSplitLeaders = efficiencyWinner !== 'tie' && volumeWinner !== 'tie' && efficiencyWinner !== volumeWinner;
-
-  const recommendationTone = efficiencyWinner !== 'tie' && efficiencyWinner === volumeWinner
-    ? 'positive'
-    : efficiencyWinner === 'tie' || hasSplitLeaders
-      ? 'warning'
-      : 'neutral';
-
-  return {
-    efficiencyWinner,
-    volumeWinner,
-    summary,
-    tradeoff,
-    recommendation,
-    recommendationTone,
-  };
 }
 
 export function buildDecisionSignals(entries: MetaPerformanceEntry[]): MetaDecisionSignal[] {
@@ -330,11 +278,11 @@ export function buildDecisionSignals(entries: MetaPerformanceEntry[]): MetaDecis
       metricFormat: 'number',
     },
     {
-      title: 'Mayor spend',
+      title: 'Mayor gasto',
       helper: 'Donde hoy está concentrada la inversión.',
       entry: highestSpend,
       tone: 'neutral',
-      metricLabel: 'Spend',
+      metricLabel: 'Gasto',
       metricValue: highestSpend?.spend ?? 0,
       metricFormat: 'currency',
     },
@@ -346,6 +294,114 @@ export function buildDecisionSignals(entries: MetaPerformanceEntry[]): MetaDecis
       metricLabel: 'CPC',
       metricValue: weakest?.cpc ?? 0,
       metricFormat: 'currency',
+    },
+  ];
+}
+
+export function buildRecommendationBuckets(entries: MetaPerformanceEntry[]): MetaRecommendationBucket[] {
+  if (entries.length === 0) {
+    return [
+      {
+        key: 'escalar',
+        title: 'Escalar',
+        description: 'Piezas con eficiencia sana y volumen suficiente para defender más presupuesto.',
+        helper: 'No hay ads con data suficiente para sugerir escalado.',
+        tone: 'positive',
+        entries: [],
+      },
+      {
+        key: 'iterar',
+        title: 'Iterar',
+        description: 'Piezas con señales de respuesta, pero todavía necesitan mejorar costo o volumen.',
+        helper: 'No hay ads en zona de iteración con los filtros actuales.',
+        tone: 'neutral',
+        entries: [],
+      },
+      {
+        key: 'revisar',
+        title: 'Revisar',
+        description: 'Piezas donde el gasto ya exige una corrección de mensaje, segmentación o creative.',
+        helper: 'No hay ads prioritarios para revisar con los filtros actuales.',
+        tone: 'warning',
+        entries: [],
+      },
+    ];
+  }
+
+  const averages = {
+    spend: safeDivide(sumBy(entries, (entry) => entry.spend), entries.length),
+    clicks: safeDivide(sumBy(entries, (entry) => entry.clicks), entries.length),
+    impressions: safeDivide(sumBy(entries, (entry) => entry.impressions), entries.length),
+    ctr: safeDivide(sumBy(entries, (entry) => entry.ctr), entries.length),
+    cpc: safeDivide(sumBy(entries, (entry) => entry.cpc), entries.filter((entry) => entry.clicks > 0).length),
+  };
+
+  const buckets: Record<MetaRecommendationBucketKey, MetaPerformanceEntry[]> = {
+    escalar: [],
+    iterar: [],
+    revisar: [],
+  };
+
+  for (const entry of entries) {
+    const hasClicks = entry.clicks > 0;
+    const ctrHealthy = entry.ctr >= averages.ctr;
+    const cpcHealthy = hasClicks && averages.cpc > 0 ? entry.cpc <= averages.cpc : hasClicks;
+    const strongVolume = entry.impressions >= Math.max(averages.impressions * 0.7, 1000) || entry.clicks >= Math.max(averages.clicks * 0.7, 8);
+    const spendHeavy = entry.spend >= Math.max(averages.spend, 1);
+    const weakCtr = entry.ctr < averages.ctr * 0.85;
+    const expensiveClicks = hasClicks && averages.cpc > 0 ? entry.cpc > averages.cpc * 1.15 : entry.spend > 0;
+
+    if (spendHeavy && (!hasClicks || weakCtr || expensiveClicks)) {
+      buckets.revisar.push(entry);
+      continue;
+    }
+
+    if (hasClicks && ctrHealthy && cpcHealthy && strongVolume) {
+      buckets.escalar.push(entry);
+      continue;
+    }
+
+    if (hasClicks || entry.impressions > 0 || entry.reach > 0) {
+      buckets.iterar.push(entry);
+    }
+  }
+
+  return [
+    {
+      key: 'escalar',
+      title: 'Escalar',
+      description: 'Eficiencia sana con volumen defendible para empujar inversión gradualmente.',
+      helper: 'Subí presupuesto de forma gradual y vigilá que CTR/CPC no se deterioren.',
+      tone: 'positive',
+      entries: buckets.escalar.sort((left, right) => {
+        if (right.clicks !== left.clicks) return right.clicks - left.clicks;
+        if (left.cpc !== right.cpc) return left.cpc - right.cpc;
+        return right.ctr - left.ctr;
+      }),
+    },
+    {
+      key: 'iterar',
+      title: 'Iterar',
+      description: 'Hay respuesta, pero todavía falta consolidar costo o tracción.',
+      helper: 'Probá ajustes en creative, copy o segmentación antes de escalar fuerte.',
+      tone: 'neutral',
+      entries: buckets.iterar.sort((left, right) => {
+        if (right.ctr !== left.ctr) return right.ctr - left.ctr;
+        if (right.clicks !== left.clicks) return right.clicks - left.clicks;
+        return left.cpc - right.cpc;
+      }),
+    },
+    {
+      key: 'revisar',
+      title: 'Revisar',
+      description: 'El gasto ya está expuesto y la eficiencia no acompaña.',
+      helper: 'Revisá primero mensaje, segmentación o pieza antes de seguir empujando presupuesto.',
+      tone: 'warning',
+      entries: buckets.revisar.sort((left, right) => {
+        if (right.spend !== left.spend) return right.spend - left.spend;
+        if (right.cpc !== left.cpc) return right.cpc - left.cpc;
+        return left.ctr - right.ctr;
+      }),
     },
   ];
 }
@@ -419,26 +475,6 @@ function createComparisonMetric(
     rightValue,
     winner,
   };
-}
-
-function pickWinner(
-  leftValue: number,
-  rightValue: number,
-  better: MetaComparisonMetric['better'],
-): MetaComparisonMetric['winner'] {
-  if (leftValue === rightValue) return 'tie';
-  const leftWins = better === 'higher' ? leftValue > rightValue : leftValue < rightValue;
-  return leftWins ? 'left' : 'right';
-}
-
-function describeEntrySide(
-  winner: MetaComparisonMetric['winner'],
-  left: MetaPerformanceEntry,
-  right: MetaPerformanceEntry,
-) {
-  if (winner === 'left') return left.title;
-  if (winner === 'right') return right.title;
-  return 'Ambos';
 }
 
 function buildHeuristicLabels(
