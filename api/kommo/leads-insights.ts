@@ -19,6 +19,13 @@ type LeadRow = {
   responsible_user_id: number | null;
 };
 
+type LeadGanadoRow = {
+  fecha_lead_ganado: string | null;
+  vendedor_nombre_snapshot: string | null;
+  pipeline_id_snapshot: number | null;
+  kommo_lead_id: number | null;
+};
+
 type PipelineRow = {
   business_id: number;
   name: string | null;
@@ -81,6 +88,7 @@ type LeadsInsightsResponse = {
     end_date: string | null;
   };
   pipelinePerformance: Array<{
+    group_key: string;
     pipeline_id: number | null;
     pipeline_name: string;
     total_leads: number;
@@ -270,6 +278,38 @@ function isDateWithinRange(dateLike: string | null, startDate: string | null, en
   return true;
 }
 
+function toComparableDateString(dateLike: string | null) {
+  if (!dateLike) return null;
+
+  const trimmedValue = dateLike.trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(trimmedValue)) {
+    return trimmedValue;
+  }
+
+  return toLimaDateString(trimmedValue);
+}
+
+function isComparableDateWithinRange(dateLike: string | null, startDate: string | null, endDate: string | null) {
+  if (!startDate && !endDate) return true;
+
+  const comparableDate = toComparableDateString(dateLike);
+  if (!comparableDate) return false;
+
+  if (startDate && comparableDate < startDate) return false;
+  if (endDate && comparableDate > endDate) return false;
+  return true;
+}
+
+function buildPerformanceGroupKey(pipelineId: number | null, pipelineName: string) {
+  const trimmedName = pipelineName.trim();
+
+  if (pipelineId !== null) {
+    return trimmedName ? `pipeline:${pipelineId}:${normalizeText(trimmedName)}` : `pipeline:${pipelineId}`;
+  }
+
+  return trimmedName ? `name:${normalizeText(trimmedName)}` : 'name:sin-pipeline';
+}
+
 export default async function kommoLeadsInsightsHandler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'GET') {
     return res.status(405).json({ error: 'Método no permitido' });
@@ -317,12 +357,14 @@ export default async function kommoLeadsInsightsHandler(req: VercelRequest, res:
 
     const [
       leads,
+      wonLeads,
       pipelines,
       statuses,
       unsortedLeads,
       users,
     ] = await Promise.all([
       safeSelectPaginated<LeadRow>('kommo_leads', 'pipeline_id,status_id,price,is_deleted,closed_at,created_at,responsible_user_id'),
+      safeSelectPaginated<LeadGanadoRow>('leads_ganados', 'fecha_lead_ganado,vendedor_nombre_snapshot,pipeline_id_snapshot,kommo_lead_id'),
       safeSelectPaginated<PipelineRow>('kommo_pipelines', 'business_id,name'),
       safeSelectPaginated<PipelineStatusRow>('kommo_pipeline_statuses', 'business_id,pipeline_id,name,type'),
       safeSelectPaginated<UnsortedLeadRow>('kommo_unsorted_leads', 'created_at'),
@@ -330,6 +372,7 @@ export default async function kommoLeadsInsightsHandler(req: VercelRequest, res:
     ]);
 
     const filteredLeads = leads.filter((lead) => isDateWithinRange(lead.created_at, startDate, endDate));
+    const filteredWonLeads = wonLeads.filter((lead) => isComparableDateWithinRange(lead.fecha_lead_ganado, startDate, endDate));
     const filteredUnsortedLeads = unsortedLeads.filter((lead) => isDateWithinRange(lead.created_at, startDate, endDate));
 
     const pipelineNameById = new Map<number, string>();
@@ -362,6 +405,7 @@ export default async function kommoLeadsInsightsHandler(req: VercelRequest, res:
     const validPrices: number[] = [];
 
     const pipelinePerformanceMap = new Map<string, {
+      group_key: string;
       pipeline_id: number | null;
       pipeline_name: string;
       total_leads: number;
@@ -425,14 +469,14 @@ export default async function kommoLeadsInsightsHandler(req: VercelRequest, res:
       const isWon = statusType === 1 || isLikelyWonStatus(statusName);
       const isLost = statusType === 2 || isLikelyLostStatus(statusName);
       const isClosed = Boolean(lead.closed_at) || isWon || isLost;
-      const isOpen = !isClosed && !Boolean(lead.is_deleted);
+      const isOpen = !isClosed && !lead.is_deleted;
 
       if (isClosed) totalClosed += 1;
-      if (isWon) totalWon += 1;
       if (isLost) totalLost += 1;
 
-      const performanceKey = String(pipelineId ?? 'null');
+      const performanceKey = buildPerformanceGroupKey(pipelineId, pipelineName);
       const pipelinePerformance = pipelinePerformanceMap.get(performanceKey) ?? {
+        group_key: performanceKey,
         pipeline_id: pipelineId,
         pipeline_name: pipelineName,
         total_leads: 0,
@@ -446,7 +490,6 @@ export default async function kommoLeadsInsightsHandler(req: VercelRequest, res:
       pipelinePerformance.total_leads += 1;
       if (isOpen) pipelinePerformance.open_leads += 1;
       if (isClosed) pipelinePerformance.closed_leads += 1;
-      if (isWon) pipelinePerformance.won_leads += 1;
       if (isLost) pipelinePerformance.lost_leads += 1;
 
       if (typeof lead.price === 'number' && Number.isFinite(lead.price) && lead.price > 0) {
@@ -455,6 +498,30 @@ export default async function kommoLeadsInsightsHandler(req: VercelRequest, res:
       }
 
       pipelinePerformanceMap.set(performanceKey, pipelinePerformance);
+    }
+
+    for (const wonLead of filteredWonLeads) {
+      const pipelineId = typeof wonLead.pipeline_id_snapshot === 'number' ? wonLead.pipeline_id_snapshot : null;
+      const snapshotName = typeof wonLead.vendedor_nombre_snapshot === 'string' ? wonLead.vendedor_nombre_snapshot.trim() : '';
+      const pipelineName = pipelineId !== null
+        ? (snapshotName || pipelineNameById.get(pipelineId) || `Pipeline ${pipelineId}`)
+        : (snapshotName || 'Sin pipeline');
+      const performanceKey = buildPerformanceGroupKey(pipelineId, pipelineName);
+      const pipelinePerformance = pipelinePerformanceMap.get(performanceKey) ?? {
+        group_key: performanceKey,
+        pipeline_id: pipelineId,
+        pipeline_name: pipelineName,
+        total_leads: 0,
+        open_leads: 0,
+        closed_leads: 0,
+        won_leads: 0,
+        lost_leads: 0,
+        prices: [],
+      };
+
+      pipelinePerformance.won_leads += 1;
+      pipelinePerformanceMap.set(performanceKey, pipelinePerformance);
+      totalWon += 1;
     }
 
     const hourlyCounter = new Map<number, number>();
@@ -489,6 +556,7 @@ export default async function kommoLeadsInsightsHandler(req: VercelRequest, res:
     const ownersResult = Array.from(ownerCounter.values()).sort((a, b) => b.total_leads - a.total_leads);
     const pipelinePerformanceResult = Array.from(pipelinePerformanceMap.values())
       .map((entry) => ({
+        group_key: entry.group_key,
         pipeline_id: entry.pipeline_id,
         pipeline_name: entry.pipeline_name,
         total_leads: entry.total_leads,
@@ -498,7 +566,7 @@ export default async function kommoLeadsInsightsHandler(req: VercelRequest, res:
         lost_leads: entry.lost_leads,
         avg_price: toNumericAverage(entry.prices),
       }))
-      .sort((a, b) => b.total_leads - a.total_leads);
+      .sort((a, b) => (b.total_leads - a.total_leads) || (b.won_leads - a.won_leads));
     const hourlyIncomingResult: HourlyIncomingInsight[] = Array.from(hourlyCounter.entries())
       .map(([hour, totalIncoming]) => ({ hour, total_incoming: totalIncoming }))
       .sort((a, b) => a.hour - b.hour);

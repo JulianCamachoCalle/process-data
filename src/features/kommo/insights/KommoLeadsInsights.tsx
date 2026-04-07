@@ -69,6 +69,7 @@ type LeadsInsightsPayload = {
     end_date: string | null;
   };
   pipelinePerformance: Array<{
+    group_key: string;
     pipeline_id: number | null;
     pipeline_name: string;
     total_leads: number;
@@ -282,9 +283,10 @@ function buildExportDocument({
   statusesByNameForPie: StatusByNameInsight[];
 }) {
   const summaryCards = [
-    ['Leads totales', formatNumber(data.summary.total_leads)],
-    ['Leads abiertos', formatNumber(data.summary.total_open)],
-    ['Leads cerrados', formatNumber(data.summary.total_closed)],
+    ['Leads creados', formatNumber(data.summary.total_leads)],
+    ['Leads abiertos (creados)', formatNumber(data.summary.total_open)],
+    ['Leads cerrados (creados)', formatNumber(data.summary.total_closed)],
+    ['Leads ganados (históricos)', formatNumber(data.summary.total_won)],
     ['Ticket promedio', formatCurrency(data.summary.avg_price)],
   ].map(([label, value]) => `
     <article class="kpi-card">
@@ -329,7 +331,7 @@ function buildExportDocument({
           .hero p { margin: 8px 0 0; color: #475569; }
           .section-title { margin: 0 0 16px; font-size: 16px; font-weight: 700; }
           .kpi-grid, .panel-grid, .chart-grid { display: grid; gap: 16px; }
-          .kpi-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); margin-top: 16px; }
+          .kpi-grid { grid-template-columns: repeat(5, minmax(0, 1fr)); margin-top: 16px; }
           .panel-grid, .chart-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); margin-top: 16px; }
           .kpi-card { border: 1px solid #e2e8f0; border-radius: 16px; padding: 18px; background: #fff; }
           .kpi-label { margin: 0; font-size: 12px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: #64748b; }
@@ -365,17 +367,17 @@ function buildExportDocument({
             <section class="panel">
               <h2 class="section-title">Insights ejecutivos</h2>
               <ul class="list">
-                <li>Personal top: <strong>${escapeHtml(data.summary.top_pipeline?.pipeline_name ?? 'N/D')}</strong></li>
+                <li>Pipeline/personal top (creados): <strong>${escapeHtml(data.summary.top_pipeline?.pipeline_name ?? 'N/D')}</strong></li>
                 <li>Hora pico incoming: <strong>${escapeHtml(data.insights.busiest_hour ? formatHour(data.insights.busiest_hour.hour) : 'N/D')}</strong></li>
                 <li>Estado más frecuente: <strong>${escapeHtml(data.insights.top_status?.status_name ?? 'N/D')}</strong></li>
-                <li>Win rate sobre cerrados: <strong>${escapeHtml(formatPercent(data.insights.won_rate_over_closed))}</strong></li>
+                <li>Win rate referencial (ganados históricos / cerrados creados): <strong>${escapeHtml(formatPercent(data.insights.won_rate_over_closed))}</strong></li>
                 <li>Leads sin pipeline: <strong>${escapeHtml(formatNumber(data.insights.orphan_pipeline_leads))}</strong></li>
               </ul>
             </section>
             <section class="panel">
               <h2 class="section-title">Top personal</h2>
               ${renderTable(
-                ['Personal', 'Leads'],
+                ['Responsable actual', 'Leads creados'],
                 data.owners.slice(0, 5).map((owner) => [owner.responsible_user_name, formatNumber(owner.total_leads)]),
               )}
             </section>
@@ -387,7 +389,7 @@ function buildExportDocument({
               ${comparisonSvg}
             </section>
             <section class="chart-panel">
-              <h2 class="section-title">Leads según personal</h2>
+              <h2 class="section-title">Leads creados según pipeline/personal</h2>
               ${pipelinesSvg}
             </section>
             <section class="chart-panel">
@@ -395,7 +397,7 @@ function buildExportDocument({
               ${renderLineChartSvg(data.hourlyIncoming)}
             </section>
             <section class="chart-panel">
-              <h2 class="section-title">Leads según estado</h2>
+              <h2 class="section-title">Leads creados según estado actual</h2>
               ${renderTable(
                 ['Estado', 'Leads'],
                 statusesByNameForPie.map((status) => [status.status_name, formatNumber(status.total_leads)]),
@@ -405,9 +407,9 @@ function buildExportDocument({
 
           <section class="stack">
             <section class="panel">
-              <h2 class="section-title">Performance por personal</h2>
+              <h2 class="section-title">Performance por pipeline/personal</h2>
               ${renderTable(
-                ['Personal', 'Total', 'Abiertos', 'Cerrados', 'Ganados', 'Perdidos', 'Ticket promedio'],
+                ['Pipeline/Personal', 'Total creados', 'Abiertos', 'Cerrados', 'Ganados históricos', 'Perdidos', 'Ticket promedio'],
                 data.pipelinePerformance.map((pipeline) => [
                   pipeline.pipeline_name,
                   formatNumber(pipeline.total_leads),
@@ -422,7 +424,7 @@ function buildExportDocument({
             <section class="panel">
               <h2 class="section-title">Estados por personal</h2>
               ${renderTable(
-                ['Personal', 'Estado', 'Leads'],
+                ['Pipeline/Personal', 'Estado', 'Leads creados'],
                 data.statuses.slice(0, 24).map((status) => [status.pipeline_name, status.status_name, formatNumber(status.total_leads)]),
               )}
             </section>
@@ -505,7 +507,7 @@ export function KommoLeadsInsights() {
       return;
     }
 
-    const keys = performance.map((item) => String(item.pipeline_id ?? 'null'));
+    const keys = performance.map((item) => item.group_key);
     if (!pipelineAKey || !keys.includes(pipelineAKey)) {
       setPipelineAKey(keys[0] ?? '');
     }
@@ -516,22 +518,22 @@ export function KommoLeadsInsights() {
   }, [insightsQuery.data?.pipelinePerformance, pipelineAKey, pipelineBKey]);
 
   const selectedPipelineA = useMemo(
-    () => insightsQuery.data?.pipelinePerformance.find((pipeline) => String(pipeline.pipeline_id ?? 'null') === pipelineAKey) ?? null,
+    () => insightsQuery.data?.pipelinePerformance.find((pipeline) => pipeline.group_key === pipelineAKey) ?? null,
     [insightsQuery.data?.pipelinePerformance, pipelineAKey],
   );
 
   const selectedPipelineB = useMemo(
-    () => insightsQuery.data?.pipelinePerformance.find((pipeline) => String(pipeline.pipeline_id ?? 'null') === pipelineBKey) ?? null,
+    () => insightsQuery.data?.pipelinePerformance.find((pipeline) => pipeline.group_key === pipelineBKey) ?? null,
     [insightsQuery.data?.pipelinePerformance, pipelineBKey],
   );
 
   const pipelineComparisonChartData = useMemo(() => {
     if (!selectedPipelineA || !selectedPipelineB) return [];
     return [
-      { metric: 'Total', pipelineA: selectedPipelineA.total_leads, pipelineB: selectedPipelineB.total_leads },
+      { metric: 'Total creados', pipelineA: selectedPipelineA.total_leads, pipelineB: selectedPipelineB.total_leads },
       { metric: 'Abiertos', pipelineA: selectedPipelineA.open_leads, pipelineB: selectedPipelineB.open_leads },
       { metric: 'Cerrados', pipelineA: selectedPipelineA.closed_leads, pipelineB: selectedPipelineB.closed_leads },
-      { metric: 'Ganados', pipelineA: selectedPipelineA.won_leads, pipelineB: selectedPipelineB.won_leads },
+      { metric: 'Ganados históricos', pipelineA: selectedPipelineA.won_leads, pipelineB: selectedPipelineB.won_leads },
       { metric: 'Perdidos', pipelineA: selectedPipelineA.lost_leads, pipelineB: selectedPipelineB.lost_leads },
     ];
   }, [selectedPipelineA, selectedPipelineB]);
@@ -766,7 +768,7 @@ export function KommoLeadsInsights() {
         </div>
 
         <p className="text-xs text-gray-500">
-          Filtro aplicado: {appliedRangeLabel}
+          Filtro aplicado: {appliedRangeLabel}. Ganados usa fecha_lead_ganado; el resto usa fecha de creación / estado actual.
         </p>
       </section>
 
@@ -809,7 +811,7 @@ function InsightsReportSections({
   statusesByNameForPie: StatusByNameInsight[];
   statusByPipelineData: { rows: Array<Record<string, number | string>>; stackKeys: string[] };
 }) {
-  if (data.summary.total_leads === 0) {
+  if (data.summary.total_leads === 0 && data.summary.total_won === 0) {
     return (
       <div className="rounded-2xl border border-gray-200 bg-white p-8 text-center text-sm text-gray-500">
         No hay leads disponibles para mostrar métricas con los filtros actuales.
@@ -822,29 +824,34 @@ function InsightsReportSections({
 
   return (
     <>
-      <section className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <KpiCard title="Leads totales" value={formatNumber(data.summary.total_leads)} />
-        <KpiCard title="Leads abiertos" value={formatNumber(data.summary.total_open)} />
-        <KpiCard title="Leads cerrados" value={formatNumber(data.summary.total_closed)} />
+      <section className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-5">
+        <KpiCard title="Leads creados" value={formatNumber(data.summary.total_leads)} />
+        <KpiCard title="Leads abiertos (creados)" value={formatNumber(data.summary.total_open)} />
+        <KpiCard title="Leads cerrados (creados)" value={formatNumber(data.summary.total_closed)} />
+        <KpiCard title="Leads ganados (históricos)" value={formatNumber(data.summary.total_won)} />
         <KpiCard title="Ticket promedio" value={formatCurrency(data.summary.avg_price)} />
       </section>
+
+      <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+        Los <strong>ganados</strong> ahora usan historial de <code>leads_ganados</code> y respetan <strong>fecha_lead_ganado</strong>. El resto de métricas sigue basado en leads creados / estado actual.
+      </div>
 
       <section className="space-y-4 rounded-2xl border border-gray-200 bg-white p-5 shadow-[0_20px_36px_-30px_rgba(15,23,42,0.8)]">
         <h3 className="inline-flex items-center gap-2 text-sm font-semibold text-gray-800">
           <BarChart3 size={16} className="text-red-600" />
-          Comparación de Personal
+          Comparación de pipeline/personal
         </h3>
 
         <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
           <label className="space-y-1 text-xs font-semibold uppercase tracking-wide text-gray-600">
-            Personal A
+            Pipeline/Personal A
             <select
               value={pipelineAKey}
               onChange={(event) => onPipelineAChange(event.target.value)}
               className="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-red-200"
             >
               {(data.pipelinePerformance ?? []).map((pipeline) => (
-                <option key={`a-${String(pipeline.pipeline_id ?? 'null')}-${pipeline.pipeline_name}`} value={String(pipeline.pipeline_id ?? 'null')}>
+                  <option key={`a-${pipeline.group_key}`} value={pipeline.group_key}>
                   {pipeline.pipeline_name}
                 </option>
               ))}
@@ -852,14 +859,14 @@ function InsightsReportSections({
           </label>
 
           <label className="space-y-1 text-xs font-semibold uppercase tracking-wide text-gray-600">
-            Personal B
+            Pipeline/Personal B
             <select
               value={pipelineBKey}
               onChange={(event) => onPipelineBChange(event.target.value)}
               className="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-red-200"
             >
               {(data.pipelinePerformance ?? []).map((pipeline) => (
-                <option key={`b-${String(pipeline.pipeline_id ?? 'null')}-${pipeline.pipeline_name}`} value={String(pipeline.pipeline_id ?? 'null')}>
+                  <option key={`b-${pipeline.group_key}`} value={pipeline.group_key}>
                   {pipeline.pipeline_name}
                 </option>
               ))}
@@ -870,10 +877,10 @@ function InsightsReportSections({
         {selectedPipelineA && selectedPipelineB ? (
           <>
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6">
-              <CompareKpiCard label="Total leads" left={selectedPipelineA.total_leads} right={selectedPipelineB.total_leads} />
+              <CompareKpiCard label="Total creados" left={selectedPipelineA.total_leads} right={selectedPipelineB.total_leads} />
               <CompareKpiCard label="Open" left={selectedPipelineA.open_leads} right={selectedPipelineB.open_leads} />
               <CompareKpiCard label="Closed" left={selectedPipelineA.closed_leads} right={selectedPipelineB.closed_leads} />
-              <CompareKpiCard label="Won" left={selectedPipelineA.won_leads} right={selectedPipelineB.won_leads} />
+              <CompareKpiCard label="Won histórico" left={selectedPipelineA.won_leads} right={selectedPipelineB.won_leads} />
               <CompareKpiCard label="Lost" left={selectedPipelineA.lost_leads} right={selectedPipelineB.lost_leads} />
               <CompareKpiCard
                 label="Avg ticket"
@@ -900,7 +907,7 @@ function InsightsReportSections({
       </section>
 
       <section className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-        <ChartCard title="Leads según Personal" icon={<Layers size={16} className="text-red-600" />}>
+        <ChartCard title="Leads creados según pipeline/personal" icon={<Layers size={16} className="text-red-600" />}>
           <ResponsiveContainer width="100%" height={300}>
             <BarChart data={data.pipelines}>
               <CartesianGrid strokeDasharray="3 3" vertical={false} />
@@ -934,7 +941,7 @@ function InsightsReportSections({
       </section>
 
       <section className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-        <ChartCard title="Leads según estado" icon={<PieChartIcon size={16} className="text-red-600" />}>
+        <ChartCard title="Leads creados según estado actual" icon={<PieChartIcon size={16} className="text-red-600" />}>
           <ResponsiveContainer width="100%" height={300}>
             <PieChart>
               <Pie
@@ -955,7 +962,7 @@ function InsightsReportSections({
           </ResponsiveContainer>
         </ChartCard>
 
-        <ChartCard title="Leads por estado + personal" icon={<BarChart3 size={16} className="text-red-600" />}>
+        <ChartCard title="Leads creados por estado + pipeline/personal" icon={<BarChart3 size={16} className="text-red-600" />}>
           <ResponsiveContainer width="100%" height={300}>
             <BarChart data={statusByPipelineData.rows}>
               <CartesianGrid strokeDasharray="3 3" vertical={false} />
@@ -982,7 +989,7 @@ function InsightsReportSections({
         <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-[0_20px_36px_-30px_rgba(15,23,42,0.8)]">
           <h3 className="inline-flex items-center gap-2 text-sm font-semibold text-gray-800">
             <Users size={16} className="text-red-600" />
-            Top Personal
+            Top responsables (leads creados)
           </h3>
           <ul className="mt-4 space-y-2 text-sm text-gray-700">
             {data.owners.slice(0, 5).map((owner) => (
@@ -998,7 +1005,7 @@ function InsightsReportSections({
           <h3 className="text-sm font-semibold text-gray-800">Insights extra</h3>
           <ul className="mt-4 space-y-2 text-sm text-gray-700">
             <li className="rounded-lg border border-gray-100 bg-gray-50/70 px-3 py-2">
-              Personal top: <span className="font-semibold text-gray-900">{data.summary.top_pipeline?.pipeline_name ?? 'N/D'}</span>
+              Pipeline/personal top (creados): <span className="font-semibold text-gray-900">{data.summary.top_pipeline?.pipeline_name ?? 'N/D'}</span>
             </li>
             <li className="rounded-lg border border-gray-100 bg-gray-50/70 px-3 py-2">
               Hora pico incoming: <span className="font-semibold text-gray-900">{data.insights.busiest_hour ? formatHour(data.insights.busiest_hour.hour) : 'N/D'}</span>
@@ -1007,7 +1014,7 @@ function InsightsReportSections({
               Estado más frecuente: <span className="font-semibold text-gray-900">{data.insights.top_status?.status_name ?? 'N/D'}</span>
             </li>
             <li className="rounded-lg border border-gray-100 bg-gray-50/70 px-3 py-2">
-              Win rate (sobre cerrados): <span className="font-semibold text-gray-900">{data.insights.won_rate_over_closed !== null ? `${data.insights.won_rate_over_closed}%` : 'N/D'}</span>
+              Win rate referencial (ganados históricos / cerrados creados): <span className="font-semibold text-gray-900">{data.insights.won_rate_over_closed !== null ? `${data.insights.won_rate_over_closed}%` : 'N/D'}</span>
             </li>
             <li className="rounded-lg border border-gray-100 bg-gray-50/70 px-3 py-2">
               Leads sin pipeline: <span className="font-semibold text-gray-900">{formatNumber(data.insights.orphan_pipeline_leads)}</span>
