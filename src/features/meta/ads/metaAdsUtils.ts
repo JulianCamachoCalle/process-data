@@ -19,6 +19,31 @@ export type MetaLeaderboardEntry = {
   cpc: number;
 };
 
+export type MetaPerformanceEntry = MetaLeaderboardEntry & {
+  reach: number;
+  creativeName: string;
+  labels: string[];
+};
+
+export type MetaComparisonMetric = {
+  label: string;
+  format: 'currency' | 'number' | 'percent';
+  better: 'higher' | 'lower';
+  leftValue: number;
+  rightValue: number;
+  winner: 'left' | 'right' | 'tie';
+};
+
+export type MetaDecisionSignal = {
+  title: string;
+  helper: string;
+  entry: MetaPerformanceEntry | null;
+  tone: 'positive' | 'warning' | 'neutral';
+  metricLabel: string;
+  metricValue: number;
+  metricFormat: 'currency' | 'number' | 'percent';
+};
+
 export type MetaBreakdownPoint = {
   name: string;
   value: number;
@@ -29,7 +54,7 @@ export function safeDivide(numerator: number, denominator: number) {
   return numerator / denominator;
 }
 
-export function sumBy(rows: MetaAdsReportingRow[], selector: (row: MetaAdsReportingRow) => number | null) {
+export function sumBy<T>(rows: T[], selector: (row: T) => number | null) {
   return rows.reduce((acc, row) => acc + (selector(row) ?? 0), 0);
 }
 
@@ -129,6 +154,164 @@ export function aggregateLeaderboard(
   return Array.from(grouped.values()).sort((left, right) => right.spend - left.spend);
 }
 
+export function aggregatePerformanceEntries(
+  rows: MetaAdsReportingRow[],
+  options: {
+    getId: (row: MetaAdsReportingRow) => string | null;
+    getTitle: (row: MetaAdsReportingRow) => string | null;
+    getSubtitle: (row: MetaAdsReportingRow) => string | null;
+    getCreativeName?: (row: MetaAdsReportingRow) => string | null;
+  },
+) {
+  const grouped = new Map<string, MetaPerformanceEntry>();
+
+  for (const row of rows) {
+    const id = options.getId(row);
+    if (!id) continue;
+
+    const current = grouped.get(id) ?? {
+      id,
+      title: options.getTitle(row) ?? id,
+      subtitle: options.getSubtitle(row) ?? 'N/D',
+      creativeName: options.getCreativeName?.(row) ?? row.creative_name ?? 'Sin creative',
+      spend: 0,
+      clicks: 0,
+      impressions: 0,
+      reach: 0,
+      ctr: 0,
+      cpc: 0,
+      labels: [],
+    };
+
+    current.spend += row.spend ?? 0;
+    current.clicks += row.clicks ?? 0;
+    current.impressions += row.impressions ?? 0;
+    current.reach += row.reach ?? 0;
+    current.ctr = safeDivide(current.clicks * 100, current.impressions);
+    current.cpc = safeDivide(current.spend, current.clicks);
+
+    if (!current.creativeName || current.creativeName === 'Sin creative') {
+      current.creativeName = options.getCreativeName?.(row) ?? row.creative_name ?? 'Sin creative';
+    }
+
+    grouped.set(id, current);
+  }
+
+  const entries = Array.from(grouped.values());
+  const averages = {
+    spend: safeDivide(sumBy(entries, (entry) => entry.spend), entries.length),
+    clicks: safeDivide(sumBy(entries, (entry) => entry.clicks), entries.length),
+    ctr: safeDivide(sumBy(entries, (entry) => entry.ctr), entries.length),
+    cpc: safeDivide(sumBy(entries, (entry) => entry.cpc), entries.length),
+  };
+
+  return entries
+    .map((entry) => ({
+      ...entry,
+      labels: buildHeuristicLabels(entry, averages),
+    }))
+    .sort((left, right) => right.spend - left.spend);
+}
+
+export function pickComparisonPair(entries: MetaPerformanceEntry[]) {
+  return entries.slice(0, 2);
+}
+
+export function buildComparisonMetrics(left?: MetaPerformanceEntry, right?: MetaPerformanceEntry): MetaComparisonMetric[] {
+  if (!left || !right) return [];
+
+  return [
+    createComparisonMetric('Spend', left.spend, right.spend, 'currency', 'higher'),
+    createComparisonMetric('Clicks', left.clicks, right.clicks, 'number', 'higher'),
+    createComparisonMetric('CTR', left.ctr, right.ctr, 'percent', 'higher'),
+    createComparisonMetric('CPC', left.cpc, right.cpc, 'currency', 'lower'),
+  ];
+}
+
+export function buildDecisionSignals(entries: MetaPerformanceEntry[]): MetaDecisionSignal[] {
+  const significant = entries.filter((entry) => entry.impressions >= 1000 && entry.clicks >= 5);
+  const pool = significant.length > 0 ? significant : entries;
+  const weakest = getWeakPerformers(entries)[0] ?? null;
+
+  const bestCtr = [...pool].sort((left, right) => right.ctr - left.ctr)[0] ?? null;
+  const bestCpc = [...pool].filter((entry) => entry.clicks > 0).sort((left, right) => left.cpc - right.cpc)[0] ?? null;
+  const mostClicks = [...entries].sort((left, right) => right.clicks - left.clicks)[0] ?? null;
+  const highestSpend = [...entries].sort((left, right) => right.spend - left.spend)[0] ?? null;
+
+  return [
+    {
+      title: 'Mejor CTR',
+      helper: 'La pieza que mejor convierte impresiones en clicks.',
+      entry: bestCtr,
+      tone: 'positive',
+      metricLabel: 'CTR',
+      metricValue: bestCtr?.ctr ?? 0,
+      metricFormat: 'percent',
+    },
+    {
+      title: 'Mejor CPC',
+      helper: 'El activo que consigue clicks más baratos.',
+      entry: bestCpc,
+      tone: 'positive',
+      metricLabel: 'CPC',
+      metricValue: bestCpc?.cpc ?? 0,
+      metricFormat: 'currency',
+    },
+    {
+      title: 'Más clicks',
+      helper: 'La unidad que más tráfico aportó al negocio.',
+      entry: mostClicks,
+      tone: 'neutral',
+      metricLabel: 'Clicks',
+      metricValue: mostClicks?.clicks ?? 0,
+      metricFormat: 'number',
+    },
+    {
+      title: 'Mayor spend',
+      helper: 'Donde hoy está concentrada la inversión.',
+      entry: highestSpend,
+      tone: 'neutral',
+      metricLabel: 'Spend',
+      metricValue: highestSpend?.spend ?? 0,
+      metricFormat: 'currency',
+    },
+    {
+      title: 'Alto gasto, baja eficiencia',
+      helper: 'Prioridad para revisar mensaje, segmentación o pieza.',
+      entry: weakest,
+      tone: 'warning',
+      metricLabel: 'CPC',
+      metricValue: weakest?.cpc ?? 0,
+      metricFormat: 'currency',
+    },
+  ];
+}
+
+export function getWeakPerformers(entries: MetaPerformanceEntry[]) {
+  if (entries.length === 0) return [];
+
+  const avgSpend = safeDivide(sumBy(entries, (entry) => entry.spend), entries.length);
+  const spendHeavy = entries.filter((entry) => entry.spend >= avgSpend && entry.clicks > 0);
+  const pool = spendHeavy.length > 0 ? spendHeavy : entries.filter((entry) => entry.clicks > 0);
+
+  return [...pool].sort((left, right) => {
+    if (right.cpc !== left.cpc) return right.cpc - left.cpc;
+    if (left.ctr !== right.ctr) return left.ctr - right.ctr;
+    return right.spend - left.spend;
+  });
+}
+
+export function getCreativeInsightEntries(entries: MetaPerformanceEntry[], limit = 4) {
+  return [...entries]
+    .filter((entry) => entry.clicks > 0 || entry.impressions > 0)
+    .sort((left, right) => {
+      if (right.clicks !== left.clicks) return right.clicks - left.clicks;
+      if (right.ctr !== left.ctr) return right.ctr - left.ctr;
+      return right.spend - left.spend;
+    })
+    .slice(0, limit);
+}
+
 export function aggregateBreakdown(
   rows: MetaAdsReportingRow[],
   selector: (row: MetaAdsReportingRow) => string | null,
@@ -149,4 +332,49 @@ export function formatCompactMetric(value: number, type: 'currency' | 'number' |
   if (type === 'currency') return formatCurrencyPen(value);
   if (type === 'percent') return formatPercent(value);
   return formatNumberEs(value);
+}
+
+function createComparisonMetric(
+  label: string,
+  leftValue: number,
+  rightValue: number,
+  format: MetaComparisonMetric['format'],
+  better: MetaComparisonMetric['better'],
+): MetaComparisonMetric {
+  let winner: MetaComparisonMetric['winner'] = 'tie';
+
+  if (leftValue !== rightValue) {
+    const leftWins = better === 'higher' ? leftValue > rightValue : leftValue < rightValue;
+    winner = leftWins ? 'left' : 'right';
+  }
+
+  return {
+    label,
+    format,
+    better,
+    leftValue,
+    rightValue,
+    winner,
+  };
+}
+
+function buildHeuristicLabels(
+  entry: MetaPerformanceEntry,
+  averages: { spend: number; clicks: number; ctr: number; cpc: number },
+) {
+  const labels: string[] = [];
+
+  if (entry.ctr >= averages.ctr && entry.cpc > 0 && entry.cpc <= averages.cpc) {
+    labels.push('Ganador en eficiencia');
+  }
+
+  if (entry.spend >= averages.spend && (entry.ctr < averages.ctr || entry.cpc > averages.cpc)) {
+    labels.push('Alto gasto, baja eficiencia');
+  }
+
+  if (entry.clicks >= averages.clicks && entry.ctr >= averages.ctr) {
+    labels.push('Mensaje que atrae clicks');
+  }
+
+  return labels.slice(0, 2);
 }

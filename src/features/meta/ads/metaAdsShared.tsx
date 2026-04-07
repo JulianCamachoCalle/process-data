@@ -231,6 +231,26 @@ export function ChartCard({ title, children, icon }: { title: string; children: 
   );
 }
 
+export function InsightBadge({
+  label,
+  tone = 'neutral',
+}: {
+  label: string;
+  tone?: 'positive' | 'warning' | 'neutral';
+}) {
+  const toneClassName = tone === 'positive'
+    ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+    : tone === 'warning'
+      ? 'border-amber-200 bg-amber-50 text-amber-700'
+      : 'border-gray-200 bg-gray-100 text-gray-600';
+
+  return (
+    <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-semibold ${toneClassName}`}>
+      {label}
+    </span>
+  );
+}
+
 export function SyncStatusCard({ latestSyncRun }: { latestSyncRun: MetaSyncRunRow | null }) {
   if (!latestSyncRun) {
     return (
