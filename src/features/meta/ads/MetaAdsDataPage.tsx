@@ -46,11 +46,6 @@ export function MetaAdsDataPage() {
   const rows = useMemo(() => reportingQuery.data?.rows ?? [], [reportingQuery.data?.rows]);
   const accounts = useMemo(() => reportingQuery.data?.accounts ?? [], [reportingQuery.data?.accounts]);
 
-  const objectiveOptions = useMemo(() => {
-    return Array.from(new Set(rows.map((row) => row.objective).filter((value): value is string => Boolean(value))))
-      .sort((left, right) => left.localeCompare(right, 'es'));
-  }, [rows]);
-
   const filteredRows = useMemo(() => {
     return rows.filter((row) => {
       if (objective && row.objective !== objective) return false;
@@ -97,7 +92,6 @@ export function MetaAdsDataPage() {
       <MetaAdsPageHero
         title="Meta Ads Data"
         description="Explorador detallado del reporting diario a nivel anuncios."
-        badge="Data explorer"
         icon={<Database className="text-red-600" size={24} />}
       />
 
@@ -135,7 +129,7 @@ export function MetaAdsDataPage() {
         }}
         isApplyDisabled={!isFiltersDirty}
         extra={(
-          <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1.4fr)_minmax(0,0.85fr)_minmax(0,0.75fr)]">
+          <div className="grid grid-cols-1 gap-4">
             <label className="rounded-2xl border border-gray-200 bg-white px-4 py-3 text-sm text-gray-600 shadow-[0_12px_24px_-20px_rgba(15,23,42,0.9)]">
               <span className="text-xs font-semibold uppercase tracking-wide text-gray-500">Buscar entidades</span>
               <div className="mt-2 inline-flex w-full items-center gap-2 rounded-xl border border-gray-200 bg-gray-50 px-3 py-2.5">
@@ -147,20 +141,6 @@ export function MetaAdsDataPage() {
                   className="w-full bg-transparent text-sm text-gray-800 outline-none"
                 />
               </div>
-            </label>
-
-            <label className="rounded-2xl border border-gray-200 bg-white px-4 py-3 text-sm text-gray-600 shadow-[0_12px_24px_-20px_rgba(15,23,42,0.9)]">
-              <span className="text-xs font-semibold uppercase tracking-wide text-gray-500">Objetivo</span>
-              <select
-                value={draftObjective}
-                onChange={(event) => setDraftObjective(event.target.value)}
-                className="mt-2 w-full rounded-xl border border-gray-300 bg-white px-3 py-2.5 text-sm text-gray-800 outline-none transition focus:border-red-300 focus:ring-2 focus:ring-red-100"
-              >
-                <option value="">Todos los objetivos</option>
-                {objectiveOptions.map((option) => (
-                  <option key={option} value={option}>{option}</option>
-                ))}
-              </select>
             </label>
           </div>
         )}

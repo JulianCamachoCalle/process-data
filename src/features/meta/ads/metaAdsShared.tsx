@@ -7,27 +7,21 @@ import { formatDateTime, formatDateRangeLabel, formatDurationMs, formatSyncResou
 export function MetaAdsPageHero({
   title,
   description,
-  badge,
   icon,
 }: {
   title: string;
   description: string;
-  badge: string;
   icon: ReactNode;
 }) {
   return (
     <div className="rounded-2xl border border-gray-200 bg-white/90 px-6 py-5 shadow-[0_24px_44px_-30px_rgba(15,23,42,0.65)] backdrop-blur-sm">
       <div className="flex items-center justify-between gap-4 flex-wrap">
         <div>
-          <h1 className="text-2xl font-extrabold text-gray-900 inline-flex items-center gap-2">
+          <h1 className="text-2xl font-extrabold text-gray-900 uppercase tracking-[0.10em] inline-flex items-center gap-2">
             {icon}
             {title}
           </h1>
-          <p className="text-sm text-gray-500 mt-1">{description}</p>
-        </div>
-        <div className="hidden md:inline-flex items-center gap-2 rounded-full border border-red-200 bg-red-50 px-3 py-1 text-xs font-semibold text-red-700">
-          <Activity size={14} />
-          {badge}
+          <p className="text-xs text-gray-500 font-semibold uppercase tracking-[0.10em] mt-1 italic">{description}</p>
         </div>
       </div>
     </div>
@@ -35,14 +29,11 @@ export function MetaAdsPageHero({
 }
 
 export function MetaAdsFiltersPanel({
-  accounts,
   appliedAccountId,
   appliedDateFrom,
   appliedDateTo,
-  draftAccountId,
   draftDateFrom,
   draftDateTo,
-  onDraftAccountIdChange,
   onDraftDateFromChange,
   onDraftDateToChange,
   onApply,
@@ -74,26 +65,12 @@ export function MetaAdsFiltersPanel({
             <Filter size={14} />
             Filtros
           </p>
-          <h2 className="mt-2 text-lg font-bold text-gray-900">Define el rango antes de consultar</h2>
         </div>
       </div>
 
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1.3fr)_repeat(2,minmax(0,0.8fr))]">
-        <label className="rounded-2xl border border-gray-200 bg-gray-50/70 px-4 py-3 text-sm text-gray-600 shadow-inner shadow-white/50">
-          <span className="text-xs font-semibold uppercase tracking-wide text-gray-500">Cuenta publicitaria</span>
-          <select
-            value={draftAccountId}
-            onChange={(event) => onDraftAccountIdChange(event.target.value)}
-            className="mt-2 w-full rounded-xl border border-gray-300 bg-white px-3 py-2.5 text-sm text-gray-800 outline-none transition focus:border-red-300 focus:ring-2 focus:ring-red-100"
-          >
-            <option value="">Todas las cuentas</option>
-            {accounts.map((account) => (
-              <option key={account.business_id} value={account.business_id}>
-                {account.name || account.business_id}
-              </option>
-            ))}
-          </select>
-        </label>
+
+        {extra}
 
         <label className="rounded-2xl border border-gray-200 bg-gray-50/70 px-4 py-3 text-sm text-gray-600 shadow-inner shadow-white/50">
           <span className="text-xs font-semibold uppercase tracking-wide text-gray-500">Fecha inicio</span>
@@ -115,8 +92,6 @@ export function MetaAdsFiltersPanel({
           />
         </label>
       </div>
-
-      {extra}
 
       <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-gray-200 bg-gradient-to-r from-gray-50 to-white px-4 py-3">
         <div className="flex flex-wrap items-center gap-2 text-xs text-gray-500">
