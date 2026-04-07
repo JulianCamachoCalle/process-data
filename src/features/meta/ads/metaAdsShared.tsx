@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { Activity, Clock3, Database, RefreshCw } from 'lucide-react';
+import { Activity, CalendarRange, CheckCircle2, Clock3, Database, Filter, RefreshCw, Sparkles } from 'lucide-react';
 import { formatCurrencyPen, formatNumberEs } from '../../../lib/tableHelpers';
 import type { MetaAdAccountOption, MetaSyncRunRow } from './types';
 import { formatDateTime, formatDateRangeLabel, formatDurationMs, formatSyncResourceSummary } from './metaAdsUtils';
@@ -36,35 +36,68 @@ export function MetaAdsPageHero({
 
 export function MetaAdsFiltersPanel({
   accounts,
-  accountId,
-  dateFrom,
-  dateTo,
-  onAccountIdChange,
-  onDateFromChange,
-  onDateToChange,
+  appliedAccountId,
+  appliedDateFrom,
+  appliedDateTo,
+  draftAccountId,
+  draftDateFrom,
+  draftDateTo,
+  onDraftAccountIdChange,
+  onDraftDateFromChange,
+  onDraftDateToChange,
+  onApply,
   onClear,
+  isApplyDisabled,
   extra,
 }: {
   accounts: MetaAdAccountOption[];
-  accountId: string;
-  dateFrom: string;
-  dateTo: string;
-  onAccountIdChange: (value: string) => void;
-  onDateFromChange: (value: string) => void;
-  onDateToChange: (value: string) => void;
+  appliedAccountId: string;
+  appliedDateFrom: string;
+  appliedDateTo: string;
+  draftAccountId: string;
+  draftDateFrom: string;
+  draftDateTo: string;
+  onDraftAccountIdChange: (value: string) => void;
+  onDraftDateFromChange: (value: string) => void;
+  onDraftDateToChange: (value: string) => void;
+  onApply: () => void;
   onClear: () => void;
+  isApplyDisabled?: boolean;
   extra?: ReactNode;
 }) {
+  const hasAppliedFilters = Boolean(appliedAccountId || appliedDateFrom || appliedDateTo);
+
   return (
-    <div className="rounded-2xl border border-gray-200 bg-white p-4 space-y-3">
-      <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Filtros</p>
-      <div className="grid grid-cols-1 xl:grid-cols-4 gap-3 items-end">
-        <label className="text-sm text-gray-600">
-          Cuenta publicitaria
+    <div className="rounded-[28px] border border-gray-200 bg-white/95 p-5 shadow-[0_24px_52px_-38px_rgba(15,23,42,0.95)] backdrop-blur-sm space-y-5">
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <p className="inline-flex items-center gap-2 text-xs font-semibold text-gray-500 uppercase tracking-[0.22em]">
+            <Filter size={14} />
+            Filtros
+          </p>
+          <h2 className="mt-2 text-lg font-bold text-gray-900">Definí el rango antes de consultar</h2>
+          <p className="mt-1 text-sm text-gray-500">
+            Los cambios quedan en borrador hasta que presionás <span className="font-semibold text-gray-700">Aplicar filtros</span>.
+          </p>
+        </div>
+
+        <div className="rounded-2xl border border-red-100 bg-gradient-to-br from-red-50 via-white to-orange-50 px-4 py-3 text-sm shadow-sm">
+          <p className="inline-flex items-center gap-2 font-semibold text-red-700">
+            <Sparkles size={15} />
+            Periodo aplicado
+          </p>
+          <p className="mt-2 text-sm font-medium text-gray-800">{formatDateRangeLabel(appliedDateFrom, appliedDateTo)}</p>
+          <p className="mt-1 text-xs text-gray-500">{hasAppliedFilters ? 'Filtro activo listo para reporting.' : 'Sin filtros remotos activos.'}</p>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1.3fr)_repeat(2,minmax(0,0.8fr))]">
+        <label className="rounded-2xl border border-gray-200 bg-gray-50/70 px-4 py-3 text-sm text-gray-600 shadow-inner shadow-white/50">
+          <span className="text-xs font-semibold uppercase tracking-wide text-gray-500">Cuenta publicitaria</span>
           <select
-            value={accountId}
-            onChange={(event) => onAccountIdChange(event.target.value)}
-            className="mt-1 w-full rounded-xl border border-gray-300 px-3 py-2 bg-white"
+            value={draftAccountId}
+            onChange={(event) => onDraftAccountIdChange(event.target.value)}
+            className="mt-2 w-full rounded-xl border border-gray-300 bg-white px-3 py-2.5 text-sm text-gray-800 outline-none transition focus:border-red-300 focus:ring-2 focus:ring-red-100"
           >
             <option value="">Todas las cuentas</option>
             {accounts.map((account) => (
@@ -75,40 +108,71 @@ export function MetaAdsFiltersPanel({
           </select>
         </label>
 
-        <label className="text-sm text-gray-600">
-          Fecha inicio
+        <label className="rounded-2xl border border-gray-200 bg-gray-50/70 px-4 py-3 text-sm text-gray-600 shadow-inner shadow-white/50">
+          <span className="text-xs font-semibold uppercase tracking-wide text-gray-500">Fecha inicio</span>
           <input
             type="date"
-            value={dateFrom}
-            onChange={(event) => onDateFromChange(event.target.value)}
-            className="mt-1 w-full rounded-xl border border-gray-300 px-3 py-2"
+            value={draftDateFrom}
+            onChange={(event) => onDraftDateFromChange(event.target.value)}
+            className="mt-2 w-full rounded-xl border border-gray-300 bg-white px-3 py-2.5 text-sm text-gray-800 outline-none transition focus:border-red-300 focus:ring-2 focus:ring-red-100"
           />
         </label>
 
-        <label className="text-sm text-gray-600">
-          Fecha fin
+        <label className="rounded-2xl border border-gray-200 bg-gray-50/70 px-4 py-3 text-sm text-gray-600 shadow-inner shadow-white/50">
+          <span className="text-xs font-semibold uppercase tracking-wide text-gray-500">Fecha fin</span>
           <input
             type="date"
-            value={dateTo}
-            onChange={(event) => onDateToChange(event.target.value)}
-            className="mt-1 w-full rounded-xl border border-gray-300 px-3 py-2"
+            value={draftDateTo}
+            onChange={(event) => onDraftDateToChange(event.target.value)}
+            className="mt-2 w-full rounded-xl border border-gray-300 bg-white px-3 py-2.5 text-sm text-gray-800 outline-none transition focus:border-red-300 focus:ring-2 focus:ring-red-100"
           />
         </label>
 
-        <div className="flex items-center justify-between gap-3 rounded-xl border border-gray-200 bg-gray-50 px-3 py-2">
-          <div className="text-sm text-gray-500">
-            Periodo: <span className="font-semibold text-gray-800">{formatDateRangeLabel(dateFrom, dateTo)}</span>
+        <div className="rounded-2xl border border-gray-200 bg-slate-900 px-4 py-3 text-white shadow-[0_18px_40px_-32px_rgba(15,23,42,1)]">
+          <div className="inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-300">
+            <CalendarRange size={14} />
+            Vista aplicada
           </div>
+          <div className="mt-3 space-y-1">
+            <p className="text-sm font-semibold">{formatDateRangeLabel(appliedDateFrom, appliedDateTo)}</p>
+            <p className="text-xs text-slate-300">Cuenta: {appliedAccountId || 'Todas las cuentas'}</p>
+          </div>
+        </div>
+      </div>
+
+      {extra}
+
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-gray-200 bg-gradient-to-r from-gray-50 to-white px-4 py-3">
+        <div className="flex flex-wrap items-center gap-2 text-xs text-gray-500">
+          <span className="inline-flex items-center gap-2 rounded-full border border-gray-200 bg-white px-3 py-1 font-medium">
+            <CheckCircle2 size={13} className="text-emerald-500" />
+            Rango aplicado: {formatDateRangeLabel(appliedDateFrom, appliedDateTo)}
+          </span>
+          {appliedAccountId ? (
+            <span className="rounded-full border border-red-100 bg-red-50 px-3 py-1 font-medium text-red-700">
+              Cuenta {appliedAccountId}
+            </span>
+          ) : null}
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2">
           <button
             type="button"
             onClick={onClear}
-            className="text-xs font-semibold text-red-600 hover:text-red-700"
+            className="inline-flex items-center justify-center rounded-xl border border-gray-300 bg-white px-4 py-2 text-sm font-semibold text-gray-700 transition hover:border-gray-400 hover:bg-gray-50"
           >
             Limpiar
           </button>
+          <button
+            type="button"
+            onClick={onApply}
+            disabled={isApplyDisabled}
+            className="inline-flex items-center justify-center rounded-xl bg-red-600 px-4 py-2 text-sm font-semibold text-white shadow-[0_18px_32px_-18px_rgba(220,38,38,0.95)] transition hover:bg-red-700 disabled:cursor-not-allowed disabled:bg-red-300 disabled:shadow-none"
+          >
+            Aplicar filtros
+          </button>
         </div>
       </div>
-      {extra}
     </div>
   );
 }
@@ -164,6 +228,26 @@ export function ChartCard({ title, children, icon }: { title: string; children: 
       </h3>
       {children}
     </div>
+  );
+}
+
+export function InsightBadge({
+  label,
+  tone = 'neutral',
+}: {
+  label: string;
+  tone?: 'positive' | 'warning' | 'neutral';
+}) {
+  const toneClassName = tone === 'positive'
+    ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+    : tone === 'warning'
+      ? 'border-amber-200 bg-amber-50 text-amber-700'
+      : 'border-gray-200 bg-gray-100 text-gray-600';
+
+  return (
+    <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-semibold ${toneClassName}`}>
+      {label}
+    </span>
   );
 }
 

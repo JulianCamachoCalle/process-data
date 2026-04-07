@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { isSupabaseConfigured, supabase } from '../../../lib/supabase';
-import type { MetaAdsOverviewFilters, MetaAdsOverviewPayload, MetaAdsReportingRow, MetaSyncRunRow } from './types';
+import type { MetaAdsOverviewFilters, MetaAdsOverviewPayload, MetaAdsReportingRow } from './types';
 
 type MetaAdAccountRow = {
   business_id: string;
@@ -37,27 +37,14 @@ export function useMetaAdsReporting(filters: MetaAdsOverviewFilters) {
         reportingQuery = reportingQuery.lte('date_start', filters.dateTo);
       }
 
-      let latestSyncQuery = supabase
-        .from('meta_sync_runs')
-        .select('*')
-        .eq('provider', 'meta')
-        .eq('resource', 'ads')
-        .order('started_at', { ascending: false })
-        .limit(1);
-
-      if (filters.accountId) {
-        latestSyncQuery = latestSyncQuery.eq('account_business_id', filters.accountId);
-      }
-
       const accountsPromise = supabase
         .from('meta_ad_accounts')
         .select('business_id, name')
         .order('name', { ascending: true });
 
-      const [accountsResult, reportingResult, latestSyncResult] = await Promise.all([
+      const [accountsResult, reportingResult] = await Promise.all([
         accountsPromise,
         reportingQuery,
-        latestSyncQuery,
       ]);
 
       if (accountsResult.error) {
@@ -68,14 +55,9 @@ export function useMetaAdsReporting(filters: MetaAdsOverviewFilters) {
         throw new Error(`No se pudo cargar el detalle de Meta Ads: ${reportingResult.error.message}`);
       }
 
-      if (latestSyncResult.error) {
-        throw new Error(`No se pudo cargar el último sync de Meta Ads: ${latestSyncResult.error.message}`);
-      }
-
       return {
         accounts: (accountsResult.data ?? []) as MetaAdAccountRow[],
         rows: (reportingResult.data ?? []) as MetaAdsReportingRow[],
-        latestSyncRun: ((latestSyncResult.data ?? [])[0] ?? null) as MetaSyncRunRow | null,
       };
     },
     staleTime: 60 * 1000,

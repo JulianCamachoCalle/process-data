@@ -44,7 +44,6 @@ export type MetaAdsOverviewFilters = {
 export type MetaAdsOverviewPayload = {
   accounts: MetaAdAccountOption[];
   rows: MetaAdsReportingRow[];
-  latestSyncRun: MetaSyncRunRow | null;
 };
 
 export type MetaSyncRunResourceSummary = {

@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { Activity, ChevronLeft, ChevronRight, Database, Megaphone, Search } from 'lucide-react';
 import { formatCurrencyPen, formatNumberEs, normalizeText } from '../../../lib/tableHelpers';
-import { KpiCard, KpiGrid, MetaAdsFiltersPanel, MetaAdsPageHero, Section, SyncStatusCard } from './metaAdsShared';
+import { KpiCard, KpiGrid, MetaAdsFiltersPanel, MetaAdsPageHero, Section } from './metaAdsShared';
 import { formatPercent, formatStatus } from './metaAdsUtils';
 import type { MetaAdsReportingRow } from './types';
 import { useMetaAdsReporting } from './useMetaAdsReporting';
@@ -31,8 +31,13 @@ export function MetaAdsDataPage() {
   const [accountId, setAccountId] = useState('');
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
+  const [draftAccountId, setDraftAccountId] = useState('');
+  const [draftDateFrom, setDraftDateFrom] = useState('');
+  const [draftDateTo, setDraftDateTo] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
   const [objective, setObjective] = useState('');
+  const [draftSearchTerm, setDraftSearchTerm] = useState('');
+  const [draftObjective, setDraftObjective] = useState('');
   const [pageSize, setPageSize] = useState(25);
   const [currentPage, setCurrentPage] = useState(1);
 
@@ -40,7 +45,6 @@ export function MetaAdsDataPage() {
 
   const rows = useMemo(() => reportingQuery.data?.rows ?? [], [reportingQuery.data?.rows]);
   const accounts = useMemo(() => reportingQuery.data?.accounts ?? [], [reportingQuery.data?.accounts]);
-  const latestSyncRun = reportingQuery.data?.latestSyncRun ?? null;
 
   const objectiveOptions = useMemo(() => {
     return Array.from(new Set(rows.map((row) => row.objective).filter((value): value is string => Boolean(value))))
@@ -53,6 +57,12 @@ export function MetaAdsDataPage() {
       return matchesSearch(row, searchTerm);
     });
   }, [objective, rows, searchTerm]);
+
+  const isFiltersDirty = accountId !== draftAccountId
+    || dateFrom !== draftDateFrom
+    || dateTo !== draftDateTo
+    || searchTerm !== draftSearchTerm
+    || objective !== draftObjective;
 
   const totalPages = Math.max(1, Math.ceil(filteredRows.length / pageSize));
   const safeCurrentPage = Math.min(currentPage, totalPages);
@@ -86,61 +96,66 @@ export function MetaAdsDataPage() {
     <div className="space-y-6">
       <MetaAdsPageHero
         title="Meta Ads Data"
-        description="Explorador detallado del reporting diario a nivel anuncio, con filtros y paginación cliente-side como el resto del repo."
+        description="Explorador detallado del reporting diario a nivel anuncio, con filtros más intencionales y paginación cliente-side."
         badge="Data explorer"
         icon={<Database className="text-red-600" size={24} />}
       />
 
       <MetaAdsFiltersPanel
         accounts={accounts}
-        accountId={accountId}
-        dateFrom={dateFrom}
-        dateTo={dateTo}
-        onAccountIdChange={(value) => {
-          setAccountId(value);
-          setCurrentPage(1);
-        }}
-        onDateFromChange={(value) => {
-          setDateFrom(value);
-          setCurrentPage(1);
-        }}
-        onDateToChange={(value) => {
-          setDateTo(value);
+        appliedAccountId={accountId}
+        appliedDateFrom={dateFrom}
+        appliedDateTo={dateTo}
+        draftAccountId={draftAccountId}
+        draftDateFrom={draftDateFrom}
+        draftDateTo={draftDateTo}
+        onDraftAccountIdChange={setDraftAccountId}
+        onDraftDateFromChange={setDraftDateFrom}
+        onDraftDateToChange={setDraftDateTo}
+        onApply={() => {
+          setAccountId(draftAccountId);
+          setDateFrom(draftDateFrom);
+          setDateTo(draftDateTo);
+          setSearchTerm(draftSearchTerm);
+          setObjective(draftObjective);
           setCurrentPage(1);
         }}
         onClear={() => {
           setAccountId('');
           setDateFrom('');
           setDateTo('');
+          setDraftAccountId('');
+          setDraftDateFrom('');
+          setDraftDateTo('');
           setSearchTerm('');
           setObjective('');
+          setDraftSearchTerm('');
+          setDraftObjective('');
           setCurrentPage(1);
         }}
+        isApplyDisabled={!isFiltersDirty}
         extra={(
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
-            <label className="rounded-xl border border-gray-200 bg-white px-3 py-2 inline-flex items-center gap-2 text-sm text-gray-600">
-              <Search size={15} className="text-gray-400" />
-              <input
-                value={searchTerm}
-                onChange={(event) => {
-                  setSearchTerm(event.target.value);
-                  setCurrentPage(1);
-                }}
-                placeholder="Buscar campaña, ad set, ad, creative o ID"
-                className="w-full bg-transparent outline-none"
-              />
+          <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1.4fr)_minmax(0,0.85fr)_minmax(0,0.75fr)]">
+            <label className="rounded-2xl border border-gray-200 bg-white px-4 py-3 text-sm text-gray-600 shadow-[0_12px_24px_-20px_rgba(15,23,42,0.9)]">
+              <span className="text-xs font-semibold uppercase tracking-wide text-gray-500">Buscar entidades</span>
+              <div className="mt-2 inline-flex w-full items-center gap-2 rounded-xl border border-gray-200 bg-gray-50 px-3 py-2.5">
+                <Search size={15} className="text-gray-400" />
+                <input
+                  value={draftSearchTerm}
+                  onChange={(event) => setDraftSearchTerm(event.target.value)}
+                  placeholder="Campaña, ad set, ad, creative o ID"
+                  className="w-full bg-transparent text-sm text-gray-800 outline-none"
+                />
+              </div>
             </label>
 
-            <label className="text-sm text-gray-600">
-              Objetivo
-                <select
-                  value={objective}
-                  onChange={(event) => {
-                    setObjective(event.target.value);
-                    setCurrentPage(1);
-                  }}
-                  className="mt-1 w-full rounded-xl border border-gray-300 px-3 py-2 bg-white"
-                >
+            <label className="rounded-2xl border border-gray-200 bg-white px-4 py-3 text-sm text-gray-600 shadow-[0_12px_24px_-20px_rgba(15,23,42,0.9)]">
+              <span className="text-xs font-semibold uppercase tracking-wide text-gray-500">Objetivo</span>
+              <select
+                value={draftObjective}
+                onChange={(event) => setDraftObjective(event.target.value)}
+                className="mt-2 w-full rounded-xl border border-gray-300 bg-white px-3 py-2.5 text-sm text-gray-800 outline-none transition focus:border-red-300 focus:ring-2 focus:ring-red-100"
+              >
                 <option value="">Todos los objetivos</option>
                 {objectiveOptions.map((option) => (
                   <option key={option} value={option}>{option}</option>
@@ -148,20 +163,17 @@ export function MetaAdsDataPage() {
               </select>
             </label>
 
-            <div className="rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 flex items-center justify-between gap-3">
+            <div className="rounded-2xl border border-red-100 bg-gradient-to-br from-red-50 via-white to-orange-50 px-4 py-3 flex items-center justify-between gap-3 shadow-[0_16px_30px_-24px_rgba(220,38,38,0.85)]">
               <div>
-                <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Estado de la vista</p>
-                <p className="text-sm text-gray-700 mt-1">{formatNumberEs(filteredRows.length)} fila(s) filtradas</p>
+                <p className="text-xs font-semibold uppercase tracking-wide text-red-600">Estado de la vista</p>
+                <p className="text-sm font-semibold text-gray-800 mt-1">{formatNumberEs(filteredRows.length)} fila(s) aplicadas</p>
+                <p className="mt-1 text-xs text-gray-500">Los cambios del formulario no impactan la tabla hasta aplicar.</p>
               </div>
               <Megaphone className="text-red-500" size={18} />
             </div>
           </div>
         )}
       />
-
-      <Section title="Último sync">
-        <SyncStatusCard latestSyncRun={latestSyncRun} />
-      </Section>
 
       <Section title="Resumen de la tabla">
         <KpiGrid>

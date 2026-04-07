@@ -102,6 +102,10 @@
     {
       "path": "/api/kommo/process-events?loop=1&limit=120",
       "schedule": "58 5 * * *"
+    },
+    {
+      "path": "/api/meta/ads/sync?date_preset=last_30d&time_increment=1&limit=100&max_pages=5&max_runtime_ms=45000",
+      "schedule": "10 6 * * *"
     }
   ]
 }
