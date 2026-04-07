@@ -96,7 +96,7 @@ export function MetaAdsDataPage() {
     <div className="space-y-6">
       <MetaAdsPageHero
         title="Meta Ads Data"
-        description="Explorador detallado del reporting diario a nivel anuncio, con filtros más intencionales y paginación cliente-side."
+        description="Explorador detallado del reporting diario a nivel anuncios."
         badge="Data explorer"
         icon={<Database className="text-red-600" size={24} />}
       />

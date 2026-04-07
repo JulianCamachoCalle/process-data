@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { LayoutDashboard, Database, Sparkles, Layers3, Workflow, Settings, PanelLeftClose, X, Megaphone, BarChart3 } from 'lucide-react';
+import { LayoutDashboard, Database, Layers3, Workflow, Settings, PanelLeftClose, X, Megaphone, BarChart3 } from 'lucide-react';
 import { getSheetLabel, groupSheetsByDomain } from '../lib/sheetLabels';
 
 interface SidebarPrefetchHandlers {
@@ -110,10 +110,6 @@ export function Sidebar({
             <h1 className="font-extrabold text-lg leading-tight">Panel Logístico</h1>
             <p className="text-xs text-red-200/80 tracking-wide">Control y Operaciones</p>
           </div>
-        </div>
-        <div className={`inline-flex items-center gap-2 rounded-full border border-red-500/35 bg-red-500/10 px-3 py-1 text-[11px] font-semibold text-red-200 ${collapsed ? 'md:hidden' : ''}`}>
-          <Sparkles size={12} />
-          Experiencia Profesional
         </div>
       </div>
 

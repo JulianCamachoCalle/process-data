@@ -53,6 +53,17 @@ export type MetaDecisionSignal = {
   metricFormat: 'currency' | 'number' | 'percent';
 };
 
+export type MetaRecommendationBucketKey = 'escalar' | 'iterar' | 'revisar';
+
+export type MetaRecommendationBucket = {
+  key: MetaRecommendationBucketKey;
+  title: 'Escalar' | 'Iterar' | 'Revisar';
+  description: string;
+  helper: string;
+  tone: 'positive' | 'warning' | 'neutral';
+  entries: MetaPerformanceEntry[];
+};
+
 export type MetaBreakdownPoint = {
   name: string;
   value: number;
@@ -346,6 +357,114 @@ export function buildDecisionSignals(entries: MetaPerformanceEntry[]): MetaDecis
       metricLabel: 'CPC',
       metricValue: weakest?.cpc ?? 0,
       metricFormat: 'currency',
+    },
+  ];
+}
+
+export function buildRecommendationBuckets(entries: MetaPerformanceEntry[]): MetaRecommendationBucket[] {
+  if (entries.length === 0) {
+    return [
+      {
+        key: 'escalar',
+        title: 'Escalar',
+        description: 'Piezas con eficiencia sana y volumen suficiente para defender más presupuesto.',
+        helper: 'No hay ads con data suficiente para sugerir escalado.',
+        tone: 'positive',
+        entries: [],
+      },
+      {
+        key: 'iterar',
+        title: 'Iterar',
+        description: 'Piezas con señales de respuesta, pero todavía necesitan mejorar costo o volumen.',
+        helper: 'No hay ads en zona de iteración con los filtros actuales.',
+        tone: 'neutral',
+        entries: [],
+      },
+      {
+        key: 'revisar',
+        title: 'Revisar',
+        description: 'Piezas donde el gasto ya exige una corrección de mensaje, segmentación o creative.',
+        helper: 'No hay ads prioritarios para revisar con los filtros actuales.',
+        tone: 'warning',
+        entries: [],
+      },
+    ];
+  }
+
+  const averages = {
+    spend: safeDivide(sumBy(entries, (entry) => entry.spend), entries.length),
+    clicks: safeDivide(sumBy(entries, (entry) => entry.clicks), entries.length),
+    impressions: safeDivide(sumBy(entries, (entry) => entry.impressions), entries.length),
+    ctr: safeDivide(sumBy(entries, (entry) => entry.ctr), entries.length),
+    cpc: safeDivide(sumBy(entries, (entry) => entry.cpc), entries.filter((entry) => entry.clicks > 0).length),
+  };
+
+  const buckets: Record<MetaRecommendationBucketKey, MetaPerformanceEntry[]> = {
+    escalar: [],
+    iterar: [],
+    revisar: [],
+  };
+
+  for (const entry of entries) {
+    const hasClicks = entry.clicks > 0;
+    const ctrHealthy = entry.ctr >= averages.ctr;
+    const cpcHealthy = hasClicks && averages.cpc > 0 ? entry.cpc <= averages.cpc : hasClicks;
+    const strongVolume = entry.impressions >= Math.max(averages.impressions * 0.7, 1000) || entry.clicks >= Math.max(averages.clicks * 0.7, 8);
+    const spendHeavy = entry.spend >= Math.max(averages.spend, 1);
+    const weakCtr = entry.ctr < averages.ctr * 0.85;
+    const expensiveClicks = hasClicks && averages.cpc > 0 ? entry.cpc > averages.cpc * 1.15 : entry.spend > 0;
+
+    if (spendHeavy && (!hasClicks || weakCtr || expensiveClicks)) {
+      buckets.revisar.push(entry);
+      continue;
+    }
+
+    if (hasClicks && ctrHealthy && cpcHealthy && strongVolume) {
+      buckets.escalar.push(entry);
+      continue;
+    }
+
+    if (hasClicks || entry.impressions > 0 || entry.reach > 0) {
+      buckets.iterar.push(entry);
+    }
+  }
+
+  return [
+    {
+      key: 'escalar',
+      title: 'Escalar',
+      description: 'Eficiencia sana con volumen defendible para empujar inversión gradualmente.',
+      helper: 'Subí presupuesto de forma gradual y vigilá que CTR/CPC no se deterioren.',
+      tone: 'positive',
+      entries: buckets.escalar.sort((left, right) => {
+        if (right.clicks !== left.clicks) return right.clicks - left.clicks;
+        if (left.cpc !== right.cpc) return left.cpc - right.cpc;
+        return right.ctr - left.ctr;
+      }),
+    },
+    {
+      key: 'iterar',
+      title: 'Iterar',
+      description: 'Hay respuesta, pero todavía falta consolidar costo o tracción.',
+      helper: 'Probá ajustes en creative, copy o segmentación antes de escalar fuerte.',
+      tone: 'neutral',
+      entries: buckets.iterar.sort((left, right) => {
+        if (right.ctr !== left.ctr) return right.ctr - left.ctr;
+        if (right.clicks !== left.clicks) return right.clicks - left.clicks;
+        return left.cpc - right.cpc;
+      }),
+    },
+    {
+      key: 'revisar',
+      title: 'Revisar',
+      description: 'El gasto ya está expuesto y la eficiencia no acompaña.',
+      helper: 'Revisá primero mensaje, segmentación o pieza antes de seguir empujando presupuesto.',
+      tone: 'warning',
+      entries: buckets.revisar.sort((left, right) => {
+        if (right.spend !== left.spend) return right.spend - left.spend;
+        if (right.cpc !== left.cpc) return right.cpc - left.cpc;
+        return left.ctr - right.ctr;
+      }),
     },
   ];
 }

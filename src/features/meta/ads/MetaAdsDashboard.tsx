@@ -1,5 +1,5 @@
 import { useMemo, useState, type ReactNode } from 'react';
-import { Activity, BadgeDollarSign, BarChart3, LineChart as LineChartIcon, Megaphone, MousePointerClick, PieChart as PieChartIcon, Sparkles, Target, Trophy } from 'lucide-react';
+import { Activity, BadgeDollarSign, BarChart3, LineChart as LineChartIcon, Megaphone, MousePointerClick, PieChart as PieChartIcon, Sparkles, Target, TrendingUp, TriangleAlert, Trophy, Wrench } from 'lucide-react';
 import { Bar, BarChart, CartesianGrid, Cell, Line, LineChart, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { formatNumberEs } from '../../../lib/tableHelpers';
 import { ChartCard, InsightBadge, KpiCard, KpiGrid, LeaderboardList, MetaAdsFiltersPanel, MetaAdsPageHero, Section } from './metaAdsShared';
@@ -11,6 +11,7 @@ import {
   buildComparisonMetrics,
   buildComparisonNarrative,
   buildDecisionSignals,
+  buildRecommendationBuckets,
   formatCompactMetric,
   getCreativeInsightEntries,
   getWeakPerformers,
@@ -80,6 +81,7 @@ export function MetaAdsDashboard() {
       getCreativeName: (row) => row.creative_name ?? row.creative_id ?? 'Sin creative',
     });
     const adDecisionSignals = buildDecisionSignals(adPerformance);
+    const recommendationBuckets = buildRecommendationBuckets(adPerformance);
     const weakAds = getWeakPerformers(adPerformance).slice(0, 5);
     const creativeInsights = getCreativeInsightEntries(adPerformance, 5);
 
@@ -101,6 +103,7 @@ export function MetaAdsDashboard() {
       campaignPerformance,
       adPerformance,
       adDecisionSignals,
+      recommendationBuckets,
       weakAds,
       creativeInsights,
     };
@@ -174,7 +177,7 @@ export function MetaAdsDashboard() {
     <div className="space-y-6">
       <MetaAdsPageHero
         title="Meta Ads Dashboard"
-        description="Vista ejecutiva de performance y tendencia diaria con filtros aplicados de forma intencional."
+        description="Vista de performance y tendencia diaria."
         badge="Dashboard ejecutivo"
         icon={<Megaphone className="text-red-600" size={24} />}
       />
@@ -345,6 +348,14 @@ export function MetaAdsDashboard() {
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-5">
           {dashboard.adDecisionSignals.map((signal) => (
             <DecisionSignalCard key={signal.title} signal={signal} />
+          ))}
+        </div>
+      </Section>
+
+      <Section title="Recomendaciones accionables">
+        <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
+          {dashboard.recommendationBuckets.map((bucket) => (
+            <RecommendationBucketCard key={bucket.key} bucket={bucket} />
           ))}
         </div>
       </Section>
@@ -570,6 +581,85 @@ function DecisionSignalCard({ signal }: { signal: MetaDecisionSignal }) {
           {signal.metricLabel}: {formatCompactMetric(signal.metricValue, signal.metricFormat)} · {signal.entry.subtitle}
         </p>
       ) : null}
+    </div>
+  );
+}
+
+function RecommendationBucketCard({
+  bucket,
+}: {
+  bucket: ReturnType<typeof buildRecommendationBuckets>[number];
+}) {
+  const toneClassName = bucket.tone === 'positive'
+    ? 'border-emerald-200 bg-emerald-50/70'
+    : bucket.tone === 'warning'
+      ? 'border-amber-200 bg-amber-50/80'
+      : 'border-gray-200 bg-gray-50/80';
+
+  const metricToneClassName = bucket.tone === 'positive'
+    ? 'text-emerald-700'
+    : bucket.tone === 'warning'
+      ? 'text-amber-700'
+      : 'text-slate-700';
+
+  const Icon = bucket.key === 'escalar' ? TrendingUp : bucket.key === 'revisar' ? TriangleAlert : Wrench;
+
+  return (
+    <div className={`rounded-2xl border p-5 shadow-[0_20px_36px_-30px_rgba(15,23,42,0.8)] ${toneClassName}`}>
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p className="inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.2em] text-gray-500">
+            <Icon size={14} />
+            {bucket.title}
+          </p>
+          <h3 className="mt-2 text-lg font-bold text-gray-900">{bucket.entries.length} ads</h3>
+          <p className="mt-2 text-sm text-gray-600">{bucket.description}</p>
+        </div>
+        <InsightBadge label={bucket.title} tone={bucket.tone} />
+      </div>
+
+      <p className="mt-3 rounded-2xl border border-white/70 bg-white/80 px-3 py-2 text-xs text-gray-600">
+        {bucket.helper}
+      </p>
+
+      {bucket.entries.length === 0 ? (
+        <div className="mt-4 rounded-xl border border-dashed border-gray-200 bg-white/70 px-4 py-5 text-sm text-gray-500">
+          No hay piezas para este bucket con los filtros actuales.
+        </div>
+      ) : (
+        <ul className="mt-4 space-y-3">
+          {bucket.entries.slice(0, 4).map((entry) => (
+            <li key={entry.id} className="rounded-2xl border border-white/80 bg-white/90 px-4 py-4">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="font-semibold text-gray-900">{entry.title}</p>
+                  <p className="mt-1 text-xs text-gray-500">{entry.subtitle}</p>
+                  <p className="mt-2 text-xs text-gray-500">Creative: {entry.creativeName}</p>
+                </div>
+                <div className={`shrink-0 text-right text-xs font-semibold ${metricToneClassName}`}>
+                  <p>{formatCompactMetric(entry.spend, 'currency')}</p>
+                  <p className="mt-1">{formatCompactMetric(entry.clicks, 'number')} clicks</p>
+                </div>
+              </div>
+
+              <div className="mt-3 grid grid-cols-3 gap-2 rounded-xl bg-gray-50/80 px-3 py-2 text-xs text-gray-600">
+                <div>
+                  <p className="uppercase tracking-wide text-gray-400">CTR</p>
+                  <p className="mt-1 font-semibold text-gray-900">{formatCompactMetric(entry.ctr, 'percent')}</p>
+                </div>
+                <div>
+                  <p className="uppercase tracking-wide text-gray-400">CPC</p>
+                  <p className="mt-1 font-semibold text-gray-900">{formatCompactMetric(entry.cpc, 'currency')}</p>
+                </div>
+                <div>
+                  <p className="uppercase tracking-wide text-gray-400">Imp.</p>
+                  <p className="mt-1 font-semibold text-gray-900">{formatCompactMetric(entry.impressions, 'number')}</p>
+                </div>
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }

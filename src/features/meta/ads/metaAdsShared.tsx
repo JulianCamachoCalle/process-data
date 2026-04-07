@@ -74,10 +74,7 @@ export function MetaAdsFiltersPanel({
             <Filter size={14} />
             Filtros
           </p>
-          <h2 className="mt-2 text-lg font-bold text-gray-900">Definí el rango antes de consultar</h2>
-          <p className="mt-1 text-sm text-gray-500">
-            Los cambios quedan en borrador hasta que presionás <span className="font-semibold text-gray-700">Aplicar filtros</span>.
-          </p>
+          <h2 className="mt-2 text-lg font-bold text-gray-900">Define el rango antes de consultar</h2>
         </div>
       </div>
 
