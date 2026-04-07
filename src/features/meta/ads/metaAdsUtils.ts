@@ -34,15 +34,6 @@ export type MetaComparisonMetric = {
   winner: 'left' | 'right' | 'tie';
 };
 
-export type MetaComparisonNarrative = {
-  efficiencyWinner: 'left' | 'right' | 'tie';
-  volumeWinner: 'left' | 'right' | 'tie';
-  summary: string;
-  tradeoff: string;
-  recommendation: string;
-  recommendationTone: 'positive' | 'warning' | 'neutral';
-};
-
 export type MetaDecisionSignal = {
   title: string;
   helper: string;
@@ -241,65 +232,11 @@ export function buildComparisonMetrics(left?: MetaPerformanceEntry, right?: Meta
   if (!left || !right) return [];
 
   return [
-    createComparisonMetric('Spend', left.spend, right.spend, 'currency', 'higher'),
+    createComparisonMetric('Gasto', left.spend, right.spend, 'currency', 'higher'),
     createComparisonMetric('Clicks', left.clicks, right.clicks, 'number', 'higher'),
     createComparisonMetric('CTR', left.ctr, right.ctr, 'percent', 'higher'),
     createComparisonMetric('CPC', left.cpc, right.cpc, 'currency', 'lower'),
   ];
-}
-
-export function buildComparisonNarrative(left?: MetaPerformanceEntry, right?: MetaPerformanceEntry): MetaComparisonNarrative | null {
-  if (!left || !right) return null;
-
-  const ctrWinner = pickWinner(left.ctr, right.ctr, 'higher');
-  const cpcWinner = pickWinner(left.cpc, right.cpc, 'lower');
-  const clicksWinner = pickWinner(left.clicks, right.clicks, 'higher');
-  const impressionWinner = pickWinner(left.impressions, right.impressions, 'higher');
-
-  const efficiencyWinner = ctrWinner === cpcWinner ? ctrWinner : 'tie';
-  const volumeWinner = clicksWinner !== 'tie' ? clicksWinner : impressionWinner;
-
-  const efficiencyLabel = describeEntrySide(efficiencyWinner, left, right);
-  const volumeLabel = describeEntrySide(volumeWinner, left, right);
-  const ctrLabel = describeEntrySide(ctrWinner, left, right);
-  const cpcLabel = describeEntrySide(cpcWinner, left, right);
-
-  const summary = efficiencyWinner === 'tie'
-    ? 'En eficiencia no hay un ganador absoluto: la comparación está partida entre atracción y costo.'
-    : `${efficiencyLabel} gana en eficiencia porque combina mejor respuesta del público con clicks más baratos.`;
-
-  const tradeoff = volumeWinner === 'tie'
-    ? 'En volumen están muy parejos, así que la decisión depende más de la calidad del tráfico que del alcance.'
-    : efficiencyWinner === volumeWinner
-      ? `${volumeLabel} también lidera en volumen, así que hoy es la apuesta más sólida para concentrar inversión.`
-      : efficiencyWinner === 'tie'
-        ? `${ctrLabel} muestra mejor CTR, pero ${cpcLabel} consigue clicks más baratos; conviene leerlo como un trade-off antes de mover presupuesto.`
-        : `${volumeLabel} trae más volumen, pero ${efficiencyLabel} es más eficiente; ahí está la tensión principal de la comparación.`;
-
-  const recommendation = efficiencyWinner !== 'tie' && efficiencyWinner === volumeWinner
-    ? `Recomendación: escalar ${efficiencyLabel} de forma gradual mientras sostenés seguimiento de CTR y CPC para validar que no se degrade.`
-    : efficiencyWinner !== 'tie' && volumeWinner !== 'tie' && efficiencyWinner !== volumeWinner
-      ? `Recomendación: iterar ${volumeLabel} para bajar costo o mover una parte del presupuesto hacia ${efficiencyLabel}, que hoy convierte mejor la inversión.`
-      : ctrWinner !== 'tie' && cpcWinner !== 'tie' && ctrWinner !== cpcWinner
-        ? `Recomendación: revisar antes de escalar. ${ctrLabel} llama mejor la atención, pero ${cpcLabel} está resolviendo el costo de forma más sana.`
-        : 'Recomendación: mantener la inversión estable y seguir testeando mensaje, segmentación o creative antes de tomar una decisión más agresiva.';
-
-  const hasSplitLeaders = efficiencyWinner !== 'tie' && volumeWinner !== 'tie' && efficiencyWinner !== volumeWinner;
-
-  const recommendationTone = efficiencyWinner !== 'tie' && efficiencyWinner === volumeWinner
-    ? 'positive'
-    : efficiencyWinner === 'tie' || hasSplitLeaders
-      ? 'warning'
-      : 'neutral';
-
-  return {
-    efficiencyWinner,
-    volumeWinner,
-    summary,
-    tradeoff,
-    recommendation,
-    recommendationTone,
-  };
 }
 
 export function buildDecisionSignals(entries: MetaPerformanceEntry[]): MetaDecisionSignal[] {
@@ -341,11 +278,11 @@ export function buildDecisionSignals(entries: MetaPerformanceEntry[]): MetaDecis
       metricFormat: 'number',
     },
     {
-      title: 'Mayor spend',
+      title: 'Mayor gasto',
       helper: 'Donde hoy está concentrada la inversión.',
       entry: highestSpend,
       tone: 'neutral',
-      metricLabel: 'Spend',
+      metricLabel: 'Gasto',
       metricValue: highestSpend?.spend ?? 0,
       metricFormat: 'currency',
     },
@@ -538,26 +475,6 @@ function createComparisonMetric(
     rightValue,
     winner,
   };
-}
-
-function pickWinner(
-  leftValue: number,
-  rightValue: number,
-  better: MetaComparisonMetric['better'],
-): MetaComparisonMetric['winner'] {
-  if (leftValue === rightValue) return 'tie';
-  const leftWins = better === 'higher' ? leftValue > rightValue : leftValue < rightValue;
-  return leftWins ? 'left' : 'right';
-}
-
-function describeEntrySide(
-  winner: MetaComparisonMetric['winner'],
-  left: MetaPerformanceEntry,
-  right: MetaPerformanceEntry,
-) {
-  if (winner === 'left') return left.title;
-  if (winner === 'right') return right.title;
-  return 'Ambos';
 }
 
 function buildHeuristicLabels(
