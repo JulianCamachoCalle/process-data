@@ -9,6 +9,7 @@ import { Login } from './features/auth/Login';
 import { KommoSyncPanel } from './features/kommo/sync/KommoSyncPanel';
 import { KommoExplorer } from './features/kommo/explorer/KommoExplorer';
 import { KommoLeadsInsights } from './features/kommo/insights/KommoLeadsInsights';
+import { MetaAdsOverview } from './features/meta/ads/MetaAdsOverview';
 import { prefetchSheetData } from './hooks/useSheetData';
 import { isSupabaseConfigured, supabase } from './lib/supabase';
 
@@ -192,6 +193,7 @@ function Layout() {
               <Route path="/kommo" element={<KommoExplorer />} />
               <Route path="/kommo/leads-insights" element={<KommoLeadsInsights />} />
               <Route path="/kommo/:resource" element={<KommoExplorer />} />
+              <Route path="/meta/ads" element={<MetaAdsOverview />} />
             </Routes>
           </div>
         </main>
