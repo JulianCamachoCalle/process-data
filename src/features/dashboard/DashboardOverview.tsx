@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Activity, AlertCircle, ChartColumnBig } from 'lucide-react';
+import { Activity, AlertCircle, Filter } from 'lucide-react';
 import { useSheetData } from '../../hooks/useSheetData';
 import { formatCurrencyPen, formatNumberEs, normalizeText, parseDateValue, parseNumericValue } from '../../lib/tableHelpers';
 
@@ -260,25 +260,24 @@ export function DashboardOverview() {
   }
 
   return (
-    <div className="space-y-6">
-      <div className="rounded-2xl border border-gray-200 bg-white/90 shadow-[0_24px_44px_-30px_rgba(15,23,42,0.65)] px-6 py-5 backdrop-blur-sm flex items-center justify-between gap-4 flex-wrap">
+    <div className="space-y-4">
+      <div className="rounded-2xl border border-gray-200 bg-white/90 shadow-[0_24px_44px_-30px_rgba(15,23,42,0.65)] px-4 py-5 backdrop-blur-sm flex items-center justify-between gap-4 flex-wrap">
         <div>
-          <h1 className="text-2xl font-extrabold text-gray-900 inline-flex items-center gap-2">
+          <h1 className="text-2xl font-extrabold text-gray-900 uppercase tracking-[0.10em] inline-flex items-center gap-2">
             <Activity className="text-red-600" size={24} />
             Resumen General
           </h1>
-          <p className="text-sm text-gray-500 mt-1">KPI del periodo y métricas operativas.</p>
-        </div>
-        <div className="hidden md:inline-flex items-center gap-2 rounded-full border border-red-200 bg-red-50 px-3 py-1 text-xs font-semibold text-red-700">
-          <ChartColumnBig size={14} />
-          Vista ejecutiva
+          <p className="text-xs text-gray-500 font-semibold uppercase tracking-[0.10em] mt-1 italic">KPI del periodo y métricas operativas.</p>
         </div>
       </div>
 
       <div className="rounded-2xl border border-gray-200 bg-white p-4">
-        <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Filtro de periodo</p>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 items-end">
-          <label className="text-sm text-gray-600">
+        <p className="inline-flex items-center gap-2 text-xs font-semibold text-gray-500 uppercase tracking-[0.22em]">
+          <Filter size={14} />
+          Filtros
+        </p>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 items-end mt-2">
+          <label className="text-xs font-semibold text-gray-500 uppercase tracking-[0.22em]">
             Fecha inicio
             <input
               type="date"
@@ -287,7 +286,7 @@ export function DashboardOverview() {
               className="mt-1 w-full rounded-xl border border-gray-300 px-3 py-2"
             />
           </label>
-          <label className="text-sm text-gray-600">
+          <label className="text-xs font-semibold text-gray-500 uppercase tracking-[0.22em]">
             Fecha fin
             <input
               type="date"
@@ -296,7 +295,7 @@ export function DashboardOverview() {
               className="mt-1 w-full rounded-xl border border-gray-300 px-3 py-2"
             />
           </label>
-          <div className="text-sm text-gray-500">Periodo: <span className="font-semibold text-gray-800">{metrics.periodo}</span></div>
+          <div className="text-xs font-semibold text-gray-500 uppercase tracking-[0.22em]">Periodo: <span className="font-semibold text-gray-800">{metrics.periodo}</span></div>
         </div>
       </div>
 
@@ -339,7 +338,7 @@ export function DashboardOverview() {
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <div className="space-y-3">
-      <h2 className="text-sm font-extrabold tracking-wide text-gray-700 uppercase">{title}</h2>
+      <h2 className="text-xs font-bold text-gray-700 uppercase tracking-[0.22em]">{title}</h2>
       {children}
     </div>
   );
@@ -354,7 +353,7 @@ function KpiGrid({ children }: { children: React.ReactNode }) {
 function KpiCard({ title, value }: { title: string; value: string }) {
   return (
     <div className="bg-white p-4 rounded-2xl shadow-[0_20px_42px_-34px_rgba(15,23,42,0.9)] border border-gray-200">
-      <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">{title}</p>
+      <p className="text-xs font-semibold text-gray-500 uppercase tracking-[0.22em]">{title}</p>
       <p className="text-2xl font-bold text-gray-900 mt-1">{value}</p>
     </div>
   );

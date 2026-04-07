@@ -164,7 +164,7 @@ function Layout() {
         onNavigate={() => setMobileSidebarOpen(false)}
       />
       <div className={`relative z-10 flex min-w-0 flex-1 flex-col overflow-hidden bg-gradient-to-b from-white/90 via-white/75 to-white/95 backdrop-blur-sm print:overflow-visible ${mobileSidebarOpen ? 'max-md:opacity-0 max-md:pointer-events-none' : ''}`}>
-        <header className="sticky top-0 z-20 flex min-h-16 items-center justify-between gap-3 border-b border-gray-200/80 bg-white/75 px-4 py-3 shadow-[0_10px_30px_-20px_rgba(15,23,42,0.45)] backdrop-blur-md sm:min-h-20 sm:px-6 md:px-8 print:hidden">
+        <header className="sticky top-0 z-20 flex min-h-16 items-center justify-between gap-3 border-b border-gray-200/80 bg-white/75 px-4 py-3 shadow-[0_10px_30px_-20px_rgba(15,23,42,0.45)] backdrop-blur-md sm:min-h-14 sm:px-6 md:px-8 print:hidden">
           <div className="flex min-w-0 items-center gap-3">
             <button
               onClick={() => setMobileSidebarOpen((prev) => !prev)}
@@ -174,18 +174,17 @@ function Layout() {
               <Menu size={18} />
             </button>
             <div className="min-w-0">
-              <h2 className="truncate text-[11px] font-semibold uppercase tracking-[0.16em] text-gray-500 sm:text-sm">Centro de Control</h2>
-              <p className="mt-1 hidden text-xs text-gray-400 sm:block">Panel administrativo logístico</p>
+              <h2 className="truncate text-[11px] font-semibold uppercase tracking-[0.16em] text-gray-500 sm:text-sm">PANEL ADMINISTRATIVO</h2>
             </div>
           </div>
           <button 
             onClick={handleLogout}
-            className="shrink-0 rounded-full border border-gray-300 bg-white/90 px-3 py-2 text-xs font-semibold text-gray-600 shadow-sm transition-colors hover:border-red-300 hover:bg-red-50 hover:text-red-700 sm:px-4 sm:py-2.5"
+            className="shrink-0 rounded-full border border-gray-300 bg-white/90 px-3 py-2 text-[11px] font-semibold text-gray-600 shadow-sm transition-colors hover:border-red-300 hover:bg-red-50 hover:text-red-700 sm:px-2 sm:py-1.5"
           >
             Cerrar sesión
           </button>
         </header>
-        <main className="relative flex-1 overflow-x-hidden overflow-y-auto p-4 sm:p-6 md:p-8 lg:p-10 print:overflow-visible print:p-0">
+        <main className="relative flex-1 overflow-x-hidden overflow-y-auto p-2 sm:p-4 md:p-6 lg:p-8 print:overflow-visible print:p-0">
           <div className="mx-auto w-full max-w-7xl print:max-w-none">
             <Routes>
               <Route path="/" element={<DashboardOverview />} />

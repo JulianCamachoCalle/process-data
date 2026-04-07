@@ -7,12 +7,10 @@ import { formatDateTime, formatDateRangeLabel, formatDurationMs, formatSyncResou
 export function MetaAdsPageHero({
   title,
   description,
-  badge,
   icon,
 }: {
   title: string;
   description: string;
-  badge: string;
   icon: ReactNode;
 }) {
   return (
@@ -24,10 +22,6 @@ export function MetaAdsPageHero({
             {title}
           </h1>
           <p className="text-sm text-gray-500 mt-1">{description}</p>
-        </div>
-        <div className="hidden md:inline-flex items-center gap-2 rounded-full border border-red-200 bg-red-50 px-3 py-1 text-xs font-semibold text-red-700">
-          <Activity size={14} />
-          {badge}
         </div>
       </div>
     </div>

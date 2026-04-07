@@ -195,7 +195,6 @@ export function MetaAdsDashboard() {
       <MetaAdsPageHero
         title="Meta Ads Dashboard"
         description="Vista de performance y tendencia diaria."
-        badge="Dashboard ejecutivo"
         icon={<Megaphone className="text-red-600" size={24} />}
       />
 

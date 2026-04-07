@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { LayoutDashboard, Database, Layers3, Workflow, Settings, PanelLeftClose, X, Megaphone, BarChart3 } from 'lucide-react';
+import { LayoutDashboard, Database, Layers3, Workflow, Settings, PanelLeftClose, X, Megaphone, BarChart3, BookMarked } from 'lucide-react';
 import { getSheetLabel, groupSheetsByDomain } from '../lib/sheetLabels';
 
 interface SidebarPrefetchHandlers {
@@ -67,8 +67,8 @@ export function Sidebar({
                   : 'text-gray-400 border-transparent hover:bg-white/5 hover:text-gray-100 hover:border-white/10'
                 } ${collapsed ? 'md:justify-center md:px-2' : 'gap-3'}`}
             >
-              <Database size={16} className={isActive ? 'text-red-300' : 'text-gray-500 group-hover:text-red-200'} />
-              <span className={`truncate text-sm ${collapsed ? 'md:hidden' : ''}`}>{getSheetLabel(sheet)}</span>
+              <Database size={16} className={isActive ? 'text-red-500' : 'text-gray-500 group-hover:text-red-400'} />
+              <span className={`text-[12px] text-gray-400 font-semibold uppercase tracking-[0.05em] ${collapsed ? 'md:hidden' : ''}`}>{getSheetLabel(sheet)}</span>
             </Link>
           );
         })}
@@ -102,39 +102,39 @@ export function Sidebar({
           </button>
         </div>
 
-        <div className="mb-2 flex items-center gap-3 pr-6 md:pr-0">
+        <div className="flex items-center gap-3 pr-6 md:pr-0">
           <div className="h-11 w-11 rounded-xl bg-red-600/20 border border-red-500/40 flex items-center justify-center shadow-[0_0_24px_rgba(230,0,0,0.35)]">
-            <LayoutDashboard className="text-red-400" size={22} />
+            <LayoutDashboard className="text-red-500" size={22} />
           </div>
           <div className={collapsed ? 'md:hidden' : ''}>
-            <h1 className="font-extrabold text-lg leading-tight">Panel Logístico</h1>
-            <p className="text-xs text-red-200/80 tracking-wide">Control y Operaciones</p>
+            <h1 className="text-lg text-white font-extrabold uppercase tracking-[0.10em]">DINSIDES</h1>
+            <p className="text-xs text-gray-500 uppercase tracking-[0.10em] italic">Control y Operaciones</p>
           </div>
         </div>
       </div>
 
-      <nav className="min-h-0 flex-1 space-y-2 overflow-y-auto px-3 py-5 sm:px-4 sm:py-6">
+      <nav className="min-h-0 flex-1 overflow-y-auto px-3 py-3 sm:px-4 sm:py-4">
         <Link
           to="/"
           onClick={() => onNavigate?.()}
           title={collapsed ? 'Resumen general' : undefined}
           className={`group flex items-center w-full text-left px-4 py-3 rounded-xl border transition-all duration-200 ${location.pathname === '/'
-              ? 'bg-gradient-to-r from-red-600 to-red-500 text-white font-semibold border-red-400/80 shadow-[0_12px_24px_-16px_rgba(230,0,0,0.9)]'
+              ? 'bg-gradient-to-r from-red-700 to-red-600 text-white font-semibold border-red-400/80 shadow-[0_12px_24px_-16px_rgba(230,0,0,0.9)]'
               : 'text-gray-300 border-transparent hover:bg-white/5 hover:text-white hover:border-white/10'
             } ${collapsed ? 'md:justify-center md:px-2' : 'gap-3'}`}
         >
-          <LayoutDashboard size={18} className={location.pathname === '/' ? 'text-white' : 'text-red-300 group-hover:text-red-200'} />
-          <span className={collapsed ? 'md:hidden' : ''}>Resumen general</span>
+          <BookMarked size={18} className={location.pathname === '/' ? 'text-white' : 'text-red-500 group-hover:text-red-400'} />
+          <span className={collapsed ? 'md:hidden' : 'text-xs text-gray-100 font-semibold uppercase tracking-[0.14em]'}>Resumen general</span>
         </Link>
 
         {renderGroup(
           'Tablas base',
-          <Layers3 size={12} className="text-red-300" />,
+          <Layers3 size={12} className="text-red-500" />,
           groupedSheets.base
         )}
         {renderGroup(
-          'Tablas dependientes y operativas',
-          <Workflow size={12} className="text-red-300" />,
+          'Tablas operativas',
+          <Workflow size={12} className="text-red-500" />,
           groupedSheets.operativas
         )}
 
@@ -143,7 +143,7 @@ export function Sidebar({
             className={`px-4 pt-3 pb-2 text-[11px] font-semibold text-gray-400 uppercase tracking-[0.18em] inline-flex items-center gap-2 ${collapsed ? 'md:justify-center' : ''}`}
             title={collapsed ? 'Meta Ads' : undefined}
           >
-            <Megaphone size={12} className="text-red-300" />
+            <Megaphone size={12} className="text-red-500" />
             <span className={collapsed ? 'md:hidden' : ''}>Meta Ads</span>
           </div>
 
@@ -156,8 +156,8 @@ export function Sidebar({
                 : 'text-gray-400 border-transparent hover:bg-white/5 hover:text-gray-100 hover:border-white/10'
               } ${collapsed ? 'md:justify-center md:px-2' : 'gap-3'}`}
           >
-            <BarChart3 size={16} className={isMetaAdsDashboardActive ? 'text-red-300' : 'text-gray-500 group-hover:text-red-200'} />
-            <span className={`truncate text-sm ${collapsed ? 'md:hidden' : ''}`}>Ads Dashboard</span>
+            <BarChart3 size={16} className={isMetaAdsDashboardActive ? 'text-red-500' : 'text-gray-500 group-hover:text-red-400'} />
+            <span className={`text-[12px] text-gray-400 font-semibold uppercase tracking-[0.05em] ${collapsed ? 'md:hidden' : ''}`}>Ads Dashboard</span>
           </Link>
 
           <Link
@@ -169,8 +169,8 @@ export function Sidebar({
                 : 'text-gray-400 border-transparent hover:bg-white/5 hover:text-gray-100 hover:border-white/10'
               } ${collapsed ? 'md:justify-center md:px-2' : 'gap-3'}`}
           >
-            <Database size={16} className={isMetaAdsDataActive ? 'text-red-300' : 'text-gray-500 group-hover:text-red-200'} />
-            <span className={`truncate text-sm ${collapsed ? 'md:hidden' : ''}`}>Ads Data</span>
+            <Database size={16} className={isMetaAdsDataActive ? 'text-red-500' : 'text-gray-500 group-hover:text-red-400'} />
+            <span className={`text-[12px] text-gray-400 font-semibold uppercase tracking-[0.05em] ${collapsed ? 'md:hidden' : ''}`}>Ads Data</span>
           </Link>
         </div>
 
@@ -179,7 +179,7 @@ export function Sidebar({
             className={`px-4 pt-3 pb-2 text-[11px] font-semibold text-gray-400 uppercase tracking-[0.18em] inline-flex items-center gap-2 ${collapsed ? 'md:justify-center' : ''}`}
             title={collapsed ? 'Kommo CRM' : undefined}
           >
-            <Database size={12} className="text-red-300" />
+            <Database size={12} className="text-red-500" />
             <span className={collapsed ? 'md:hidden' : ''}>Kommo CRM</span>
           </div>
 
@@ -192,8 +192,8 @@ export function Sidebar({
                 : 'text-gray-400 border-transparent hover:bg-white/5 hover:text-gray-100 hover:border-white/10'
               } ${collapsed ? 'md:justify-center md:px-2' : 'gap-3'}`}
           >
-            <Database size={16} className={isKommoExplorerActive ? 'text-red-300' : 'text-gray-500 group-hover:text-red-200'} />
-            <span className={`truncate text-sm ${collapsed ? 'md:hidden' : ''}`}>Kommo Explorer</span>
+            <Database size={16} className={isKommoExplorerActive ? 'text-red-500' : 'text-gray-500 group-hover:text-red-400'} />
+            <span className={`text-[12px] text-gray-400 font-semibold uppercase tracking-[0.05em] ${collapsed ? 'md:hidden' : ''}`}>Kommo Explorer</span>
           </Link>
 
           <Link
@@ -205,8 +205,8 @@ export function Sidebar({
                 : 'text-gray-400 border-transparent hover:bg-white/5 hover:text-gray-100 hover:border-white/10'
               } ${collapsed ? 'md:justify-center md:px-2' : 'gap-3'}`}
           >
-            <Database size={16} className={isKommoInsightsActive ? 'text-red-300' : 'text-gray-500 group-hover:text-red-200'} />
-            <span className={`truncate text-sm ${collapsed ? 'md:hidden' : ''}`}>Leads Insights</span>
+            <Database size={16} className={isKommoInsightsActive ? 'text-red-500' : 'text-gray-500 group-hover:text-red-400'} />
+            <span className={`text-[12px] text-gray-400 font-semibold uppercase tracking-[0.05em] ${collapsed ? 'md:hidden' : ''}`}>Leads Insights</span>
           </Link>
         </div>
       </nav>

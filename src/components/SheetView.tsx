@@ -390,11 +390,11 @@ export function SheetView({ sheetName }: SheetViewProps) {
     <div className="flex flex-col gap-6">
       <div className="flex flex-col md:flex-row md:justify-between md:items-center gap-4 bg-white/95 p-6 rounded-2xl border border-gray-200 shadow-[0_24px_44px_-30px_rgba(15,23,42,0.65)] backdrop-blur-sm">
         <div className="space-y-1">
-          <h2 className="text-2xl font-extrabold text-gray-900 capitalize tracking-tight inline-flex items-center gap-2">
+          <h2 className="text-2xl uppercase tracking-[0.10em] font-extrabold text-gray-900 inline-flex items-center gap-2">
             <Table2 className="text-red-600" size={24} />
             {sheetLabel}
           </h2>
-          <p className="text-sm text-gray-500">Gestión de datos.</p>
+          <p className="text-xs text-gray-500 font-semibold uppercase tracking-[0.10em] mt-1 italic">Gestión de los datos {sheetLabel}</p>
         </div>
         <div className="flex gap-3">
           <button
