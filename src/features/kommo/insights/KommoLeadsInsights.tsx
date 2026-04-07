@@ -11,12 +11,14 @@ import {
   Users,
 } from 'lucide-react';
 import {
+  Area,
+  AreaChart,
   Bar,
   BarChart,
   CartesianGrid,
   Cell,
+  Legend,
   Line,
-  LineChart,
   Pie,
   PieChart,
   ResponsiveContainer,
@@ -120,7 +122,15 @@ type LeadsInsightsPayload = {
   };
 };
 
-const COLORS = ['#dc2626', '#ef4444', '#f97316', '#f59e0b', '#8b5cf6', '#14b8a6', '#22c55e'];
+const COLORS = ['#dc2626', '#f97316', '#8b5cf6', '#0f766e', '#2563eb', '#7c3aed', '#475569', '#16a34a'];
+const CHART_GRID = '#e2e8f0';
+const CHART_AXIS = '#64748b';
+const CHART_TOOLTIP_STYLE = {
+  borderRadius: '16px',
+  border: '1px solid #e2e8f0',
+  boxShadow: '0 20px 36px -28px rgba(15, 23, 42, 0.35)',
+  backgroundColor: '#ffffff',
+};
 
 function formatNumber(value: number) {
   return new Intl.NumberFormat('es-PE').format(value);
@@ -183,6 +193,15 @@ function asChartNumber(value: unknown) {
 function truncateLabel(value: string, maxLength = 24) {
   if (value.length <= maxLength) return value;
   return `${value.slice(0, maxLength - 1)}…`;
+}
+
+function buildShareLabel(value: number, total: number) {
+  if (!total) return '0%';
+  return `${Math.round((value / total) * 100)}%`;
+}
+
+function formatStatusLegendLabel(label: string) {
+  return truncateLabel(label, 28);
 }
 
 function escapeHtml(value: string) {
@@ -372,10 +391,10 @@ function buildExportDocument({
             <section class="panel">
               <h2 class="section-title">Semántica del tablero</h2>
               <ul class="list">
-                <li><strong>Creados / incoming</strong>: usa <code>kommo_leads.created_at</code> y <code>kommo_unsorted_leads.created_at</code>.</li>
-                <li><strong>Open, closed y lost</strong>: muestran el estado actual del cohort creado dentro del rango.</li>
-                <li><strong>Ganados históricos</strong>: usa <code>leads_ganados.fecha_lead_ganado</code>.</li>
-                <li>No se muestra win rate mezclado ni performance histórica de lost/closed porque la fuente actual no lo soporta con honestidad.</li>
+                <li><strong>Actividad creada en el periodo</strong>: usa <code>kommo_leads.created_at</code> y <code>kommo_unsorted_leads.created_at</code>.</li>
+                <li><strong>Estado actual del cohort creado</strong>: open, closed y lost describen cómo está hoy ese grupo de leads.</li>
+                <li><strong>Ganados registrados en el periodo</strong>: usa <code>leads_ganados.fecha_lead_ganado</code>.</li>
+                <li>No se muestra win rate ni evolución histórica de lost/closed porque la fuente actual no lo soporta con honestidad.</li>
               </ul>
             </section>
             <section class="panel">
@@ -598,6 +617,42 @@ export function KommoLeadsInsights() {
     };
   }, [insightsQuery.data?.created.status_volume]);
 
+  const createdPipelineChartData = useMemo(
+    () => (insightsQuery.data?.created.pipeline_volume ?? [])
+      .slice(0, 8)
+      .map((pipeline) => ({
+        label: truncateLabel(pipeline.pipeline_name, 28),
+        total_leads: pipeline.total_leads,
+        fullLabel: pipeline.pipeline_name,
+      }))
+      .reverse(),
+    [insightsQuery.data?.created.pipeline_volume],
+  );
+
+  const wonSellerChartData = useMemo(
+    () => (insightsQuery.data?.won.sellers ?? [])
+      .slice(0, 8)
+      .map((seller) => ({
+        label: truncateLabel(seller.seller_name, 28),
+        total_won: seller.total_won,
+        fullLabel: seller.seller_name,
+      }))
+      .reverse(),
+    [insightsQuery.data?.won.sellers],
+  );
+
+  const wonPipelineChartData = useMemo(
+    () => (insightsQuery.data?.won.pipelines ?? [])
+      .slice(0, 8)
+      .map((pipeline) => ({
+        label: truncateLabel(pipeline.pipeline_name, 28),
+        total_won: pipeline.total_won,
+        fullLabel: pipeline.pipeline_name,
+      }))
+      .reverse(),
+    [insightsQuery.data?.won.pipelines],
+  );
+
   const handleExportPdf = useCallback(async () => {
     if (isExportingPdf) return;
 
@@ -667,14 +722,15 @@ export function KommoLeadsInsights() {
 
   return (
     <div className="space-y-6">
-      <header className="flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-gray-200 bg-white px-6 py-5 shadow-[0_24px_44px_-30px_rgba(15,23,42,0.65)]">
+      <header className="flex flex-wrap items-center justify-between gap-4 rounded-[28px] border border-gray-200 bg-white px-6 py-6 shadow-[0_24px_44px_-30px_rgba(15,23,42,0.65)]">
         <div>
-          <h1 className="inline-flex items-center gap-2 text-2xl font-extrabold text-gray-900">
+          <p className="text-xs font-semibold uppercase tracking-[0.22em] text-gray-500">Kommo · Análisis de leads</p>
+          <h1 className="mt-2 inline-flex items-center gap-2 text-2xl font-extrabold uppercase tracking-[0.08em] text-gray-900">
             <Activity className="text-red-600" size={22} />
             Leads Insights
           </h1>
           <p className="mt-1 text-sm text-gray-500">
-            Tablero semánticamente honesto: cohort de creados/incoming por un lado, ganados históricos por otro. Zona horaria: {data.timezone ?? 'America/Lima'}.
+            Compará el mismo rango temporal desde dos fuentes defendibles: actividad creada del periodo y ganados registrados en historial. Zona horaria: {data.timezone ?? 'America/Lima'}.
           </p>
         </div>
         <div className="inline-flex items-center gap-2 print:hidden">
@@ -682,44 +738,51 @@ export function KommoLeadsInsights() {
             type="button"
             onClick={handleExportPdf}
             disabled={isExportingPdf}
-            className="inline-flex items-center gap-2 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs font-semibold text-red-700 hover:bg-red-100 disabled:cursor-wait disabled:opacity-70"
+            className="inline-flex items-center gap-2 rounded-2xl border border-gray-200 bg-white px-4 py-2.5 text-xs font-semibold uppercase tracking-[0.16em] text-gray-700 transition hover:border-red-200 hover:bg-red-50 hover:text-red-700 disabled:cursor-wait disabled:opacity-70"
           >
             <FileText size={14} />
             {isExportingPdf ? 'Exportando PDF...' : 'Exportar PDF'}
           </button>
           <Link
             to="/kommo"
-            className="inline-flex items-center gap-2 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs font-semibold text-red-700 hover:bg-red-100"
+            className="inline-flex items-center gap-2 rounded-2xl border border-gray-200 bg-white px-4 py-2.5 text-xs font-semibold uppercase tracking-[0.16em] text-gray-700 transition hover:border-red-200 hover:bg-red-50 hover:text-red-700"
           >
             Ver Explorer
           </Link>
         </div>
       </header>
 
-      <section className="space-y-4 rounded-2xl border border-gray-200 bg-white p-5 shadow-[0_20px_36px_-30px_rgba(15,23,42,0.8)]">
+      <section className="space-y-5 rounded-[28px] border border-gray-200 bg-white p-5 shadow-[0_20px_36px_-30px_rgba(15,23,42,0.8)]">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-gray-500">Filtros</p>
+            <p className="mt-1 text-sm text-gray-500">Aplicá el mismo rango a actividad creada e historial de ganados.</p>
+          </div>
+          {insightsQuery.isFetching ? <span className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">Actualizando…</span> : null}
+        </div>
+
         <div className="flex flex-wrap items-center gap-2">
           <QuickRangeButton label="Hoy" onClick={() => applyQuickRange('today')} />
           <QuickRangeButton label="Últimos 7 días" onClick={() => applyQuickRange('last7')} />
           <QuickRangeButton label="Últimos 30 días" onClick={() => applyQuickRange('last30')} />
           <QuickRangeButton label="Todo" onClick={() => applyQuickRange('all')} />
-          {insightsQuery.isFetching ? <span className="ml-2 text-xs text-gray-500">Actualizando…</span> : null}
         </div>
 
         <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-          <label className="space-y-1 text-xs font-semibold uppercase tracking-wide text-gray-600">
-            Desde
+          <label className="rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3 text-xs font-semibold uppercase tracking-wide text-gray-600">
+            <span>Desde</span>
             <input
               type="date"
-              className="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-red-200"
+              className="mt-2 w-full rounded-xl border border-gray-200 bg-white px-3 py-2.5 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-red-200"
               value={draftStartDate ?? ''}
               onChange={(event) => setDraftStartDate(event.target.value || null)}
             />
           </label>
-          <label className="space-y-1 text-xs font-semibold uppercase tracking-wide text-gray-600">
-            Hasta
+          <label className="rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3 text-xs font-semibold uppercase tracking-wide text-gray-600">
+            <span>Hasta</span>
             <input
               type="date"
-              className="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-red-200"
+              className="mt-2 w-full rounded-xl border border-gray-200 bg-white px-3 py-2.5 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-red-200"
               value={draftEndDate ?? ''}
               onChange={(event) => setDraftEndDate(event.target.value || null)}
             />
@@ -730,28 +793,33 @@ export function KommoLeadsInsights() {
           <button
             type="button"
             onClick={applyFilters}
-            className="inline-flex items-center rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs font-semibold text-red-700 hover:bg-red-100"
+            className="inline-flex items-center rounded-2xl bg-red-600 px-4 py-2.5 text-xs font-semibold uppercase tracking-[0.16em] text-white shadow-[0_18px_32px_-18px_rgba(220,38,38,0.9)] transition hover:bg-red-700"
           >
             Aplicar filtros
           </button>
           <button
             type="button"
             onClick={clearFilters}
-            className="inline-flex items-center rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-50"
+            className="inline-flex items-center rounded-2xl border border-gray-200 bg-white px-4 py-2.5 text-xs font-semibold uppercase tracking-[0.16em] text-gray-700 transition hover:bg-gray-50"
           >
             Limpiar
           </button>
         </div>
 
-        <p className="text-xs text-gray-500">
-          Filtro aplicado: {appliedRangeLabel}. Creados e incoming usan fechas de creación. Ganados usa <code>fecha_lead_ganado</code>. No mostramos métricas históricas de lost/closed ni win rate mezclado porque hoy la fuente no las respalda.
-        </p>
+        <div className="flex flex-wrap items-center gap-2 text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">
+          <span className="rounded-full border border-gray-200 bg-gray-50 px-3 py-1.5">Rango aplicado: {appliedRangeLabel}</span>
+          <span className="rounded-full border border-gray-200 bg-white px-3 py-1.5">Creados / incoming → fecha de creación</span>
+          <span className="rounded-full border border-gray-200 bg-white px-3 py-1.5">Ganados → fecha_lead_ganado</span>
+        </div>
       </section>
 
       <InsightsReportSections
         data={data}
         statusesByNameForPie={statusesByNameForPie}
         statusByPipelineData={statusByPipelineData}
+        createdPipelineChartData={createdPipelineChartData}
+        wonSellerChartData={wonSellerChartData}
+        wonPipelineChartData={wonPipelineChartData}
       />
     </div>
   );
@@ -761,10 +829,16 @@ function InsightsReportSections({
   data,
   statusesByNameForPie,
   statusByPipelineData,
+  createdPipelineChartData,
+  wonSellerChartData,
+  wonPipelineChartData,
 }: {
   data: LeadsInsightsPayload;
   statusesByNameForPie: StatusByNameInsight[];
   statusByPipelineData: { rows: Array<Record<string, number | string>>; stackKeys: string[] };
+  createdPipelineChartData: Array<{ label: string; total_leads: number; fullLabel: string }>;
+  wonSellerChartData: Array<{ label: string; total_won: number; fullLabel: string }>;
+  wonPipelineChartData: Array<{ label: string; total_won: number; fullLabel: string }>;
 }) {
   if (data.created.summary.total_leads === 0 && data.won.summary.total_won === 0) {
     return (
@@ -781,106 +855,133 @@ function InsightsReportSections({
     <>
       <section className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <SemanticSectionCard
-          title="Universo 1 — Leads creados / incoming"
-          description="Cohort filtrado por fecha de creación. Open, closed, lost y responsables muestran el estado actual de esos leads creados dentro del rango."
+          title="Actividad creada en el periodo"
+          description="El rango filtra por fecha de creación. Los estados y responsables describen cómo está hoy ese cohort creado dentro del periodo."
         >
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
-            <KpiCard title="Leads creados" value={formatNumber(data.created.summary.total_leads)} compact />
-            <KpiCard title="Incoming entrantes" value={formatNumber(data.created.summary.total_incoming)} compact />
-            <KpiCard title="Abiertos actuales" value={formatNumber(data.created.summary.total_open)} compact />
-            <KpiCard title="Cerrados actuales" value={formatNumber(data.created.summary.total_closed)} compact />
-            <KpiCard title="Perdidos actuales" value={formatNumber(data.created.summary.total_lost)} compact />
-            <KpiCard title="Ticket promedio" value={formatCurrency(data.created.summary.avg_price)} compact />
+            <KpiCard title="Leads creados" value={formatNumber(data.created.summary.total_leads)} helper="Base del análisis del periodo" compact />
+            <KpiCard title="Incoming entrantes" value={formatNumber(data.created.summary.total_incoming)} helper={`Participación ${buildShareLabel(data.created.summary.total_incoming, data.created.summary.total_leads)}`} compact />
+            <KpiCard title="Abiertos hoy" value={formatNumber(data.created.summary.total_open)} helper="Estado actual del cohort creado" compact />
+            <KpiCard title="Cerrados hoy" value={formatNumber(data.created.summary.total_closed)} helper="No representa cierre histórico" compact />
+            <KpiCard title="Perdidos hoy" value={formatNumber(data.created.summary.total_lost)} helper="Foto actual del cohort" compact />
+            <KpiCard title="Ticket promedio" value={formatCurrency(data.created.summary.avg_price)} helper="Precio promedio del cohort creado" compact />
           </div>
         </SemanticSectionCard>
 
         <SemanticSectionCard
-          title="Universo 2 — Ganados históricos"
-          description="Cohort filtrado por fecha_lead_ganado. Los rankings usan snapshots históricos de vendedor y pipeline al momento del ganado."
+          title="Ganados registrados en el periodo"
+          description="El rango filtra por fecha_lead_ganado. Los rankings usan snapshots históricos de vendedor y pipeline al momento del ganado."
         >
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-            <KpiCard title="Leads ganados" value={formatNumber(data.won.summary.total_won)} compact />
-            <KpiCard title="Top vendedor" value={data.won.summary.top_seller?.seller_name ?? 'N/D'} compact />
-            <KpiCard title="Top pipeline" value={data.won.summary.top_pipeline?.pipeline_name ?? 'N/D'} compact />
+            <KpiCard title="Leads ganados" value={formatNumber(data.won.summary.total_won)} helper="Serie histórica defendible" compact />
+            <KpiCard title="Top vendedor" value={data.won.summary.top_seller?.seller_name ?? 'N/D'} helper="Snapshot al momento del ganado" compact />
+            <KpiCard title="Top pipeline" value={data.won.summary.top_pipeline?.pipeline_name ?? 'N/D'} helper="No se mezcla con estados actuales" compact />
           </div>
         </SemanticSectionCard>
       </section>
 
-      <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-        ESTE tablero ya no mezcla universos. Si una métrica no puede defenderse históricamente con las fuentes actuales, se re-scopéa o se saca.
-      </div>
-
       <section className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-        <ChartCard title="Leads creados por pipeline actual" icon={<Layers size={16} className="text-red-600" />}>
+        <ChartCard title="Leads creados por pipeline" description="Top pipelines del cohort creado en el rango." icon={<Layers size={16} className="text-red-600" />}>
           <ResponsiveContainer width="100%" height={300}>
-            <BarChart data={data.created.pipeline_volume}>
-              <CartesianGrid strokeDasharray="3 3" vertical={false} />
-              <XAxis
-                dataKey="pipeline_name"
-                tick={{ fontSize: 12 }}
-                tickFormatter={(value) => truncateLabel(String(value), 22)}
-                interval={0}
-                angle={-20}
-                textAnchor="end"
-                height={58}
+            <BarChart data={createdPipelineChartData} layout="vertical" margin={{ top: 8, right: 12, bottom: 8, left: 8 }}>
+              <CartesianGrid stroke={CHART_GRID} strokeDasharray="3 3" horizontal={false} />
+              <XAxis type="number" tick={{ fontSize: 12, fill: CHART_AXIS }} axisLine={false} tickLine={false} allowDecimals={false} />
+              <YAxis type="category" dataKey="label" width={152} tick={{ fontSize: 12, fill: CHART_AXIS }} axisLine={false} tickLine={false} />
+              <Tooltip
+                cursor={{ fill: '#f8fafc' }}
+                contentStyle={CHART_TOOLTIP_STYLE}
+                formatter={(value) => formatNumber(asChartNumber(value))}
+                labelFormatter={(_, payload) => String(payload?.[0]?.payload?.fullLabel ?? '')}
               />
-              <YAxis tick={{ fontSize: 12 }} />
-              <Tooltip formatter={(value) => formatNumber(asChartNumber(value))} />
-              <Bar dataKey="total_leads" name="Creados" radius={[8, 8, 0, 0]} fill="#dc2626" />
+              <Bar dataKey="total_leads" name="Creados" radius={[0, 10, 10, 0]} fill="#dc2626" barSize={18} />
             </BarChart>
           </ResponsiveContainer>
         </ChartCard>
 
-        <ChartCard title="Horas con más leads entrantes" icon={<Clock3 size={16} className="text-red-600" />}>
+        <ChartCard title="Horas con más leads entrantes" description="Distribución horaria de incoming del periodo." icon={<Clock3 size={16} className="text-red-600" />}>
           <ResponsiveContainer width="100%" height={300}>
-            <LineChart data={data.created.hourly_incoming}>
-              <CartesianGrid strokeDasharray="3 3" vertical={false} />
-              <XAxis dataKey="hour" tickFormatter={formatHour} tick={{ fontSize: 12 }} />
-              <YAxis tick={{ fontSize: 12 }} />
-              <Tooltip labelFormatter={(hour) => `Hora ${formatHour(Number(hour))}`} formatter={(value) => formatNumber(asChartNumber(value))} />
-              <Line type="monotone" dataKey="total_incoming" name="Incoming" stroke="#dc2626" strokeWidth={2.5} dot={{ r: 2 }} />
-            </LineChart>
+            <AreaChart data={data.created.hourly_incoming} margin={{ top: 12, right: 12, bottom: 0, left: 0 }}>
+              <defs>
+                <linearGradient id="incomingFill" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%" stopColor="#dc2626" stopOpacity={0.22} />
+                  <stop offset="95%" stopColor="#dc2626" stopOpacity={0.02} />
+                </linearGradient>
+              </defs>
+              <CartesianGrid stroke={CHART_GRID} strokeDasharray="3 3" vertical={false} />
+              <XAxis dataKey="hour" tickFormatter={formatHour} tick={{ fontSize: 12, fill: CHART_AXIS }} axisLine={false} tickLine={false} />
+              <YAxis tick={{ fontSize: 12, fill: CHART_AXIS }} axisLine={false} tickLine={false} allowDecimals={false} />
+              <Tooltip
+                contentStyle={CHART_TOOLTIP_STYLE}
+                labelFormatter={(hour) => `Hora ${formatHour(Number(hour))}`}
+                formatter={(value) => formatNumber(asChartNumber(value))}
+              />
+              <Area type="monotone" dataKey="total_incoming" stroke="#dc2626" fill="url(#incomingFill)" strokeWidth={2.5} />
+              <Line type="monotone" dataKey="total_incoming" stroke="#dc2626" strokeWidth={2.5} dot={{ r: 3, strokeWidth: 2, fill: '#ffffff' }} activeDot={{ r: 5 }} />
+            </AreaChart>
           </ResponsiveContainer>
         </ChartCard>
       </section>
 
       <section className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-        <ChartCard title="Leads creados según estado actual" icon={<PieChartIcon size={16} className="text-red-600" />}>
-          <ResponsiveContainer width="100%" height={300}>
-            <PieChart>
-              <Pie
-                data={statusesByNameForPie}
-                dataKey="total_leads"
-                nameKey="status_name"
-                cx="50%"
-                cy="50%"
-                outerRadius={105}
-                label={(entry) => truncateLabel(String(entry.name ?? ''), 18)}
-              >
-                {statusesByNameForPie.map((entry, index) => (
-                  <Cell key={`${entry.status_name}-${index}`} fill={COLORS[index % COLORS.length]} />
-                ))}
-              </Pie>
-              <Tooltip formatter={(value) => formatNumber(asChartNumber(value))} labelFormatter={(label) => String(label)} />
-            </PieChart>
-          </ResponsiveContainer>
+        <ChartCard title="Leads creados según estado actual" description="Participación de estados actuales dentro del cohort creado." icon={<PieChartIcon size={16} className="text-red-600" />}>
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_220px] lg:items-center">
+            <ResponsiveContainer width="100%" height={280}>
+              <PieChart>
+                <Pie
+                  data={statusesByNameForPie}
+                  dataKey="total_leads"
+                  nameKey="status_name"
+                  cx="50%"
+                  cy="50%"
+                  innerRadius={72}
+                  outerRadius={102}
+                  paddingAngle={2}
+                  stroke="#ffffff"
+                  strokeWidth={2}
+                >
+                  {statusesByNameForPie.map((entry, index) => (
+                    <Cell key={`${entry.status_name}-${index}`} fill={COLORS[index % COLORS.length]} />
+                  ))}
+                </Pie>
+                <Tooltip contentStyle={CHART_TOOLTIP_STYLE} formatter={(value) => formatNumber(asChartNumber(value))} labelFormatter={(label) => String(label)} />
+              </PieChart>
+            </ResponsiveContainer>
+
+            <div className="space-y-2">
+              {statusesByNameForPie.map((status, index) => (
+                <div key={status.status_name} className="flex items-center justify-between gap-3 rounded-2xl border border-gray-200 bg-gray-50 px-3 py-2.5 text-sm">
+                  <div className="flex min-w-0 items-center gap-2">
+                    <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: COLORS[index % COLORS.length] }} />
+                    <span className="truncate text-gray-700">{formatStatusLegendLabel(status.status_name)}</span>
+                  </div>
+                  <div className="text-right">
+                    <p className="font-semibold text-gray-900">{formatNumber(status.total_leads)}</p>
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-gray-500">{buildShareLabel(status.total_leads, data.created.summary.total_leads)}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
         </ChartCard>
 
-        <ChartCard title="Leads creados por estado actual + pipeline" icon={<BarChart3 size={16} className="text-red-600" />}>
+        <ChartCard title="Estados actuales por pipeline" description="Lectura comparativa por pipeline sin asumir performance histórica." icon={<BarChart3 size={16} className="text-red-600" />}>
           <ResponsiveContainer width="100%" height={300}>
-            <BarChart data={statusByPipelineData.rows}>
-              <CartesianGrid strokeDasharray="3 3" vertical={false} />
+            <BarChart data={statusByPipelineData.rows} margin={{ top: 8, right: 16, bottom: 56, left: 0 }}>
+              <CartesianGrid stroke={CHART_GRID} strokeDasharray="3 3" vertical={false} />
               <XAxis
                 dataKey="pipeline_name"
-                tick={{ fontSize: 12 }}
+                tick={{ fontSize: 12, fill: CHART_AXIS }}
                 tickFormatter={(value) => truncateLabel(String(value), 22)}
                 interval={0}
                 angle={-20}
                 textAnchor="end"
                 height={58}
+                axisLine={false}
+                tickLine={false}
               />
-              <YAxis tick={{ fontSize: 12 }} />
-              <Tooltip formatter={(value) => formatNumber(asChartNumber(value))} />
+              <YAxis tick={{ fontSize: 12, fill: CHART_AXIS }} axisLine={false} tickLine={false} allowDecimals={false} />
+              <Tooltip contentStyle={CHART_TOOLTIP_STYLE} formatter={(value) => formatNumber(asChartNumber(value))} />
+              <Legend verticalAlign="top" height={36} wrapperStyle={{ fontSize: '12px' }} />
               {statusByPipelineData.stackKeys.map((key, index) => (
                 <Bar key={key} dataKey={key} stackId="statuses" fill={COLORS[index % COLORS.length]} radius={index === statusByPipelineData.stackKeys.length - 1 ? [8, 8, 0, 0] : [0, 0, 0, 0]} />
               ))}
@@ -890,14 +991,14 @@ function InsightsReportSections({
       </section>
 
       <section className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-        <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-[0_20px_36px_-30px_rgba(15,23,42,0.8)]">
+        <div className="rounded-[28px] border border-gray-200 bg-white p-5 shadow-[0_20px_36px_-30px_rgba(15,23,42,0.8)]">
           <h3 className="inline-flex items-center gap-2 text-sm font-semibold text-gray-800">
             <Users size={16} className="text-red-600" />
             Top responsables actuales (cohort creado)
           </h3>
           <ul className="mt-4 space-y-2 text-sm text-gray-700">
             {data.created.owner_volume.slice(0, 5).map((owner) => (
-              <li key={String(owner.responsible_user_id ?? 'null')} className="flex items-center justify-between rounded-lg border border-gray-100 bg-gray-50/70 px-3 py-2">
+              <li key={String(owner.responsible_user_id ?? 'null')} className="flex items-center justify-between rounded-2xl border border-gray-200 bg-gray-50 px-3 py-2.5">
                 <span className="truncate pr-3">{owner.responsible_user_name}</span>
                 <span className="font-semibold text-gray-900">{formatNumber(owner.total_leads)}</span>
               </li>
@@ -905,22 +1006,22 @@ function InsightsReportSections({
           </ul>
         </div>
 
-        <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-[0_20px_36px_-30px_rgba(15,23,42,0.8)]">
+        <div className="rounded-[28px] border border-gray-200 bg-white p-5 shadow-[0_20px_36px_-30px_rgba(15,23,42,0.8)]">
           <h3 className="text-sm font-semibold text-gray-800">Highlights creados / incoming</h3>
           <ul className="mt-4 space-y-2 text-sm text-gray-700">
-            <li className="rounded-lg border border-gray-100 bg-gray-50/70 px-3 py-2">
+            <li className="rounded-2xl border border-gray-200 bg-gray-50 px-3 py-2.5">
               Pipeline top (creados): <span className="font-semibold text-gray-900">{data.created.summary.top_pipeline?.pipeline_name ?? 'N/D'}</span>
             </li>
-            <li className="rounded-lg border border-gray-100 bg-gray-50/70 px-3 py-2">
+            <li className="rounded-2xl border border-gray-200 bg-gray-50 px-3 py-2.5">
               Responsable actual top: <span className="font-semibold text-gray-900">{data.created.summary.top_owner?.responsible_user_name ?? 'N/D'}</span>
             </li>
-            <li className="rounded-lg border border-gray-100 bg-gray-50/70 px-3 py-2">
+            <li className="rounded-2xl border border-gray-200 bg-gray-50 px-3 py-2.5">
               Hora pico incoming: <span className="font-semibold text-gray-900">{data.created.insights.busiest_hour ? formatHour(data.created.insights.busiest_hour.hour) : 'N/D'}</span>
             </li>
-            <li className="rounded-lg border border-gray-100 bg-gray-50/70 px-3 py-2">
+            <li className="rounded-2xl border border-gray-200 bg-gray-50 px-3 py-2.5">
               Estado actual más frecuente: <span className="font-semibold text-gray-900">{data.created.insights.top_status?.status_name ?? 'N/D'}</span>
             </li>
-            <li className="rounded-lg border border-gray-100 bg-gray-50/70 px-3 py-2">
+            <li className="rounded-2xl border border-gray-200 bg-gray-50 px-3 py-2.5">
               Leads sin pipeline: <span className="font-semibold text-gray-900">{formatNumber(data.created.insights.orphan_pipeline_leads)}</span>
             </li>
           </ul>
@@ -928,42 +1029,36 @@ function InsightsReportSections({
       </section>
 
       <section className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-        <ChartCard title="Ganados históricos por vendedor snapshot" icon={<Users size={16} className="text-red-600" />}>
+        <ChartCard title="Ganados históricos por vendedor" description="Ranking snapshot al momento del ganado." icon={<Users size={16} className="text-red-600" />}>
           <ResponsiveContainer width="100%" height={300}>
-            <BarChart data={data.won.sellers.slice(0, 8)}>
-              <CartesianGrid strokeDasharray="3 3" vertical={false} />
-              <XAxis
-                dataKey="seller_name"
-                tick={{ fontSize: 12 }}
-                tickFormatter={(value) => truncateLabel(String(value), 20)}
-                interval={0}
-                angle={-20}
-                textAnchor="end"
-                height={58}
+            <BarChart data={wonSellerChartData} layout="vertical" margin={{ top: 8, right: 12, bottom: 8, left: 8 }}>
+              <CartesianGrid stroke={CHART_GRID} strokeDasharray="3 3" horizontal={false} />
+              <XAxis type="number" tick={{ fontSize: 12, fill: CHART_AXIS }} axisLine={false} tickLine={false} allowDecimals={false} />
+              <YAxis type="category" dataKey="label" width={152} tick={{ fontSize: 12, fill: CHART_AXIS }} axisLine={false} tickLine={false} />
+              <Tooltip
+                cursor={{ fill: '#f8fafc' }}
+                contentStyle={CHART_TOOLTIP_STYLE}
+                formatter={(value) => formatNumber(asChartNumber(value))}
+                labelFormatter={(_, payload) => String(payload?.[0]?.payload?.fullLabel ?? '')}
               />
-              <YAxis tick={{ fontSize: 12 }} />
-              <Tooltip formatter={(value) => formatNumber(asChartNumber(value))} />
-              <Bar dataKey="total_won" name="Ganados" radius={[8, 8, 0, 0]} fill="#dc2626" />
+              <Bar dataKey="total_won" name="Ganados" radius={[0, 10, 10, 0]} fill="#dc2626" barSize={18} />
             </BarChart>
           </ResponsiveContainer>
         </ChartCard>
 
-        <ChartCard title="Ganados históricos por pipeline snapshot" icon={<Layers size={16} className="text-red-600" />}>
+        <ChartCard title="Ganados históricos por pipeline" description="Distribución histórica de ganados por pipeline snapshot." icon={<Layers size={16} className="text-red-600" />}>
           <ResponsiveContainer width="100%" height={300}>
-            <BarChart data={data.won.pipelines.slice(0, 8)}>
-              <CartesianGrid strokeDasharray="3 3" vertical={false} />
-              <XAxis
-                dataKey="pipeline_name"
-                tick={{ fontSize: 12 }}
-                tickFormatter={(value) => truncateLabel(String(value), 20)}
-                interval={0}
-                angle={-20}
-                textAnchor="end"
-                height={58}
+            <BarChart data={wonPipelineChartData} layout="vertical" margin={{ top: 8, right: 12, bottom: 8, left: 8 }}>
+              <CartesianGrid stroke={CHART_GRID} strokeDasharray="3 3" horizontal={false} />
+              <XAxis type="number" tick={{ fontSize: 12, fill: CHART_AXIS }} axisLine={false} tickLine={false} allowDecimals={false} />
+              <YAxis type="category" dataKey="label" width={152} tick={{ fontSize: 12, fill: CHART_AXIS }} axisLine={false} tickLine={false} />
+              <Tooltip
+                cursor={{ fill: '#f8fafc' }}
+                contentStyle={CHART_TOOLTIP_STYLE}
+                formatter={(value) => formatNumber(asChartNumber(value))}
+                labelFormatter={(_, payload) => String(payload?.[0]?.payload?.fullLabel ?? '')}
               />
-              <YAxis tick={{ fontSize: 12 }} />
-              <Tooltip formatter={(value) => formatNumber(asChartNumber(value))} />
-              <Bar dataKey="total_won" name="Ganados" radius={[8, 8, 0, 0]} fill="#f97316" />
+              <Bar dataKey="total_won" name="Ganados" radius={[0, 10, 10, 0]} fill="#f97316" barSize={18} />
             </BarChart>
           </ResponsiveContainer>
         </ChartCard>
@@ -1001,18 +1096,19 @@ function QuickRangeButton({ label, onClick }: { label: string; onClick: () => vo
     <button
       type="button"
       onClick={onClick}
-      className="inline-flex items-center rounded-xl border border-red-200 bg-red-50 px-3 py-1.5 text-xs font-semibold text-red-700 hover:bg-red-100"
+      className="inline-flex items-center rounded-full border border-gray-200 bg-white px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.14em] text-gray-700 transition hover:border-red-200 hover:bg-red-50 hover:text-red-700"
     >
       {label}
     </button>
   );
 }
 
-function KpiCard({ title, value, compact = false }: { title: string; value: string; compact?: boolean }) {
+function KpiCard({ title, value, helper, compact = false }: { title: string; value: string; helper?: string; compact?: boolean }) {
   return (
     <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-[0_20px_42px_-34px_rgba(15,23,42,0.9)]">
-      <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">{title}</p>
+      <p className="text-xs font-semibold uppercase tracking-[0.18em] text-gray-500">{title}</p>
       <p className={`${compact ? 'text-lg' : 'text-2xl'} mt-1 font-bold text-gray-900`}>{value}</p>
+      {helper ? <p className="mt-2 text-xs text-gray-500">{helper}</p> : null}
     </div>
   );
 }
@@ -1027,9 +1123,10 @@ function SemanticSectionCard({
   children: ReactNode;
 }) {
   return (
-    <section className="space-y-4 rounded-2xl border border-gray-200 bg-white p-5 shadow-[0_20px_36px_-30px_rgba(15,23,42,0.8)]">
+    <section className="space-y-4 rounded-[28px] border border-gray-200 bg-white p-5 shadow-[0_20px_36px_-30px_rgba(15,23,42,0.8)]">
       <div>
-        <h3 className="text-sm font-semibold text-gray-900">{title}</h3>
+        <p className="text-xs font-semibold uppercase tracking-[0.18em] text-gray-500">Comparativa</p>
+        <h3 className="mt-1 text-base font-bold text-gray-900">{title}</h3>
         <p className="mt-1 text-sm text-gray-500">{description}</p>
       </div>
       {children}
@@ -1039,7 +1136,7 @@ function SemanticSectionCard({
 
 function DataPanel({ title, headers, rows }: { title: string; headers: string[]; rows: string[][] }) {
   return (
-    <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-[0_20px_36px_-30px_rgba(15,23,42,0.8)]">
+    <div className="rounded-[28px] border border-gray-200 bg-white p-5 shadow-[0_20px_36px_-30px_rgba(15,23,42,0.8)]">
       <h3 className="mb-4 text-sm font-semibold text-gray-800">{title}</h3>
       <div className="overflow-x-auto">
         <table className="min-w-full text-sm">
@@ -1069,13 +1166,16 @@ function DataPanel({ title, headers, rows }: { title: string; headers: string[];
   );
 }
 
-function ChartCard({ title, icon, children }: { title: string; icon: ReactNode; children: ReactNode }) {
+function ChartCard({ title, description, icon, children }: { title: string; description?: string; icon: ReactNode; children: ReactNode }) {
   return (
-    <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-[0_20px_36px_-30px_rgba(15,23,42,0.8)]">
-      <h3 className="mb-3 inline-flex items-center gap-2 text-sm font-semibold text-gray-800">
-        {icon}
-        {title}
-      </h3>
+    <div className="rounded-[28px] border border-gray-200 bg-white p-5 shadow-[0_20px_36px_-30px_rgba(15,23,42,0.8)]">
+      <div className="mb-4">
+        <h3 className="inline-flex items-center gap-2 text-sm font-semibold text-gray-800">
+          {icon}
+          {title}
+        </h3>
+        {description ? <p className="mt-1 text-sm text-gray-500">{description}</p> : null}
+      </div>
       {children}
     </div>
   );
