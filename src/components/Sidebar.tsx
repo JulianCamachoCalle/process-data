@@ -62,11 +62,10 @@ export function Sidebar({
               onMouseEnter={() => prefetchHandlers?.onSheetHover?.(sheet)}
               onFocus={() => prefetchHandlers?.onSheetFocus?.(sheet)}
               title={collapsed ? getSheetLabel(sheet) : undefined}
-              className={`group flex items-center w-full text-left px-4 py-2.5 rounded-xl border transition-all duration-200 ${
-                isActive
+              className={`group flex items-center w-full text-left px-4 py-2.5 rounded-xl border transition-all duration-200 ${isActive
                   ? 'bg-white/10 text-white font-semibold border-red-500/70 shadow-[0_8px_24px_-18px_rgba(255,255,255,0.8)]'
                   : 'text-gray-400 border-transparent hover:bg-white/5 hover:text-gray-100 hover:border-white/10'
-              } ${collapsed ? 'md:justify-center md:px-2' : 'gap-3'}`}
+                } ${collapsed ? 'md:justify-center md:px-2' : 'gap-3'}`}
             >
               <Database size={16} className={isActive ? 'text-red-300' : 'text-gray-500 group-hover:text-red-200'} />
               <span className={`truncate text-sm ${collapsed ? 'md:hidden' : ''}`}>{getSheetLabel(sheet)}</span>
@@ -123,16 +122,15 @@ export function Sidebar({
           to="/"
           onClick={() => onNavigate?.()}
           title={collapsed ? 'Resumen general' : undefined}
-          className={`group flex items-center w-full text-left px-4 py-3 rounded-xl border transition-all duration-200 ${
-            location.pathname === '/'
+          className={`group flex items-center w-full text-left px-4 py-3 rounded-xl border transition-all duration-200 ${location.pathname === '/'
               ? 'bg-gradient-to-r from-red-600 to-red-500 text-white font-semibold border-red-400/80 shadow-[0_12px_24px_-16px_rgba(230,0,0,0.9)]'
               : 'text-gray-300 border-transparent hover:bg-white/5 hover:text-white hover:border-white/10'
-          } ${collapsed ? 'md:justify-center md:px-2' : 'gap-3'}`}
+            } ${collapsed ? 'md:justify-center md:px-2' : 'gap-3'}`}
         >
           <LayoutDashboard size={18} className={location.pathname === '/' ? 'text-white' : 'text-red-300 group-hover:text-red-200'} />
           <span className={collapsed ? 'md:hidden' : ''}>Resumen general</span>
         </Link>
-        
+
         {renderGroup(
           'Tablas base',
           <Layers3 size={12} className="text-red-300" />,
@@ -157,11 +155,10 @@ export function Sidebar({
             to="/meta/ads/dashboard"
             onClick={() => onNavigate?.()}
             title={collapsed ? 'Meta Ads Dashboard' : undefined}
-            className={`group flex items-center w-full text-left px-4 py-2.5 rounded-xl border transition-all duration-200 ${
-              isMetaAdsDashboardActive
+            className={`group flex items-center w-full text-left px-4 py-2.5 rounded-xl border transition-all duration-200 ${isMetaAdsDashboardActive
                 ? 'bg-white/10 text-white font-semibold border-red-500/70 shadow-[0_8px_24px_-18px_rgba(255,255,255,0.8)]'
                 : 'text-gray-400 border-transparent hover:bg-white/5 hover:text-gray-100 hover:border-white/10'
-            } ${collapsed ? 'md:justify-center md:px-2' : 'gap-3'}`}
+              } ${collapsed ? 'md:justify-center md:px-2' : 'gap-3'}`}
           >
             <BarChart3 size={16} className={isMetaAdsDashboardActive ? 'text-red-300' : 'text-gray-500 group-hover:text-red-200'} />
             <span className={`truncate text-sm ${collapsed ? 'md:hidden' : ''}`}>Ads Dashboard</span>
@@ -171,11 +168,10 @@ export function Sidebar({
             to="/meta/ads/data"
             onClick={() => onNavigate?.()}
             title={collapsed ? 'Meta Ads Data' : undefined}
-            className={`group flex items-center w-full text-left px-4 py-2.5 rounded-xl border transition-all duration-200 ${
-              isMetaAdsDataActive
+            className={`group flex items-center w-full text-left px-4 py-2.5 rounded-xl border transition-all duration-200 ${isMetaAdsDataActive
                 ? 'bg-white/10 text-white font-semibold border-red-500/70 shadow-[0_8px_24px_-18px_rgba(255,255,255,0.8)]'
                 : 'text-gray-400 border-transparent hover:bg-white/5 hover:text-gray-100 hover:border-white/10'
-            } ${collapsed ? 'md:justify-center md:px-2' : 'gap-3'}`}
+              } ${collapsed ? 'md:justify-center md:px-2' : 'gap-3'}`}
           >
             <Database size={16} className={isMetaAdsDataActive ? 'text-red-300' : 'text-gray-500 group-hover:text-red-200'} />
             <span className={`truncate text-sm ${collapsed ? 'md:hidden' : ''}`}>Ads Data</span>
@@ -195,11 +191,10 @@ export function Sidebar({
             to="/kommo"
             onClick={() => onNavigate?.()}
             title={collapsed ? 'Kommo Explorer' : undefined}
-            className={`group flex items-center w-full text-left px-4 py-2.5 rounded-xl border transition-all duration-200 ${
-              isKommoExplorerActive
+            className={`group flex items-center w-full text-left px-4 py-2.5 rounded-xl border transition-all duration-200 ${isKommoExplorerActive
                 ? 'bg-white/10 text-white font-semibold border-red-500/70 shadow-[0_8px_24px_-18px_rgba(255,255,255,0.8)]'
                 : 'text-gray-400 border-transparent hover:bg-white/5 hover:text-gray-100 hover:border-white/10'
-            } ${collapsed ? 'md:justify-center md:px-2' : 'gap-3'}`}
+              } ${collapsed ? 'md:justify-center md:px-2' : 'gap-3'}`}
           >
             <Database size={16} className={isKommoExplorerActive ? 'text-red-300' : 'text-gray-500 group-hover:text-red-200'} />
             <span className={`truncate text-sm ${collapsed ? 'md:hidden' : ''}`}>Kommo Explorer</span>
@@ -209,11 +204,10 @@ export function Sidebar({
             to="/kommo/leads-insights"
             onClick={() => onNavigate?.()}
             title={collapsed ? 'Leads Insights' : undefined}
-            className={`group flex items-center w-full text-left px-4 py-2.5 rounded-xl border transition-all duration-200 ${
-              isKommoInsightsActive
+            className={`group flex items-center w-full text-left px-4 py-2.5 rounded-xl border transition-all duration-200 ${isKommoInsightsActive
                 ? 'bg-white/10 text-white font-semibold border-red-500/70 shadow-[0_8px_24px_-18px_rgba(255,255,255,0.8)]'
                 : 'text-gray-400 border-transparent hover:bg-white/5 hover:text-gray-100 hover:border-white/10'
-            } ${collapsed ? 'md:justify-center md:px-2' : 'gap-3'}`}
+              } ${collapsed ? 'md:justify-center md:px-2' : 'gap-3'}`}
           >
             <Database size={16} className={isKommoInsightsActive ? 'text-red-300' : 'text-gray-500 group-hover:text-red-200'} />
             <span className={`truncate text-sm ${collapsed ? 'md:hidden' : ''}`}>Leads Insights</span>
@@ -222,7 +216,7 @@ export function Sidebar({
       </nav>
 
       <div className="border-t border-white/10 px-2 pb-4 pt-1.5 sm:pb-5">
-        
+
         {/* Hidden admin trigger */}
         <button
           onClick={onSecretClick}

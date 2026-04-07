@@ -9,6 +9,7 @@ import {
   aggregatePerformanceEntries,
   aggregateTrendRows,
   buildComparisonMetrics,
+  buildComparisonNarrative,
   buildDecisionSignals,
   formatCompactMetric,
   getCreativeInsightEntries,
@@ -17,6 +18,7 @@ import {
   safeDivide,
   sumBy,
   type MetaComparisonMetric,
+  type MetaComparisonNarrative,
   type MetaDecisionSignal,
   type MetaPerformanceEntry,
 } from './metaAdsUtils';
@@ -134,6 +136,16 @@ export function MetaAdsDashboard() {
 
   const selectedAdComparisonMetrics = useMemo(
     () => buildComparisonMetrics(selectedAdComparison[0], selectedAdComparison[1]),
+    [selectedAdComparison],
+  );
+
+  const selectedCampaignNarrative = useMemo(
+    () => buildComparisonNarrative(selectedCampaignComparison[0], selectedCampaignComparison[1]),
+    [selectedCampaignComparison],
+  );
+
+  const selectedAdNarrative = useMemo(
+    () => buildComparisonNarrative(selectedAdComparison[0], selectedAdComparison[1]),
     [selectedAdComparison],
   );
 
@@ -303,6 +315,7 @@ export function MetaAdsDashboard() {
             left={selectedCampaignComparison[0]}
             right={selectedCampaignComparison[1]}
             metrics={selectedCampaignComparisonMetrics}
+            narrative={selectedCampaignNarrative}
             emptyMessage="Todavía no hay suficientes campañas con data para comparar."
           />
           <HeadToHeadCard
@@ -322,6 +335,7 @@ export function MetaAdsDashboard() {
             left={selectedAdComparison[0]}
             right={selectedAdComparison[1]}
             metrics={selectedAdComparisonMetrics}
+            narrative={selectedAdNarrative}
             emptyMessage="Todavía no hay suficientes ads con data para comparar."
           />
         </div>
@@ -381,6 +395,7 @@ function HeadToHeadCard({
   left,
   right,
   metrics,
+  narrative,
   emptyMessage,
 }: {
   title: string;
@@ -389,6 +404,7 @@ function HeadToHeadCard({
   left?: MetaPerformanceEntry;
   right?: MetaPerformanceEntry;
   metrics: MetaComparisonMetric[];
+  narrative: MetaComparisonNarrative | null;
   emptyMessage: string;
 }) {
   if (!left || !right) {
@@ -437,7 +453,31 @@ function HeadToHeadCard({
           </tbody>
         </table>
       </div>
+
+      {narrative ? <ComparisonNarrativeCard narrative={narrative} /> : null}
     </ChartCard>
+  );
+}
+
+function ComparisonNarrativeCard({ narrative }: { narrative: MetaComparisonNarrative }) {
+  return (
+    <div className="rounded-2xl border border-red-100 bg-gradient-to-br from-red-50 via-white to-orange-50 px-4 py-4">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-wide text-red-700">Resumen ejecutivo</p>
+          <p className="mt-2 text-sm font-semibold text-gray-900">{narrative.summary}</p>
+        </div>
+        <InsightBadge
+          label={narrative.recommendationTone === 'positive' ? 'Escalar' : narrative.recommendationTone === 'warning' ? 'Revisar' : 'Iterar'}
+          tone={narrative.recommendationTone}
+        />
+      </div>
+
+      <div className="mt-3 space-y-2 text-sm text-gray-600">
+        <p>{narrative.tradeoff}</p>
+        <p className="font-medium text-gray-800">{narrative.recommendation}</p>
+      </div>
+    </div>
   );
 }
 
