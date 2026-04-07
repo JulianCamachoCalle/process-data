@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useCallback, useMemo, useState, type ReactNode } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import {
@@ -55,46 +55,68 @@ type OwnerInsight = {
   total_leads: number;
 };
 
+type CreatedPipelineSnapshotInsight = {
+  group_key: string;
+  pipeline_id: number | null;
+  pipeline_name: string;
+  total_leads: number;
+  open_leads: number;
+  closed_leads: number;
+  lost_leads: number;
+  avg_price: number | null;
+};
+
+type WonPipelineInsight = {
+  pipeline_id: number | null;
+  pipeline_name: string;
+  total_won: number;
+};
+
+type WonSellerInsight = {
+  seller_name: string;
+  total_won: number;
+};
+
 type LeadsInsightsPayload = {
   success: boolean;
   error?: string;
   timezone?: string;
-  pipelines: PipelineInsight[];
-  statuses: StatusInsight[];
-  statusesByName: StatusByNameInsight[];
-  hourlyIncoming: HourlyIncomingInsight[];
-  owners: OwnerInsight[];
   filters: {
     start_date: string | null;
     end_date: string | null;
   };
-  pipelinePerformance: Array<{
-    group_key: string;
-    pipeline_id: number | null;
-    pipeline_name: string;
-    total_leads: number;
-    open_leads: number;
-    closed_leads: number;
-    won_leads: number;
-    lost_leads: number;
-    avg_price: number | null;
-  }>;
-  summary: {
-    total_leads: number;
-    total_open: number;
-    total_closed: number;
-    total_won: number;
-    total_lost: number;
-    total_deleted: number;
-    avg_price: number | null;
-    top_pipeline: PipelineInsight | null;
+  created: {
+    summary: {
+      total_leads: number;
+      total_open: number;
+      total_closed: number;
+      total_lost: number;
+      total_deleted: number;
+      total_incoming: number;
+      avg_price: number | null;
+      top_pipeline: PipelineInsight | null;
+      top_owner: OwnerInsight | null;
+    };
+    pipeline_volume: PipelineInsight[];
+    owner_volume: OwnerInsight[];
+    status_volume: StatusInsight[];
+    status_volume_by_name: StatusByNameInsight[];
+    pipeline_current_state: CreatedPipelineSnapshotInsight[];
+    hourly_incoming: HourlyIncomingInsight[];
+    insights: {
+      busiest_hour: HourlyIncomingInsight | null;
+      top_status: StatusInsight | null;
+      orphan_pipeline_leads: number;
+    };
   };
-  insights: {
-    busiest_hour: HourlyIncomingInsight | null;
-    top_status: StatusInsight | null;
-    won_rate_over_closed: number | null;
-    orphan_pipeline_leads: number;
-    top_owner: OwnerInsight | null;
+  won: {
+    summary: {
+      total_won: number;
+      top_pipeline: WonPipelineInsight | null;
+      top_seller: WonSellerInsight | null;
+    };
+    pipelines: WonPipelineInsight[];
+    sellers: WonSellerInsight[];
   };
 };
 
@@ -170,10 +192,6 @@ function escapeHtml(value: string) {
     .replaceAll('>', '&gt;')
     .replaceAll('"', '&quot;')
     .replaceAll("'", '&#39;');
-}
-
-function formatPercent(value: number | null) {
-  return value === null ? 'N/D' : `${value}%`;
 }
 
 function renderHorizontalBarChartSvg(
@@ -269,25 +287,19 @@ function buildExportDocument({
   data,
   generatedAt,
   appliedRangeLabel,
-  selectedPipelineA,
-  selectedPipelineB,
-  pipelineComparisonChartData,
   statusesByNameForPie,
 }: {
   data: LeadsInsightsPayload;
   generatedAt: string;
   appliedRangeLabel: string;
-  selectedPipelineA: LeadsInsightsPayload['pipelinePerformance'][number] | null;
-  selectedPipelineB: LeadsInsightsPayload['pipelinePerformance'][number] | null;
-  pipelineComparisonChartData: Array<{ metric: string; pipelineA: number; pipelineB: number }>;
   statusesByNameForPie: StatusByNameInsight[];
 }) {
   const summaryCards = [
-    ['Leads creados', formatNumber(data.summary.total_leads)],
-    ['Leads abiertos (creados)', formatNumber(data.summary.total_open)],
-    ['Leads cerrados (creados)', formatNumber(data.summary.total_closed)],
-    ['Leads ganados (históricos)', formatNumber(data.summary.total_won)],
-    ['Ticket promedio', formatCurrency(data.summary.avg_price)],
+    ['Leads creados', formatNumber(data.created.summary.total_leads)],
+    ['Incoming entrantes', formatNumber(data.created.summary.total_incoming)],
+    ['Abiertos actuales', formatNumber(data.created.summary.total_open)],
+    ['Ganados históricos', formatNumber(data.won.summary.total_won)],
+    ['Ticket promedio creado', formatCurrency(data.created.summary.avg_price)],
   ].map(([label, value]) => `
     <article class="kpi-card">
       <p class="kpi-label">${escapeHtml(label)}</p>
@@ -295,20 +307,18 @@ function buildExportDocument({
     </article>
   `).join('');
 
-  const comparisonSvg = selectedPipelineA && selectedPipelineB
-    ? renderHorizontalBarChartSvg(
-        pipelineComparisonChartData.flatMap((item) => [
-          { label: `${item.metric} — ${selectedPipelineA.pipeline_name}`, value: item.pipelineA, color: '#dc2626' },
-          { label: `${item.metric} — ${selectedPipelineB.pipeline_name}`, value: item.pipelineB, color: '#f97316' },
-        ]),
-        { rowHeight: 26 },
-      )
-    : '<p class="export-empty">No hay suficientes pipelines para comparar.</p>';
-
   const pipelinesSvg = renderHorizontalBarChartSvg(
-    data.pipelines.slice(0, 8).map((pipeline, index) => ({
+    data.created.pipeline_volume.slice(0, 8).map((pipeline, index) => ({
       label: pipeline.pipeline_name,
       value: pipeline.total_leads,
+      color: COLORS[index % COLORS.length],
+    })),
+  );
+
+  const wonSellersSvg = renderHorizontalBarChartSvg(
+    data.won.sellers.slice(0, 8).map((seller, index) => ({
+      label: seller.seller_name,
+      value: seller.total_won,
       color: COLORS[index % COLORS.length],
     })),
   );
@@ -346,11 +356,6 @@ function buildExportDocument({
           th { background: #f8fafc; color: #334155; }
           .stack { display: grid; gap: 16px; margin-top: 16px; }
           @page { size: A4 landscape; margin: 12mm; }
-          @media print {
-            body { background: #ffffff; }
-            .page { max-width: none; padding: 0; }
-            .hero, .panel, .chart-panel { box-shadow: none; }
-          }
         </style>
       </head>
       <body>
@@ -365,36 +370,41 @@ function buildExportDocument({
 
           <section class="panel-grid">
             <section class="panel">
-              <h2 class="section-title">Insights ejecutivos</h2>
+              <h2 class="section-title">Semántica del tablero</h2>
               <ul class="list">
-                <li>Pipeline/personal top (creados): <strong>${escapeHtml(data.summary.top_pipeline?.pipeline_name ?? 'N/D')}</strong></li>
-                <li>Hora pico incoming: <strong>${escapeHtml(data.insights.busiest_hour ? formatHour(data.insights.busiest_hour.hour) : 'N/D')}</strong></li>
-                <li>Estado más frecuente: <strong>${escapeHtml(data.insights.top_status?.status_name ?? 'N/D')}</strong></li>
-                <li>Win rate referencial (ganados históricos / cerrados creados): <strong>${escapeHtml(formatPercent(data.insights.won_rate_over_closed))}</strong></li>
-                <li>Leads sin pipeline: <strong>${escapeHtml(formatNumber(data.insights.orphan_pipeline_leads))}</strong></li>
+                <li><strong>Creados / incoming</strong>: usa <code>kommo_leads.created_at</code> y <code>kommo_unsorted_leads.created_at</code>.</li>
+                <li><strong>Open, closed y lost</strong>: muestran el estado actual del cohort creado dentro del rango.</li>
+                <li><strong>Ganados históricos</strong>: usa <code>leads_ganados.fecha_lead_ganado</code>.</li>
+                <li>No se muestra win rate mezclado ni performance histórica de lost/closed porque la fuente actual no lo soporta con honestidad.</li>
               </ul>
             </section>
             <section class="panel">
-              <h2 class="section-title">Top personal</h2>
+              <h2 class="section-title">Highlights</h2>
               ${renderTable(
-                ['Responsable actual', 'Leads creados'],
-                data.owners.slice(0, 5).map((owner) => [owner.responsible_user_name, formatNumber(owner.total_leads)]),
+                ['Métrica', 'Valor'],
+                [
+                  ['Top pipeline creado', data.created.summary.top_pipeline?.pipeline_name ?? 'N/D'],
+                  ['Top responsable actual', data.created.summary.top_owner?.responsible_user_name ?? 'N/D'],
+                  ['Hora pico incoming', data.created.insights.busiest_hour ? formatHour(data.created.insights.busiest_hour.hour) : 'N/D'],
+                  ['Estado actual más frecuente', data.created.insights.top_status?.status_name ?? 'N/D'],
+                  ['Top vendedor histórico', data.won.summary.top_seller?.seller_name ?? 'N/D'],
+                ],
               )}
             </section>
           </section>
 
           <section class="chart-grid">
             <section class="chart-panel">
-              <h2 class="section-title">Comparación de personal</h2>
-              ${comparisonSvg}
-            </section>
-            <section class="chart-panel">
-              <h2 class="section-title">Leads creados según pipeline/personal</h2>
+              <h2 class="section-title">Leads creados por pipeline actual</h2>
               ${pipelinesSvg}
             </section>
             <section class="chart-panel">
+              <h2 class="section-title">Ganados históricos por vendedor snapshot</h2>
+              ${wonSellersSvg}
+            </section>
+            <section class="chart-panel">
               <h2 class="section-title">Horas con más leads entrantes</h2>
-              ${renderLineChartSvg(data.hourlyIncoming)}
+              ${renderLineChartSvg(data.created.hourly_incoming)}
             </section>
             <section class="chart-panel">
               <h2 class="section-title">Leads creados según estado actual</h2>
@@ -407,25 +417,27 @@ function buildExportDocument({
 
           <section class="stack">
             <section class="panel">
-              <h2 class="section-title">Performance por pipeline/personal</h2>
+              <h2 class="section-title">Cohort creado por pipeline + estado actual</h2>
               ${renderTable(
-                ['Pipeline/Personal', 'Total creados', 'Abiertos', 'Cerrados', 'Ganados históricos', 'Perdidos', 'Ticket promedio'],
-                data.pipelinePerformance.map((pipeline) => [
+                ['Pipeline', 'Creados', 'Abiertos', 'Cerrados', 'Perdidos', 'Ticket promedio'],
+                data.created.pipeline_current_state.map((pipeline) => [
                   pipeline.pipeline_name,
                   formatNumber(pipeline.total_leads),
                   formatNumber(pipeline.open_leads),
                   formatNumber(pipeline.closed_leads),
-                  formatNumber(pipeline.won_leads),
                   formatNumber(pipeline.lost_leads),
                   formatCurrency(pipeline.avg_price),
                 ]),
               )}
             </section>
             <section class="panel">
-              <h2 class="section-title">Estados por personal</h2>
+              <h2 class="section-title">Ganados históricos</h2>
               ${renderTable(
-                ['Pipeline/Personal', 'Estado', 'Leads creados'],
-                data.statuses.slice(0, 24).map((status) => [status.pipeline_name, status.status_name, formatNumber(status.total_leads)]),
+                ['Entidad', 'Ganados'],
+                [
+                  ...data.won.sellers.slice(0, 8).map((seller) => [seller.seller_name, formatNumber(seller.total_won)]),
+                  ...data.won.pipelines.slice(0, 8).map((pipeline) => [`Pipeline: ${pipeline.pipeline_name}`, formatNumber(pipeline.total_won)]),
+                ],
               )}
             </section>
           </section>
@@ -435,13 +447,55 @@ function buildExportDocument({
   `;
 }
 
+function buildEmptyPayload(startDate: string | null, endDate: string | null, error?: string): LeadsInsightsPayload {
+  return {
+    success: false,
+    error,
+    filters: {
+      start_date: startDate,
+      end_date: endDate,
+    },
+    created: {
+      summary: {
+        total_leads: 0,
+        total_open: 0,
+        total_closed: 0,
+        total_lost: 0,
+        total_deleted: 0,
+        total_incoming: 0,
+        avg_price: null,
+        top_pipeline: null,
+        top_owner: null,
+      },
+      pipeline_volume: [],
+      owner_volume: [],
+      status_volume: [],
+      status_volume_by_name: [],
+      pipeline_current_state: [],
+      hourly_incoming: [],
+      insights: {
+        busiest_hour: null,
+        top_status: null,
+        orphan_pipeline_leads: 0,
+      },
+    },
+    won: {
+      summary: {
+        total_won: 0,
+        top_pipeline: null,
+        top_seller: null,
+      },
+      pipelines: [],
+      sellers: [],
+    },
+  };
+}
+
 export function KommoLeadsInsights() {
   const [draftStartDate, setDraftStartDate] = useState<string | null>(null);
   const [draftEndDate, setDraftEndDate] = useState<string | null>(null);
   const [appliedStartDate, setAppliedStartDate] = useState<string | null>(null);
   const [appliedEndDate, setAppliedEndDate] = useState<string | null>(null);
-  const [pipelineAKey, setPipelineAKey] = useState<string>('');
-  const [pipelineBKey, setPipelineBKey] = useState<string>('');
   const [isExportingPdf, setIsExportingPdf] = useState(false);
 
   const insightsQuery = useQuery({
@@ -462,81 +516,12 @@ export function KommoLeadsInsights() {
 
       const payload = (await response.json()) as LeadsInsightsPayload;
       if (!response.ok) {
-        return {
-          success: false,
-          error: payload.error ?? 'No se pudo cargar insights de leads',
-          pipelines: [],
-          statuses: [],
-          statusesByName: [],
-          hourlyIncoming: [],
-          owners: [],
-          filters: {
-            start_date: appliedStartDate,
-            end_date: appliedEndDate,
-          },
-          pipelinePerformance: [],
-          summary: {
-            total_leads: 0,
-            total_open: 0,
-            total_closed: 0,
-            total_won: 0,
-            total_lost: 0,
-            total_deleted: 0,
-            avg_price: null,
-            top_pipeline: null,
-          },
-          insights: {
-            busiest_hour: null,
-            top_status: null,
-            won_rate_over_closed: null,
-            orphan_pipeline_leads: 0,
-            top_owner: null,
-          },
-        };
+        return buildEmptyPayload(appliedStartDate, appliedEndDate, payload.error ?? 'No se pudo cargar insights de leads');
       }
 
       return payload;
     },
   });
-
-  useEffect(() => {
-    const performance = insightsQuery.data?.pipelinePerformance ?? [];
-    if (performance.length === 0) {
-      setPipelineAKey('');
-      setPipelineBKey('');
-      return;
-    }
-
-    const keys = performance.map((item) => item.group_key);
-    if (!pipelineAKey || !keys.includes(pipelineAKey)) {
-      setPipelineAKey(keys[0] ?? '');
-    }
-
-    if (!pipelineBKey || !keys.includes(pipelineBKey) || pipelineBKey === pipelineAKey) {
-      setPipelineBKey(keys[1] ?? keys[0] ?? '');
-    }
-  }, [insightsQuery.data?.pipelinePerformance, pipelineAKey, pipelineBKey]);
-
-  const selectedPipelineA = useMemo(
-    () => insightsQuery.data?.pipelinePerformance.find((pipeline) => pipeline.group_key === pipelineAKey) ?? null,
-    [insightsQuery.data?.pipelinePerformance, pipelineAKey],
-  );
-
-  const selectedPipelineB = useMemo(
-    () => insightsQuery.data?.pipelinePerformance.find((pipeline) => pipeline.group_key === pipelineBKey) ?? null,
-    [insightsQuery.data?.pipelinePerformance, pipelineBKey],
-  );
-
-  const pipelineComparisonChartData = useMemo(() => {
-    if (!selectedPipelineA || !selectedPipelineB) return [];
-    return [
-      { metric: 'Total creados', pipelineA: selectedPipelineA.total_leads, pipelineB: selectedPipelineB.total_leads },
-      { metric: 'Abiertos', pipelineA: selectedPipelineA.open_leads, pipelineB: selectedPipelineB.open_leads },
-      { metric: 'Cerrados', pipelineA: selectedPipelineA.closed_leads, pipelineB: selectedPipelineB.closed_leads },
-      { metric: 'Ganados históricos', pipelineA: selectedPipelineA.won_leads, pipelineB: selectedPipelineB.won_leads },
-      { metric: 'Perdidos', pipelineA: selectedPipelineA.lost_leads, pipelineB: selectedPipelineB.lost_leads },
-    ];
-  }, [selectedPipelineA, selectedPipelineB]);
 
   const applyQuickRange = (range: 'today' | 'last7' | 'last30' | 'all') => {
     const todayLima = getCurrentLimaDate();
@@ -575,14 +560,49 @@ export function KommoLeadsInsights() {
     setAppliedEndDate(null);
   };
 
+  const statusesByNameForPie = useMemo(
+    () => (insightsQuery.data?.created.status_volume_by_name ?? []).slice(0, 8),
+    [insightsQuery.data?.created.status_volume_by_name],
+  );
+
+  const statusByPipelineData = useMemo(() => {
+    const source = insightsQuery.data?.created.status_volume ?? [];
+    const topStatuses = source
+      .slice()
+      .sort((a, b) => b.total_leads - a.total_leads)
+      .slice(0, 8)
+      .map((status) => status.status_name);
+
+    const byPipeline = new Map<string, Record<string, number | string>>();
+
+    for (const status of source) {
+      const key = `${status.pipeline_id ?? 'null'}-${status.pipeline_name}`;
+      if (!byPipeline.has(key)) {
+        byPipeline.set(key, { pipeline_name: status.pipeline_name });
+      }
+
+      const row = byPipeline.get(key);
+      if (!row) continue;
+
+      const statusKey = topStatuses.includes(status.status_name) ? status.status_name : 'Otros';
+      const currentValue = Number(row[statusKey] ?? 0);
+      row[statusKey] = currentValue + status.total_leads;
+    }
+
+    const rows = Array.from(byPipeline.values());
+    return {
+      rows,
+      stackKeys: Array.from(new Set([...topStatuses, 'Otros'])).filter((key) =>
+        rows.some((row) => Number(row[key] ?? 0) > 0),
+      ),
+    };
+  }, [insightsQuery.data?.created.status_volume]);
+
   const handleExportPdf = useCallback(async () => {
     if (isExportingPdf) return;
 
     const currentData = insightsQuery.data;
     if (!currentData || currentData.success === false) return;
-
-    const currentAppliedRangeLabel = `${currentData.filters.start_date ?? 'sin inicio'} — ${currentData.filters.end_date ?? 'sin fin'}`;
-    const currentStatusesByNameForPie = (currentData.statusesByName ?? []).slice(0, 8);
 
     const generatedAt = new Intl.DateTimeFormat('es-PE', {
       dateStyle: 'medium',
@@ -597,18 +617,13 @@ export function KommoLeadsInsights() {
         throw new Error('El navegador bloqueó la ventana de exportación.');
       }
 
-      const documentMarkup = buildExportDocument({
+      exportWindow.document.open();
+      exportWindow.document.write(buildExportDocument({
         data: currentData,
         generatedAt,
-        appliedRangeLabel: currentAppliedRangeLabel,
-        selectedPipelineA,
-        selectedPipelineB,
-        pipelineComparisonChartData,
-        statusesByNameForPie: currentStatusesByNameForPie,
-      });
-
-      exportWindow.document.open();
-      exportWindow.document.write(documentMarkup);
+        appliedRangeLabel: `${currentData.filters.start_date ?? 'sin inicio'} — ${currentData.filters.end_date ?? 'sin fin'}`,
+        statusesByNameForPie,
+      }));
       exportWindow.document.close();
 
       const finalizePrint = () => {
@@ -629,48 +644,7 @@ export function KommoLeadsInsights() {
       window.alert('No se pudo exportar el PDF. Probá nuevamente.');
       setIsExportingPdf(false);
     }
-  }, [
-    insightsQuery.data,
-    isExportingPdf,
-    pipelineComparisonChartData,
-    selectedPipelineA,
-    selectedPipelineB,
-  ]);
-
-  const statusByPipelineData = useMemo(() => {
-    const source = insightsQuery.data?.statuses ?? [];
-    const topStatuses = source
-      .slice()
-      .sort((a, b) => b.total_leads - a.total_leads)
-      .slice(0, 8)
-      .map((status) => status.status_name);
-
-    const byPipeline = new Map<string, Record<string, number | string>>();
-
-    for (const status of source) {
-      const key = `${status.pipeline_id ?? 'null'}-${status.pipeline_name}`;
-      if (!byPipeline.has(key)) {
-        byPipeline.set(key, { pipeline_name: status.pipeline_name });
-      }
-
-      const row = byPipeline.get(key)!;
-      const statusKey = topStatuses.includes(status.status_name) ? status.status_name : 'Otros';
-      const currentValue = Number(row[statusKey] ?? 0);
-      row[statusKey] = currentValue + status.total_leads;
-    }
-
-    return {
-      rows: Array.from(byPipeline.values()),
-      stackKeys: Array.from(new Set([...topStatuses, 'Otros'])).filter((key) =>
-        Array.from(byPipeline.values()).some((row) => Number(row[key] ?? 0) > 0),
-      ),
-    };
-  }, [insightsQuery.data?.statuses]);
-
-  const statusesByNameForPie = useMemo(
-    () => (insightsQuery.data?.statusesByName ?? []).slice(0, 8),
-    [insightsQuery.data?.statusesByName],
-  );
+  }, [insightsQuery.data, isExportingPdf, statusesByNameForPie]);
 
   if (insightsQuery.isLoading) {
     return (
@@ -682,7 +656,7 @@ export function KommoLeadsInsights() {
 
   if (!insightsQuery.data || insightsQuery.data.success === false) {
     return (
-      <div className="rounded-2xl border border-red-200 bg-red-50 p-6 text-red-700 text-sm">
+      <div className="rounded-2xl border border-red-200 bg-red-50 p-6 text-sm text-red-700">
         {insightsQuery.data?.error ?? 'Error cargando insights de leads'}
       </div>
     );
@@ -693,13 +667,15 @@ export function KommoLeadsInsights() {
 
   return (
     <div className="space-y-6">
-      <header className="rounded-2xl border border-gray-200 bg-white px-6 py-5 shadow-[0_24px_44px_-30px_rgba(15,23,42,0.65)] flex items-center justify-between gap-4 flex-wrap">
+      <header className="flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-gray-200 bg-white px-6 py-5 shadow-[0_24px_44px_-30px_rgba(15,23,42,0.65)]">
         <div>
-          <h1 className="text-2xl font-extrabold text-gray-900 inline-flex items-center gap-2">
+          <h1 className="inline-flex items-center gap-2 text-2xl font-extrabold text-gray-900">
             <Activity className="text-red-600" size={22} />
             Leads Insights
           </h1>
-          <p className="text-sm text-gray-500 mt-1">Métricas ejecutivas de leads Kommo. Zona horaria de entrada: {data.timezone ?? 'America/Lima'}.</p>
+          <p className="mt-1 text-sm text-gray-500">
+            Tablero semánticamente honesto: cohort de creados/incoming por un lado, ganados históricos por otro. Zona horaria: {data.timezone ?? 'America/Lima'}.
+          </p>
         </div>
         <div className="inline-flex items-center gap-2 print:hidden">
           <button
@@ -720,17 +696,17 @@ export function KommoLeadsInsights() {
         </div>
       </header>
 
-      <section className="rounded-2xl border border-gray-200 bg-white p-5 shadow-[0_20px_36px_-30px_rgba(15,23,42,0.8)] space-y-4">
+      <section className="space-y-4 rounded-2xl border border-gray-200 bg-white p-5 shadow-[0_20px_36px_-30px_rgba(15,23,42,0.8)]">
         <div className="flex flex-wrap items-center gap-2">
           <QuickRangeButton label="Hoy" onClick={() => applyQuickRange('today')} />
           <QuickRangeButton label="Últimos 7 días" onClick={() => applyQuickRange('last7')} />
           <QuickRangeButton label="Últimos 30 días" onClick={() => applyQuickRange('last30')} />
           <QuickRangeButton label="Todo" onClick={() => applyQuickRange('all')} />
-          {insightsQuery.isFetching ? <span className="text-xs text-gray-500 ml-2">Actualizando…</span> : null}
+          {insightsQuery.isFetching ? <span className="ml-2 text-xs text-gray-500">Actualizando…</span> : null}
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-          <label className="text-xs font-semibold text-gray-600 uppercase tracking-wide space-y-1">
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+          <label className="space-y-1 text-xs font-semibold uppercase tracking-wide text-gray-600">
             Desde
             <input
               type="date"
@@ -739,7 +715,7 @@ export function KommoLeadsInsights() {
               onChange={(event) => setDraftStartDate(event.target.value || null)}
             />
           </label>
-          <label className="text-xs font-semibold text-gray-600 uppercase tracking-wide space-y-1">
+          <label className="space-y-1 text-xs font-semibold uppercase tracking-wide text-gray-600">
             Hasta
             <input
               type="date"
@@ -768,19 +744,12 @@ export function KommoLeadsInsights() {
         </div>
 
         <p className="text-xs text-gray-500">
-          Filtro aplicado: {appliedRangeLabel}. Ganados usa fecha_lead_ganado; el resto usa fecha de creación / estado actual.
+          Filtro aplicado: {appliedRangeLabel}. Creados e incoming usan fechas de creación. Ganados usa <code>fecha_lead_ganado</code>. No mostramos métricas históricas de lost/closed ni win rate mezclado porque hoy la fuente no las respalda.
         </p>
       </section>
 
       <InsightsReportSections
         data={data}
-        pipelineAKey={pipelineAKey}
-        pipelineBKey={pipelineBKey}
-        onPipelineAChange={setPipelineAKey}
-        onPipelineBChange={setPipelineBKey}
-        selectedPipelineA={selectedPipelineA}
-        selectedPipelineB={selectedPipelineB}
-        pipelineComparisonChartData={pipelineComparisonChartData}
         statusesByNameForPie={statusesByNameForPie}
         statusByPipelineData={statusByPipelineData}
       />
@@ -790,28 +759,14 @@ export function KommoLeadsInsights() {
 
 function InsightsReportSections({
   data,
-  pipelineAKey,
-  pipelineBKey,
-  onPipelineAChange,
-  onPipelineBChange,
-  selectedPipelineA,
-  selectedPipelineB,
-  pipelineComparisonChartData,
   statusesByNameForPie,
   statusByPipelineData,
 }: {
   data: LeadsInsightsPayload;
-  pipelineAKey: string;
-  pipelineBKey: string;
-  onPipelineAChange: (value: string) => void;
-  onPipelineBChange: (value: string) => void;
-  selectedPipelineA: LeadsInsightsPayload['pipelinePerformance'][number] | null;
-  selectedPipelineB: LeadsInsightsPayload['pipelinePerformance'][number] | null;
-  pipelineComparisonChartData: Array<{ metric: string; pipelineA: number; pipelineB: number }>;
   statusesByNameForPie: StatusByNameInsight[];
   statusByPipelineData: { rows: Array<Record<string, number | string>>; stackKeys: string[] };
 }) {
-  if (data.summary.total_leads === 0 && data.summary.total_won === 0) {
+  if (data.created.summary.total_leads === 0 && data.won.summary.total_won === 0) {
     return (
       <div className="rounded-2xl border border-gray-200 bg-white p-8 text-center text-sm text-gray-500">
         No hay leads disponibles para mostrar métricas con los filtros actuales.
@@ -824,92 +779,41 @@ function InsightsReportSections({
 
   return (
     <>
-      <section className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-5">
-        <KpiCard title="Leads creados" value={formatNumber(data.summary.total_leads)} />
-        <KpiCard title="Leads abiertos (creados)" value={formatNumber(data.summary.total_open)} />
-        <KpiCard title="Leads cerrados (creados)" value={formatNumber(data.summary.total_closed)} />
-        <KpiCard title="Leads ganados (históricos)" value={formatNumber(data.summary.total_won)} />
-        <KpiCard title="Ticket promedio" value={formatCurrency(data.summary.avg_price)} />
+      <section className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <SemanticSectionCard
+          title="Universo 1 — Leads creados / incoming"
+          description="Cohort filtrado por fecha de creación. Open, closed, lost y responsables muestran el estado actual de esos leads creados dentro del rango."
+        >
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+            <KpiCard title="Leads creados" value={formatNumber(data.created.summary.total_leads)} compact />
+            <KpiCard title="Incoming entrantes" value={formatNumber(data.created.summary.total_incoming)} compact />
+            <KpiCard title="Abiertos actuales" value={formatNumber(data.created.summary.total_open)} compact />
+            <KpiCard title="Cerrados actuales" value={formatNumber(data.created.summary.total_closed)} compact />
+            <KpiCard title="Perdidos actuales" value={formatNumber(data.created.summary.total_lost)} compact />
+            <KpiCard title="Ticket promedio" value={formatCurrency(data.created.summary.avg_price)} compact />
+          </div>
+        </SemanticSectionCard>
+
+        <SemanticSectionCard
+          title="Universo 2 — Ganados históricos"
+          description="Cohort filtrado por fecha_lead_ganado. Los rankings usan snapshots históricos de vendedor y pipeline al momento del ganado."
+        >
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+            <KpiCard title="Leads ganados" value={formatNumber(data.won.summary.total_won)} compact />
+            <KpiCard title="Top vendedor" value={data.won.summary.top_seller?.seller_name ?? 'N/D'} compact />
+            <KpiCard title="Top pipeline" value={data.won.summary.top_pipeline?.pipeline_name ?? 'N/D'} compact />
+          </div>
+        </SemanticSectionCard>
       </section>
 
       <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-        Los <strong>ganados</strong> ahora usan historial de <code>leads_ganados</code> y respetan <strong>fecha_lead_ganado</strong>. El resto de métricas sigue basado en leads creados / estado actual.
+        ESTE tablero ya no mezcla universos. Si una métrica no puede defenderse históricamente con las fuentes actuales, se re-scopéa o se saca.
       </div>
 
-      <section className="space-y-4 rounded-2xl border border-gray-200 bg-white p-5 shadow-[0_20px_36px_-30px_rgba(15,23,42,0.8)]">
-        <h3 className="inline-flex items-center gap-2 text-sm font-semibold text-gray-800">
-          <BarChart3 size={16} className="text-red-600" />
-          Comparación de pipeline/personal
-        </h3>
-
-        <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-          <label className="space-y-1 text-xs font-semibold uppercase tracking-wide text-gray-600">
-            Pipeline/Personal A
-            <select
-              value={pipelineAKey}
-              onChange={(event) => onPipelineAChange(event.target.value)}
-              className="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-red-200"
-            >
-              {(data.pipelinePerformance ?? []).map((pipeline) => (
-                  <option key={`a-${pipeline.group_key}`} value={pipeline.group_key}>
-                  {pipeline.pipeline_name}
-                </option>
-              ))}
-            </select>
-          </label>
-
-          <label className="space-y-1 text-xs font-semibold uppercase tracking-wide text-gray-600">
-            Pipeline/Personal B
-            <select
-              value={pipelineBKey}
-              onChange={(event) => onPipelineBChange(event.target.value)}
-              className="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-red-200"
-            >
-              {(data.pipelinePerformance ?? []).map((pipeline) => (
-                  <option key={`b-${pipeline.group_key}`} value={pipeline.group_key}>
-                  {pipeline.pipeline_name}
-                </option>
-              ))}
-            </select>
-          </label>
-        </div>
-
-        {selectedPipelineA && selectedPipelineB ? (
-          <>
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6">
-              <CompareKpiCard label="Total creados" left={selectedPipelineA.total_leads} right={selectedPipelineB.total_leads} />
-              <CompareKpiCard label="Open" left={selectedPipelineA.open_leads} right={selectedPipelineB.open_leads} />
-              <CompareKpiCard label="Closed" left={selectedPipelineA.closed_leads} right={selectedPipelineB.closed_leads} />
-              <CompareKpiCard label="Won histórico" left={selectedPipelineA.won_leads} right={selectedPipelineB.won_leads} />
-              <CompareKpiCard label="Lost" left={selectedPipelineA.lost_leads} right={selectedPipelineB.lost_leads} />
-              <CompareKpiCard
-                label="Avg ticket"
-                left={selectedPipelineA.avg_price}
-                right={selectedPipelineB.avg_price}
-                formatter={(value) => formatCurrency(value)}
-              />
-            </div>
-
-            <ResponsiveContainer width="100%" height={280}>
-              <BarChart data={pipelineComparisonChartData}>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                <XAxis dataKey="metric" tick={{ fontSize: 12 }} />
-                <YAxis tick={{ fontSize: 12 }} />
-                <Tooltip formatter={(value) => formatNumber(asChartNumber(value))} />
-                <Bar dataKey="pipelineA" name={selectedPipelineA.pipeline_name} fill="#dc2626" radius={[6, 6, 0, 0]} />
-                <Bar dataKey="pipelineB" name={selectedPipelineB.pipeline_name} fill="#f97316" radius={[6, 6, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
-          </>
-        ) : (
-          <p className="text-sm text-gray-500">No hay pipelines suficientes para comparar.</p>
-        )}
-      </section>
-
       <section className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-        <ChartCard title="Leads creados según pipeline/personal" icon={<Layers size={16} className="text-red-600" />}>
+        <ChartCard title="Leads creados por pipeline actual" icon={<Layers size={16} className="text-red-600" />}>
           <ResponsiveContainer width="100%" height={300}>
-            <BarChart data={data.pipelines}>
+            <BarChart data={data.created.pipeline_volume}>
               <CartesianGrid strokeDasharray="3 3" vertical={false} />
               <XAxis
                 dataKey="pipeline_name"
@@ -922,14 +826,14 @@ function InsightsReportSections({
               />
               <YAxis tick={{ fontSize: 12 }} />
               <Tooltip formatter={(value) => formatNumber(asChartNumber(value))} />
-              <Bar dataKey="total_leads" name="Leads" radius={[8, 8, 0, 0]} fill="#dc2626" />
+              <Bar dataKey="total_leads" name="Creados" radius={[8, 8, 0, 0]} fill="#dc2626" />
             </BarChart>
           </ResponsiveContainer>
         </ChartCard>
 
         <ChartCard title="Horas con más leads entrantes" icon={<Clock3 size={16} className="text-red-600" />}>
           <ResponsiveContainer width="100%" height={300}>
-            <LineChart data={data.hourlyIncoming}>
+            <LineChart data={data.created.hourly_incoming}>
               <CartesianGrid strokeDasharray="3 3" vertical={false} />
               <XAxis dataKey="hour" tickFormatter={formatHour} tick={{ fontSize: 12 }} />
               <YAxis tick={{ fontSize: 12 }} />
@@ -962,7 +866,7 @@ function InsightsReportSections({
           </ResponsiveContainer>
         </ChartCard>
 
-        <ChartCard title="Leads creados por estado + pipeline/personal" icon={<BarChart3 size={16} className="text-red-600" />}>
+        <ChartCard title="Leads creados por estado actual + pipeline" icon={<BarChart3 size={16} className="text-red-600" />}>
           <ResponsiveContainer width="100%" height={300}>
             <BarChart data={statusByPipelineData.rows}>
               <CartesianGrid strokeDasharray="3 3" vertical={false} />
@@ -989,10 +893,10 @@ function InsightsReportSections({
         <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-[0_20px_36px_-30px_rgba(15,23,42,0.8)]">
           <h3 className="inline-flex items-center gap-2 text-sm font-semibold text-gray-800">
             <Users size={16} className="text-red-600" />
-            Top responsables (leads creados)
+            Top responsables actuales (cohort creado)
           </h3>
           <ul className="mt-4 space-y-2 text-sm text-gray-700">
-            {data.owners.slice(0, 5).map((owner) => (
+            {data.created.owner_volume.slice(0, 5).map((owner) => (
               <li key={String(owner.responsible_user_id ?? 'null')} className="flex items-center justify-between rounded-lg border border-gray-100 bg-gray-50/70 px-3 py-2">
                 <span className="truncate pr-3">{owner.responsible_user_name}</span>
                 <span className="font-semibold text-gray-900">{formatNumber(owner.total_leads)}</span>
@@ -1002,25 +906,91 @@ function InsightsReportSections({
         </div>
 
         <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-[0_20px_36px_-30px_rgba(15,23,42,0.8)]">
-          <h3 className="text-sm font-semibold text-gray-800">Insights extra</h3>
+          <h3 className="text-sm font-semibold text-gray-800">Highlights creados / incoming</h3>
           <ul className="mt-4 space-y-2 text-sm text-gray-700">
             <li className="rounded-lg border border-gray-100 bg-gray-50/70 px-3 py-2">
-              Pipeline/personal top (creados): <span className="font-semibold text-gray-900">{data.summary.top_pipeline?.pipeline_name ?? 'N/D'}</span>
+              Pipeline top (creados): <span className="font-semibold text-gray-900">{data.created.summary.top_pipeline?.pipeline_name ?? 'N/D'}</span>
             </li>
             <li className="rounded-lg border border-gray-100 bg-gray-50/70 px-3 py-2">
-              Hora pico incoming: <span className="font-semibold text-gray-900">{data.insights.busiest_hour ? formatHour(data.insights.busiest_hour.hour) : 'N/D'}</span>
+              Responsable actual top: <span className="font-semibold text-gray-900">{data.created.summary.top_owner?.responsible_user_name ?? 'N/D'}</span>
             </li>
             <li className="rounded-lg border border-gray-100 bg-gray-50/70 px-3 py-2">
-              Estado más frecuente: <span className="font-semibold text-gray-900">{data.insights.top_status?.status_name ?? 'N/D'}</span>
+              Hora pico incoming: <span className="font-semibold text-gray-900">{data.created.insights.busiest_hour ? formatHour(data.created.insights.busiest_hour.hour) : 'N/D'}</span>
             </li>
             <li className="rounded-lg border border-gray-100 bg-gray-50/70 px-3 py-2">
-              Win rate referencial (ganados históricos / cerrados creados): <span className="font-semibold text-gray-900">{data.insights.won_rate_over_closed !== null ? `${data.insights.won_rate_over_closed}%` : 'N/D'}</span>
+              Estado actual más frecuente: <span className="font-semibold text-gray-900">{data.created.insights.top_status?.status_name ?? 'N/D'}</span>
             </li>
             <li className="rounded-lg border border-gray-100 bg-gray-50/70 px-3 py-2">
-              Leads sin pipeline: <span className="font-semibold text-gray-900">{formatNumber(data.insights.orphan_pipeline_leads)}</span>
+              Leads sin pipeline: <span className="font-semibold text-gray-900">{formatNumber(data.created.insights.orphan_pipeline_leads)}</span>
             </li>
           </ul>
         </div>
+      </section>
+
+      <section className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+        <ChartCard title="Ganados históricos por vendedor snapshot" icon={<Users size={16} className="text-red-600" />}>
+          <ResponsiveContainer width="100%" height={300}>
+            <BarChart data={data.won.sellers.slice(0, 8)}>
+              <CartesianGrid strokeDasharray="3 3" vertical={false} />
+              <XAxis
+                dataKey="seller_name"
+                tick={{ fontSize: 12 }}
+                tickFormatter={(value) => truncateLabel(String(value), 20)}
+                interval={0}
+                angle={-20}
+                textAnchor="end"
+                height={58}
+              />
+              <YAxis tick={{ fontSize: 12 }} />
+              <Tooltip formatter={(value) => formatNumber(asChartNumber(value))} />
+              <Bar dataKey="total_won" name="Ganados" radius={[8, 8, 0, 0]} fill="#dc2626" />
+            </BarChart>
+          </ResponsiveContainer>
+        </ChartCard>
+
+        <ChartCard title="Ganados históricos por pipeline snapshot" icon={<Layers size={16} className="text-red-600" />}>
+          <ResponsiveContainer width="100%" height={300}>
+            <BarChart data={data.won.pipelines.slice(0, 8)}>
+              <CartesianGrid strokeDasharray="3 3" vertical={false} />
+              <XAxis
+                dataKey="pipeline_name"
+                tick={{ fontSize: 12 }}
+                tickFormatter={(value) => truncateLabel(String(value), 20)}
+                interval={0}
+                angle={-20}
+                textAnchor="end"
+                height={58}
+              />
+              <YAxis tick={{ fontSize: 12 }} />
+              <Tooltip formatter={(value) => formatNumber(asChartNumber(value))} />
+              <Bar dataKey="total_won" name="Ganados" radius={[8, 8, 0, 0]} fill="#f97316" />
+            </BarChart>
+          </ResponsiveContainer>
+        </ChartCard>
+      </section>
+
+      <section className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+        <DataPanel
+          title="Cohort creado por pipeline + estado actual"
+          headers={['Pipeline', 'Creados', 'Abiertos', 'Cerrados', 'Perdidos', 'Ticket prom.']}
+          rows={data.created.pipeline_current_state.slice(0, 10).map((pipeline) => [
+            pipeline.pipeline_name,
+            formatNumber(pipeline.total_leads),
+            formatNumber(pipeline.open_leads),
+            formatNumber(pipeline.closed_leads),
+            formatNumber(pipeline.lost_leads),
+            formatCurrency(pipeline.avg_price),
+          ])}
+        />
+
+        <DataPanel
+          title="Ranking histórico de ganados"
+          headers={['Entidad', 'Ganados']}
+          rows={[
+            ...data.won.sellers.slice(0, 5).map((seller) => [seller.seller_name, formatNumber(seller.total_won)]),
+            ...data.won.pipelines.slice(0, 5).map((pipeline) => [`Pipeline: ${pipeline.pipeline_name}`, formatNumber(pipeline.total_won)]),
+          ]}
+        />
       </section>
     </>
   );
@@ -1038,31 +1008,63 @@ function QuickRangeButton({ label, onClick }: { label: string; onClick: () => vo
   );
 }
 
-function CompareKpiCard({
-  label,
-  left,
-  right,
-  formatter = (value) => formatNumber(Number(value ?? 0)),
-}: {
-  label: string;
-  left: number | null;
-  right: number | null;
-  formatter?: (value: number | null) => string;
-}) {
+function KpiCard({ title, value, compact = false }: { title: string; value: string; compact?: boolean }) {
   return (
-    <div className="rounded-xl border border-gray-200 bg-gray-50/60 p-3">
-      <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">{label}</p>
-      <p className="mt-2 text-sm font-semibold text-gray-900">A: {formatter(left)}</p>
-      <p className="text-sm font-semibold text-gray-900">B: {formatter(right)}</p>
+    <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-[0_20px_42px_-34px_rgba(15,23,42,0.9)]">
+      <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">{title}</p>
+      <p className={`${compact ? 'text-lg' : 'text-2xl'} mt-1 font-bold text-gray-900`}>{value}</p>
     </div>
   );
 }
 
-function KpiCard({ title, value }: { title: string; value: string }) {
+function SemanticSectionCard({
+  title,
+  description,
+  children,
+}: {
+  title: string;
+  description: string;
+  children: ReactNode;
+}) {
   return (
-    <div className="bg-white p-4 rounded-2xl shadow-[0_20px_42px_-34px_rgba(15,23,42,0.9)] border border-gray-200">
-      <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">{title}</p>
-      <p className="text-2xl font-bold text-gray-900 mt-1">{value}</p>
+    <section className="space-y-4 rounded-2xl border border-gray-200 bg-white p-5 shadow-[0_20px_36px_-30px_rgba(15,23,42,0.8)]">
+      <div>
+        <h3 className="text-sm font-semibold text-gray-900">{title}</h3>
+        <p className="mt-1 text-sm text-gray-500">{description}</p>
+      </div>
+      {children}
+    </section>
+  );
+}
+
+function DataPanel({ title, headers, rows }: { title: string; headers: string[]; rows: string[][] }) {
+  return (
+    <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-[0_20px_36px_-30px_rgba(15,23,42,0.8)]">
+      <h3 className="mb-4 text-sm font-semibold text-gray-800">{title}</h3>
+      <div className="overflow-x-auto">
+        <table className="min-w-full text-sm">
+          <thead>
+            <tr className="border-b border-gray-200 text-left text-xs uppercase tracking-wide text-gray-500">
+              {headers.map((header) => (
+                <th key={header} className="px-3 py-2 font-semibold">{header}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {rows.length === 0 ? (
+              <tr>
+                <td colSpan={headers.length} className="px-3 py-4 text-gray-500">Sin datos disponibles.</td>
+              </tr>
+            ) : rows.map((row, rowIndex) => (
+              <tr key={`${title}-${rowIndex}`} className="border-b border-gray-100 last:border-b-0">
+                {row.map((cell, cellIndex) => (
+                  <td key={`${title}-${rowIndex}-${cellIndex}`} className="px-3 py-2 text-gray-700">{cell}</td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }
@@ -1070,7 +1072,7 @@ function KpiCard({ title, value }: { title: string; value: string }) {
 function ChartCard({ title, icon, children }: { title: string; icon: ReactNode; children: ReactNode }) {
   return (
     <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-[0_20px_36px_-30px_rgba(15,23,42,0.8)]">
-      <h3 className="text-sm font-semibold text-gray-800 inline-flex items-center gap-2 mb-3">
+      <h3 className="mb-3 inline-flex items-center gap-2 text-sm font-semibold text-gray-800">
         {icon}
         {title}
       </h3>
