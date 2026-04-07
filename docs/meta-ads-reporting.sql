@@ -142,6 +142,40 @@ before update on public.meta_ad_insights_daily
 for each row
 execute function public.set_updated_at();
 
+create table if not exists public.meta_sync_runs (
+  id uuid primary key default gen_random_uuid(),
+  provider text not null,
+  resource text not null,
+  sync_type text not null default 'manual',
+  account_business_id text,
+  started_at timestamptz not null default now(),
+  finished_at timestamptz,
+  duration_ms integer,
+  success boolean,
+  early_stop jsonb,
+  totals jsonb,
+  resources jsonb,
+  request_params jsonb,
+  error_message text,
+  created_at_db timestamptz not null default now(),
+  updated_at_db timestamptz not null default now()
+);
+
+create index if not exists meta_sync_runs_provider_resource_started_at_idx
+  on public.meta_sync_runs (provider, resource, started_at desc);
+
+create index if not exists meta_sync_runs_account_business_id_started_at_idx
+  on public.meta_sync_runs (account_business_id, started_at desc);
+
+create index if not exists meta_sync_runs_success_idx
+  on public.meta_sync_runs (success);
+
+drop trigger if exists set_meta_sync_runs_updated_at_db on public.meta_sync_runs;
+create trigger set_meta_sync_runs_updated_at_db
+before update on public.meta_sync_runs
+for each row
+execute function public.set_updated_at();
+
 create or replace view public.meta_ads_reporting_daily as
 select
   insight.id as insight_row_id,
