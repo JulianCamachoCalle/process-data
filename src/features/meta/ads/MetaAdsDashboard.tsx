@@ -17,6 +17,8 @@ import {
 } from './metaAdsUtils';
 import { useMetaAdsReporting } from './useMetaAdsReporting';
 
+const HOURLY_COLORS = ['#dc2626', '#f97316', '#ea580c', '#b91c1c', '#7f1d1d'];
+
 export function MetaAdsDashboard() {
   const [accountId, setAccountId] = useState('');
   const [dateFrom, setDateFrom] = useState('');
@@ -32,6 +34,7 @@ export function MetaAdsDashboard() {
 
   const dashboard = useMemo(() => {
     const rows = reportingQuery.data?.rows ?? [];
+    const hourlyRows = reportingQuery.data?.hourlyRows ?? [];
     const totalSpend = sumBy(rows, (row) => row.spend);
     const totalImpressions = sumBy(rows, (row) => row.impressions);
     const totalReach = sumBy(rows, (row) => row.reach);
@@ -85,6 +88,37 @@ export function MetaAdsDashboard() {
       getCreativeName: (row) => row.creative_name ?? row.creative_id ?? 'Sin creative',
     });
 
+    const adIdsInScope = new Set(rows.map((row) => row.ad_business_id).filter(Boolean));
+    const scopedHourlyRows = hourlyRows.filter((row) => adIdsInScope.has(row.ad_business_id));
+
+    const hourlyByDateMap = new Map<string, number[]>();
+    for (const row of scopedHourlyRows) {
+      const hour = parseHourFromBucket(row.hour_bucket);
+      if (hour === null) continue;
+
+      const date = row.date_start;
+      const current = hourlyByDateMap.get(date) ?? Array<number>(24).fill(0);
+      current[hour] += Number(row.clicks ?? 0);
+      hourlyByDateMap.set(date, current);
+    }
+
+    const selectedHourlyDates = Array.from(hourlyByDateMap.keys())
+      .sort()
+      .slice(-5);
+
+    const hourlyTrendByDay = Array.from({ length: 24 }).map((_, hour) => {
+      const row: Record<string, string | number> = {
+        hour,
+        label: `${String(hour).padStart(2, '0')}:00`,
+      };
+
+      for (const date of selectedHourlyDates) {
+        row[date] = hourlyByDateMap.get(date)?.[hour] ?? 0;
+      }
+
+      return row;
+    });
+
     return {
       totalSpend,
       totalImpressions,
@@ -101,8 +135,10 @@ export function MetaAdsDashboard() {
       topAdsByClicks,
       campaignPerformance,
       adPerformance,
+      hourlyTrendByDay,
+      selectedHourlyDates,
     };
-  }, [reportingQuery.data?.rows]);
+  }, [reportingQuery.data?.hourlyRows, reportingQuery.data?.rows]);
 
   const accounts = reportingQuery.data?.accounts ?? [];
   const isFiltersDirty = accountId !== draftAccountId || dateFrom !== draftDateFrom || dateTo !== draftDateTo;
@@ -265,6 +301,34 @@ export function MetaAdsDashboard() {
             </ResponsiveContainer>
           </ChartCard>
         </div>
+
+        <ChartCard title="Tendencia por hora x día (Clicks)" icon={<LineChartIcon size={16} className="text-red-600" />}>
+          {dashboard.selectedHourlyDates.length === 0 ? (
+            <div className="rounded-xl border border-dashed border-gray-200 bg-gray-50 px-4 py-6 text-sm text-gray-500">
+              Todavía no hay data horaria. Ejecutá sync de Meta Ads con breakdown horario.
+            </div>
+          ) : (
+            <ResponsiveContainer width="100%" height={320}>
+              <LineChart data={dashboard.hourlyTrendByDay}>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                <XAxis dataKey="label" tick={{ fontSize: 12 }} />
+                <YAxis tick={{ fontSize: 12 }} allowDecimals={false} />
+                <Tooltip formatter={(value) => formatCompactMetric(Number(value ?? 0), 'number')} />
+                {dashboard.selectedHourlyDates.map((date, index) => (
+                  <Line
+                    key={date}
+                    type="monotone"
+                    dataKey={date}
+                    name={date}
+                    stroke={HOURLY_COLORS[index % HOURLY_COLORS.length]}
+                    strokeWidth={2.1}
+                    dot={{ r: 1.8 }}
+                  />
+                ))}
+              </LineChart>
+            </ResponsiveContainer>
+          )}
+        </ChartCard>
       </Section>
 
       <Section title="Top performers">
@@ -426,9 +490,9 @@ function UnifiedComparisonCard({
       <div className="overflow-x-auto rounded-2xl border border-gray-200 bg-white shadow-[0_14px_30px_-24px_rgba(15,23,42,0.75)]">
         <table className="min-w-full table-fixed text-sm">
           <colgroup>
-            <col className="w-[32%]" />
-            <col className="w-[34%]" />
-            <col className="w-[34%]" />
+            <col className="w-[20%]" />
+            <col className="w-[40%]" />
+            <col className="w-[40%]" />
           </colgroup>
           <thead>
             <tr className="text-left text-xs uppercase tracking-[0.2em] text-gray-500 bg-gray-50 border-y border-gray-200">
@@ -440,7 +504,7 @@ function UnifiedComparisonCard({
           <tbody>
             {metrics.map((metric) => (
               <tr key={metric.label} className="border-t border-gray-100 text-gray-700 even:bg-gray-50/35">
-                <td className="py-3.5 pr-3 pl-4 font-semibold text-gray-900">{metric.label}</td>
+                <td className="py-3.5 pr-3 pl-4 font-extrabold uppercase text-gray-700">{metric.label}</td>
                 <td className={`py-3.5 px-3 text-base tabular-nums ${getComparisonCellClassName(metric, 'left')}`}>{formatCompactMetric(metric.leftValue, metric.format)}</td>
                 <td className={`py-3.5 px-3 pr-4 text-base tabular-nums ${getComparisonCellClassName(metric, 'right')}`}>{formatCompactMetric(metric.rightValue, metric.format)}</td>
               </tr>
@@ -593,4 +657,13 @@ function resolveComparisonSelection(
     left: leftResolved,
     right,
   };
+}
+
+function parseHourFromBucket(hourBucket: string) {
+  const match = String(hourBucket ?? '').trim().match(/^(\d{1,2})/);
+  if (!match) return null;
+
+  const hour = Number.parseInt(match[1] ?? '', 10);
+  if (!Number.isInteger(hour) || hour < 0 || hour > 23) return null;
+  return hour;
 }

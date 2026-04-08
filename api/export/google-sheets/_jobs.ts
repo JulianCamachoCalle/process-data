@@ -41,9 +41,9 @@ const ENVIOS_EXPORT_COLUMNS = [
   'Cobro Entrega',
   'Pago moto',
   'Excedente pagado moto',
-  'ingreso total fila',
-  'costo total fila',
-  'observaciones',
+  'Ingreso total fila',
+  'Costo total fila',
+  'Observaciones',
   'Tipo Punto',
   'Extra punto moto',
   'Extra punto empresa',
@@ -195,14 +195,14 @@ function getAlignmentByHeader(header: string) {
   }
 
   if (
-    normalized.includes('cobro')
-    || normalized.includes('pago')
-    || normalized.includes('ingreso')
-    || normalized.includes('costo')
-    || normalized.includes('extra')
-    || normalized.includes('cantidad')
-    || normalized.includes('veces')
-    || normalized.includes('dias')
+    normalized.includes('Cobro')
+    || normalized.includes('Pago')
+    || normalized.includes('Ingreso')
+    || normalized.includes('Costo')
+    || normalized.includes('Extra')
+    || normalized.includes('Cantidad')
+    || normalized.includes('Veces')
+    || normalized.includes('Dias')
     || normalized.includes('anulados')
   ) {
     return 'RIGHT' as const;
@@ -219,11 +219,11 @@ function isCurrencyHeader(header: string) {
   }
 
   return (
-    normalized.includes('cobro')
-    || normalized.includes('pago')
-    || normalized.includes('ingreso')
-    || normalized.includes('costo')
-    || normalized.includes('extra')
+    normalized.includes('Cobro')
+    || normalized.includes('Pago')
+    || normalized.includes('Ingreso')
+    || normalized.includes('Costo')
+    || normalized.includes('Extra')
   );
 }
 
@@ -515,8 +515,8 @@ async function fetchEnviosRows(dateFrom: string, dateTo: string) {
       'Cobro Entrega': formatCost(row.cobro_entrega),
       'Pago moto': formatCost(row.pago_moto),
       'Excedente pagado moto': formatCost(row.excedente_pagado_moto),
-      'ingreso total fila': formatCost(row.ingreso_total_fila),
-      'costo total fila': formatCost(row.costo_total_fila),
+      'Ingreso total fila': formatCost(row.ingreso_total_fila),
+      'Costo total fila': formatCost(row.costo_total_fila),
       observaciones: String(row.observaciones ?? ''),
       'Tipo Punto': tipoPuntoById.get(Number(row.id_tipo_punto)) ?? '',
       'Extra punto moto': formatCost(row.extra_punto_moto),

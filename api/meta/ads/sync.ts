@@ -11,6 +11,7 @@ const META_GRAPH_BASE_URL = `https://graph.facebook.com/${META_GRAPH_VERSION}`;
 const SYNC_SECRET_HEADER = 'x-meta-sync-secret';
 const SYNC_SECRET_ENV = 'META_SYNC_SECRET';
 const DEFAULT_ACCOUNT_ID_ENV = 'META_ADS_ACCOUNT_ID';
+const DEFAULT_INSTAGRAM_USER_ID_ENV = 'META_INSTAGRAM_USER_ID';
 const DEFAULT_LIMIT = 100;
 const DEFAULT_MAX_PAGES = 10;
 const DEFAULT_MAX_RUNTIME_MS = 45_000;
@@ -57,6 +58,8 @@ type EarlyStopInfo = {
   resource: keyof SyncSummary;
   reason: 'max_runtime_ms';
 };
+
+type MetaSyncResource = 'ads' | 'instagram';
 
 type MetaAccountRow = {
   business_id: string;
@@ -111,6 +114,19 @@ type MetaInsightRow = {
   ad_business_id: string;
   date_start: string;
   date_stop: string;
+  spend: number;
+  impressions: number;
+  reach: number;
+  clicks: number;
+  ctr: number | null;
+  cpc: number | null;
+  raw_payload: JsonRecord;
+};
+
+type MetaInsightHourlyRow = {
+  ad_business_id: string;
+  date_start: string;
+  hour_bucket: string;
   spend: number;
   impressions: number;
   reach: number;
@@ -193,6 +209,26 @@ function resolveAccountId(req: VercelRequest, body: JsonRecord) {
   }
 
   throw new Error('El parámetro account_id es obligatorio. También podés configurar META_ADS_ACCOUNT_ID para corridas automáticas.');
+}
+
+function resolveSyncResource(req: VercelRequest, body: JsonRecord): MetaSyncResource {
+  const value = (getRequestParam(req, body, 'resource') ?? 'ads').trim().toLowerCase();
+
+  if (value === 'ads' || value === 'instagram') {
+    return value;
+  }
+
+  throw new Error('resource inválido. Permitidos: ads | instagram');
+}
+
+function resolveInstagramUserId(req: VercelRequest, body: JsonRecord) {
+  const requestValue = getRequestParam(req, body, 'instagram_user_id')?.trim();
+  if (requestValue) return requestValue;
+
+  const envValue = process.env[DEFAULT_INSTAGRAM_USER_ID_ENV]?.trim();
+  if (envValue) return envValue;
+
+  throw new Error('instagram_user_id es obligatorio. También podés configurar META_INSTAGRAM_USER_ID.');
 }
 
 function requireMetaAccessToken() {
@@ -414,6 +450,42 @@ async function syncPagedResource<TItem, TRow extends JsonRecord>(options: {
   };
 }
 
+async function fetchMetaCollection(options: {
+  token: string;
+  path: string;
+  params: Record<string, string>;
+  maxPages: number;
+  startedAt: number;
+  maxRuntimeMs: number;
+}) {
+  const rows: JsonRecord[] = [];
+  let pagesFetched = 0;
+  let nextUrl: string | null = options.path;
+  let params: Record<string, string> | undefined = options.params;
+  let stoppedEarly = false;
+
+  while (nextUrl && pagesFetched < options.maxPages) {
+    if (!hasRuntimeBudget(options.startedAt, options.maxRuntimeMs)) {
+      stoppedEarly = true;
+      break;
+    }
+
+    const payload = await fetchMetaJson(options.token, nextUrl, params);
+    params = undefined;
+    const items = Array.isArray(payload.data) ? payload.data as JsonRecord[] : [];
+    rows.push(...items);
+    pagesFetched += 1;
+    nextUrl = getPagingNext(payload);
+  }
+
+  return {
+    rows,
+    pages_fetched: pagesFetched,
+    has_more: stoppedEarly || nextUrl !== null,
+    stopped_early: stoppedEarly,
+  };
+}
+
 function mapAccountRow(accountBusinessId: string, payload: JsonRecord): MetaAccountRow {
   return {
     business_id: accountBusinessId,
@@ -508,6 +580,29 @@ function mapInsightRow(payload: JsonRecord): MetaInsightRow | null {
   };
 }
 
+function mapInsightHourlyRow(payload: JsonRecord): MetaInsightHourlyRow | null {
+  const adBusinessId = toNullableText(payload.ad_id);
+  const dateStart = toNullableText(payload.date_start);
+  const hourBucket = toNullableText(payload.hourly_stats_aggregated_by_advertiser_time_zone);
+
+  if (!adBusinessId || !dateStart || !hourBucket) {
+    return null;
+  }
+
+  return {
+    ad_business_id: adBusinessId,
+    date_start: dateStart,
+    hour_bucket: hourBucket,
+    spend: toNumberOrZero(payload.spend),
+    impressions: Math.trunc(toNumberOrZero(payload.impressions)),
+    reach: Math.trunc(toNumberOrZero(payload.reach)),
+    clicks: Math.trunc(toNumberOrZero(payload.clicks)),
+    ctr: toNullableNumber(payload.ctr),
+    cpc: toNullableNumber(payload.cpc),
+    raw_payload: payload,
+  };
+}
+
 export default async function metaAdsSyncHandler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'GET' && req.method !== 'POST') {
     return res.status(405).json({ error: 'Método no permitido' });
@@ -528,7 +623,8 @@ export default async function metaAdsSyncHandler(req: VercelRequest, res: Vercel
     }
 
     const body = parseBodyObject(req);
-    const accountBusinessId = resolveAccountId(req, body);
+    const resource = resolveSyncResource(req, body);
+    const accountBusinessId = resource === 'ads' ? resolveAccountId(req, body) : null;
     accountBusinessIdForRun = accountBusinessId;
     const datePreset = getRequestParam(req, body, 'date_preset')?.trim() || 'last_30d';
     const timeIncrement = getRequestParam(req, body, 'time_increment')?.trim() || '1';
@@ -544,12 +640,13 @@ export default async function metaAdsSyncHandler(req: VercelRequest, res: Vercel
 
     syncRunId = await createSyncRun({
       provider: 'meta',
-      resource: 'ads',
+      resource,
       sync_type: secretAuthorized ? 'secret' : 'manual',
       account_business_id: accountBusinessId,
       started_at: new Date(startedAt).toISOString(),
       request_params: {
         account_id: accountBusinessId,
+        resource,
         date_preset: datePreset,
         time_increment: timeIncrement,
         limit,
@@ -557,6 +654,79 @@ export default async function metaAdsSyncHandler(req: VercelRequest, res: Vercel
         max_runtime_ms: maxRuntimeMs,
       },
     });
+
+    if (resource === 'instagram') {
+      const instagramUserId = resolveInstagramUserId(req, body);
+
+      const profilePayload = await fetchMetaJson(token, instagramUserId, {
+        fields: 'id,username,name,followers_count,follows_count,media_count,profile_picture_url',
+      });
+
+      const mediaResult = await fetchMetaCollection({
+        token,
+        path: `${instagramUserId}/media`,
+        params: {
+          fields: 'id,caption,media_type,media_url,permalink,timestamp,like_count,comments_count',
+          limit: String(limit),
+        },
+        maxPages,
+        startedAt,
+        maxRuntimeMs,
+      });
+
+      const durationMs = Date.now() - startedAt;
+      const responsePayload = {
+        success: true,
+        resource,
+        instagram_user_id: instagramUserId,
+        duration_ms: durationMs,
+        profile: {
+          id: toNullableText(profilePayload.id),
+          username: toNullableText(profilePayload.username),
+          name: toNullableText(profilePayload.name),
+          followers_count: toNumberOrZero(profilePayload.followers_count),
+          follows_count: toNumberOrZero(profilePayload.follows_count),
+          media_count: toNumberOrZero(profilePayload.media_count),
+          profile_picture_url: toNullableText(profilePayload.profile_picture_url),
+        },
+        media: {
+          pages_fetched: mediaResult.pages_fetched,
+          pulled: mediaResult.rows.length,
+          has_more: mediaResult.has_more,
+          stopped_early: mediaResult.stopped_early,
+          rows: mediaResult.rows,
+        },
+      };
+
+      await finalizeSyncRun(syncRunId, {
+        finished_at: new Date().toISOString(),
+        duration_ms: durationMs,
+        success: true,
+        early_stop: mediaResult.stopped_early
+          ? { resource: 'insights', reason: 'max_runtime_ms' }
+          : null,
+        totals: {
+          pulled: mediaResult.rows.length,
+          upserted: 0,
+        },
+        resources: {
+          profile: { pulled: 1, upserted: 0 },
+          media: {
+            pages_fetched: mediaResult.pages_fetched,
+            pulled: mediaResult.rows.length,
+            upserted: 0,
+            has_more: mediaResult.has_more,
+          },
+        },
+        error_message: null,
+      });
+
+      return res.status(200).json(responsePayload);
+    }
+
+    if (!accountBusinessId) {
+      throw new Error('account_id es obligatorio para resource=ads.');
+    }
 
     const baseSummary: SyncSummary = {
       account: { pages_fetched: 1, pulled: 1, upserted: 0, has_more: false },
@@ -658,6 +828,36 @@ export default async function metaAdsSyncHandler(req: VercelRequest, res: Vercel
       });
       baseSummary.insights = insightsResult.summary;
       earlyStop = insightsResult.earlyStop;
+    }
+
+    if (!earlyStop) {
+      try {
+        const hourlyInsightsResult = await syncPagedResource<JsonRecord, MetaInsightHourlyRow>({
+          token,
+          label: 'insights',
+          path: `${accountBusinessId}/insights`,
+          params: {
+            level: 'ad',
+            fields: 'ad_id,date_start,spend,impressions,reach,clicks,ctr,cpc,hourly_stats_aggregated_by_advertiser_time_zone',
+            breakdowns: 'hourly_stats_aggregated_by_advertiser_time_zone',
+            date_preset: datePreset,
+            time_increment: '1',
+            limit: String(limit),
+          },
+          maxPages,
+          startedAt,
+          maxRuntimeMs,
+          mapItem: mapInsightHourlyRow,
+          table: 'meta_ad_insights_hourly',
+          onConflict: 'ad_business_id,date_start,hour_bucket',
+        });
+
+        if (!earlyStop) {
+          earlyStop = hourlyInsightsResult.earlyStop;
+        }
+      } catch (hourlyError) {
+        console.warn('[meta-ads-sync] hourly insights skipped:', hourlyError);
+      }
     }
 
     const durationMs = Date.now() - startedAt;
