@@ -170,7 +170,7 @@ export function GoogleSheetsExportTester() {
         <div className="mt-5 rounded-xl border border-amber-200 bg-amber-50 p-4 text-xs text-amber-900 space-y-2">
           <p className="font-semibold uppercase tracking-[0.12em]">Configuración necesaria</p>
           <ul className="list-disc pl-5 space-y-1">
-            <li>1. Cambia la accesibilidad del Google Sheet a público</li>
+            <li>1. Cambia la accesibilidad del Google Sheet y compartelo como editor a esta cuenta (app-sheets-reader@logistics-dashboard-491801.iam.gserviceaccount.com)</li>
             <li>2. Copia el ID del Google Sheet (lo que va entre /d/ y /edit)</li>
             <li>3. Pega el ID en el campo SpreadSheet ID</li>
             <li>4. Rellena los otros campos correspondientes </li>

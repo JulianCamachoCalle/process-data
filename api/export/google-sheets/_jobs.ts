@@ -100,43 +100,11 @@ function parseDateInput(value: string) {
   return Number.isNaN(parsed.getTime()) ? null : value;
 }
 
-async function selectAllRowsPaginated(
-  table: string,
-  columns: string,
-  orderByColumn: string,
-) {
-  const supabase = getSupabaseAdminClient();
-  const rows: Array<Record<string, unknown>> = [];
-  const batchSize = 1000;
-  let from = 0;
-
-  while (true) {
-    const to = from + batchSize - 1;
-    const { data, error } = await supabase
-      .from(table as never)
-      .select(columns as never)
-      .order(orderByColumn as never, { ascending: true })
-      .range(from, to);
-
-    if (error) {
-      throw new Error(error.message || `No se pudo consultar ${table}.`);
-    }
-
-    const chunk = (data ?? []) as Array<Record<string, unknown>>;
-    rows.push(...chunk);
-
-    if (chunk.length < batchSize) break;
-    from += batchSize;
-  }
-
-  return rows;
-}
-
 function normalizeDateForCompare(raw: unknown): string | null {
   const value = String(raw ?? '').trim();
   if (!value) return null;
 
-  const isoMatch = value.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  const isoMatch = value.match(/^(\d{4})-(\d{2})-(\d{2})/);
   if (isoMatch) {
     return `${isoMatch[1]}-${isoMatch[2]}-${isoMatch[3]}`;
   }
@@ -160,8 +128,57 @@ function isDateInRange(raw: unknown, dateFrom: string, dateTo: string) {
   return comparable >= dateFrom && comparable <= dateTo;
 }
 
+async function selectAllRowsPaginated(
+  table: string,
+  columns: string,
+  orderByColumn: string,
+  dateFilter?: {
+    column: string;
+    from: string;
+    to: string;
+  },
+) {
+  const supabase = getSupabaseAdminClient();
+  const rows: Array<Record<string, unknown>> = [];
+  const batchSize = 1000;
+  let from = 0;
+
+  while (true) {
+    const to = from + batchSize - 1;
+    let query = supabase
+      .from(table as never)
+      .select(columns as never)
+      .order(orderByColumn as never, { ascending: true })
+      .range(from, to);
+
+    if (dateFilter) {
+      query = query
+        .gte(dateFilter.column as never, dateFilter.from as never)
+        .lte(dateFilter.column as never, dateFilter.to as never);
+    }
+
+    const { data, error } = await query;
+
+    if (error) {
+      throw new Error(error.message || `No se pudo consultar ${table}.`);
+    }
+
+    const chunk = (data ?? []) as Array<Record<string, unknown>>;
+    rows.push(...chunk);
+
+    if (chunk.length < batchSize) break;
+    from += batchSize;
+  }
+
+  return rows;
+}
+
 function getAlignmentByHeader(header: string) {
   const normalized = header.trim().toLowerCase();
+
+  if (normalized.includes('fecha')) {
+    return 'CENTER' as const;
+  }
 
   if (
     normalized.includes('cobro')
@@ -176,15 +193,16 @@ function getAlignmentByHeader(header: string) {
     return 'RIGHT' as const;
   }
 
-  if (normalized.includes('fecha')) {
-    return 'CENTER' as const;
-  }
-
   return 'LEFT' as const;
 }
 
 function isCurrencyHeader(header: string) {
   const normalized = header.trim().toLowerCase();
+
+  if (normalized.includes('fecha')) {
+    return false;
+  }
+
   return (
     normalized.includes('cobro')
     || normalized.includes('pago')
@@ -333,6 +351,28 @@ async function applyBasicSheetStyles(
         });
       }
     }
+
+    requests.push({
+      autoResizeDimensions: {
+        dimensions: {
+          sheetId: sheet.sheetId,
+          dimension: 'COLUMNS',
+          startIndex: 0,
+          endIndex: columnsCount,
+        },
+      },
+    });
+
+    requests.push({
+      autoResizeDimensions: {
+        dimensions: {
+          sheetId: sheet.sheetId,
+          dimension: 'ROWS',
+          startIndex: 0,
+          endIndex: rowsCount + 1,
+        },
+      },
+    });
   }
 
   await applySheetBatchUpdate(spreadsheetId, requests);
@@ -395,6 +435,7 @@ async function fetchEnviosRows(dateFrom: string, dateTo: string) {
       'envios',
       'fecha_envio,id_lead_ganado,id_destino,id_resultado,cobro_entrega,pago_moto,excedente_pagado_moto,ingreso_total_fila,costo_total_fila,observaciones,id_tipo_punto,extra_punto_moto,extra_punto_empresa',
       'fecha_envio',
+      { column: 'fecha_envio', from: dateFrom, to: dateTo },
     ),
     selectAllRowsPaginated(
       'leads_ganados',
@@ -405,6 +446,14 @@ async function fetchEnviosRows(dateFrom: string, dateTo: string) {
     supabase.from('resultados' as never).select('business_id,resultado' as never),
     supabase.from('tipo_punto' as never).select('business_id,tipo_punto' as never),
   ]);
+
+  const enviosRows = enviosRowsRaw.length > 0
+    ? enviosRowsRaw
+    : (await selectAllRowsPaginated(
+      'envios',
+      'fecha_envio,id_lead_ganado,id_destino,id_resultado,cobro_entrega,pago_moto,excedente_pagado_moto,ingreso_total_fila,costo_total_fila,observaciones,id_tipo_punto,extra_punto_moto,extra_punto_empresa',
+      'fecha_envio',
+    )).filter((row) => isDateInRange(row.fecha_envio, dateFrom, dateTo));
 
   const leadsById = new Map<number, { tienda: string; vendedor: string; fullfilment: string }>();
   for (const row of leadsRowsRaw) {
@@ -435,8 +484,7 @@ async function fetchEnviosRows(dateFrom: string, dateTo: string) {
     if (Number.isFinite(id)) tipoPuntoById.set(id, String(row.tipo_punto ?? ''));
   }
 
-  const mapped = enviosRowsRaw
-    .filter((row) => isDateInRange(row.fecha_envio, dateFrom, dateTo))
+  const mapped = enviosRows
     .map((row) => {
     const leadId = Number(row.id_lead_ganado);
     const lead = leadsById.get(leadId);
@@ -472,10 +520,18 @@ async function fetchLeadsGanadosRows(dateFrom: string, dateTo: string) {
     'leads_ganados',
     'fecha_ingreso_lead,fecha_lead_ganado,dias_lead_a_ganado,notas,distrito,cantidad_envios,anulados_fullfilment,ingreso_anulados_fullfilment,tienda_nombre_snapshot,vendedor_nombre_snapshot,origen_snapshot,fullfilment_snapshot',
     'fecha_lead_ganado',
+    { column: 'fecha_lead_ganado', from: dateFrom, to: dateTo },
   );
 
-  const mapped = rowsRaw
-    .filter((row) => isDateInRange(row.fecha_lead_ganado, dateFrom, dateTo))
+  const leadsRows = rowsRaw.length > 0
+    ? rowsRaw
+    : (await selectAllRowsPaginated(
+      'leads_ganados',
+      'fecha_ingreso_lead,fecha_lead_ganado,dias_lead_a_ganado,notas,distrito,cantidad_envios,anulados_fullfilment,ingreso_anulados_fullfilment,tienda_nombre_snapshot,vendedor_nombre_snapshot,origen_snapshot,fullfilment_snapshot',
+      'fecha_lead_ganado',
+    )).filter((row) => isDateInRange(row.fecha_lead_ganado, dateFrom, dateTo));
+
+  const mapped = leadsRows
     .map((row) => ({
       Tienda: String(row.tienda_nombre_snapshot ?? ''),
       Vendedor: String(row.vendedor_nombre_snapshot ?? ''),
