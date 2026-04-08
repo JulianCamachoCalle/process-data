@@ -59,6 +59,15 @@ type EarlyStopInfo = {
   reason: 'max_runtime_ms';
 };
 
+type HourlySyncDebug = {
+  pages_fetched: number;
+  pulled: number;
+  upserted: number;
+  has_more: boolean;
+  skipped: boolean;
+  error: string | null;
+};
+
 type MetaSyncResource = 'ads' | 'instagram';
 
 type MetaAccountRow = {
@@ -830,6 +839,15 @@ export default async function metaAdsSyncHandler(req: VercelRequest, res: Vercel
       earlyStop = insightsResult.earlyStop;
     }
 
+    let hourlyDebug: HourlySyncDebug = {
+      pages_fetched: 0,
+      pulled: 0,
+      upserted: 0,
+      has_more: false,
+      skipped: true,
+      error: null,
+    };
+
     if (!earlyStop) {
       try {
         const hourlyInsightsResult = await syncPagedResource<JsonRecord, MetaInsightHourlyRow>({
@@ -852,11 +870,29 @@ export default async function metaAdsSyncHandler(req: VercelRequest, res: Vercel
           onConflict: 'ad_business_id,date_start,hour_bucket',
         });
 
+        hourlyDebug = {
+          pages_fetched: hourlyInsightsResult.summary.pages_fetched,
+          pulled: hourlyInsightsResult.summary.pulled,
+          upserted: hourlyInsightsResult.summary.upserted,
+          has_more: hourlyInsightsResult.summary.has_more,
+          skipped: false,
+          error: null,
+        };
+
         if (!earlyStop) {
           earlyStop = hourlyInsightsResult.earlyStop;
         }
       } catch (hourlyError) {
-        console.warn('[meta-ads-sync] hourly insights skipped:', hourlyError);
+        const message = hourlyError instanceof Error ? hourlyError.message : String(hourlyError);
+        hourlyDebug = {
+          pages_fetched: 0,
+          pulled: 0,
+          upserted: 0,
+          has_more: false,
+          skipped: true,
+          error: message,
+        };
+        console.warn('[meta-ads-sync] hourly insights skipped:', message);
       }
     }
 
@@ -870,13 +906,18 @@ export default async function metaAdsSyncHandler(req: VercelRequest, res: Vercel
       { pulled: 0, upserted: 0 },
     );
 
+    const resourcesPayload: JsonRecord = {
+      ...baseSummary,
+      insights_hourly: hourlyDebug,
+    };
+
     await finalizeSyncRun(syncRunId, {
       finished_at: new Date().toISOString(),
       duration_ms: durationMs,
       success: true,
       early_stop: earlyStop,
       totals,
-      resources: baseSummary,
+      resources: resourcesPayload,
       error_message: null,
     });
 
@@ -891,7 +932,7 @@ export default async function metaAdsSyncHandler(req: VercelRequest, res: Vercel
       early_stop: earlyStop,
       duration_ms: durationMs,
       totals,
-      resources: baseSummary,
+      resources: resourcesPayload,
     });
   } catch (error) {
     const durationMs = Date.now() - startedAt;
