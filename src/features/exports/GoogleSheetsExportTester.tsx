@@ -167,16 +167,6 @@ export function GoogleSheetsExportTester() {
         {message ? <p className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">{message}</p> : null}
         {error ? <p className="mt-4 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p> : null}
 
-        {job ? (
-          <div className="mt-4 rounded-xl border border-gray-200 bg-gray-50 p-4 text-sm text-gray-700">
-            <p><span className="font-semibold">Job:</span> {job.id}</p>
-            <p><span className="font-semibold">Estado:</span> {job.status}</p>
-            <p><span className="font-semibold">Filas procesadas:</span> {job.processed_rows}</p>
-            <p><span className="font-semibold">Filas exportadas:</span> {job.exported_rows}</p>
-            {job.error_message ? <p className="text-red-700"><span className="font-semibold">Error:</span> {job.error_message}</p> : null}
-          </div>
-        ) : null}
-
         <div className="mt-5 rounded-xl border border-amber-200 bg-amber-50 p-4 text-xs text-amber-900 space-y-2">
           <p className="font-semibold uppercase tracking-[0.12em]">Configuración necesaria</p>
           <ul className="list-disc pl-5 space-y-1">
