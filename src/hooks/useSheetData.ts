@@ -830,8 +830,6 @@ async function fetchRecojoReferenceData(): Promise<RecojoReferenceData> {
   const tipoCobroOptions = Array.from(
     new Set([
       ...Array.from(tipoRecojoLabelById.values()).map((value) => String(value ?? '').trim()).filter(Boolean),
-      'Cobrado',
-      'Gratis',
     ]),
   );
 
