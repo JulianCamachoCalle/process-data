@@ -100,6 +100,38 @@ function parseDateInput(value: string) {
   return Number.isNaN(parsed.getTime()) ? null : value;
 }
 
+async function selectAllRowsPaginated(
+  table: string,
+  columns: string,
+  orderByColumn: string,
+) {
+  const supabase = getSupabaseAdminClient();
+  const rows: Array<Record<string, unknown>> = [];
+  const batchSize = 1000;
+  let from = 0;
+
+  while (true) {
+    const to = from + batchSize - 1;
+    const { data, error } = await supabase
+      .from(table as never)
+      .select(columns as never)
+      .order(orderByColumn as never, { ascending: true })
+      .range(from, to);
+
+    if (error) {
+      throw new Error(error.message || `No se pudo consultar ${table}.`);
+    }
+
+    const chunk = (data ?? []) as Array<Record<string, unknown>>;
+    rows.push(...chunk);
+
+    if (chunk.length < batchSize) break;
+    from += batchSize;
+  }
+
+  return rows;
+}
+
 function normalizeDateForCompare(raw: unknown): string | null {
   const value = String(raw ?? '').trim();
   if (!value) return null;
@@ -332,7 +364,10 @@ async function applySheetBatchUpdate(
   const auth = getGoogleJwt();
   await auth.authorize();
 
-  const accessToken = auth.credentials.access_token;
+  const tokenResult = await auth.getAccessToken();
+  const accessToken = typeof tokenResult === 'string'
+    ? tokenResult
+    : (tokenResult?.token ?? auth.credentials.access_token ?? null);
   if (!accessToken) {
     throw new Error('No se pudo obtener token de Google para aplicar estilos.');
   }
@@ -355,24 +390,24 @@ async function applySheetBatchUpdate(
 async function fetchEnviosRows(dateFrom: string, dateTo: string) {
   const supabase = getSupabaseAdminClient();
 
-  const [enviosResult, leadsResult, destinosResult, resultadosResult, tipoPuntoResult] = await Promise.all([
-    supabase
-      .from('envios' as never)
-      .select('fecha_envio,id_lead_ganado,id_destino,id_resultado,cobro_entrega,pago_moto,excedente_pagado_moto,ingreso_total_fila,costo_total_fila,observaciones,id_tipo_punto,extra_punto_moto,extra_punto_empresa' as never)
-      .order('fecha_envio' as never, { ascending: true }),
-    supabase
-      .from('leads_ganados' as never)
-      .select('business_id,tienda_nombre_snapshot,vendedor_nombre_snapshot,fullfilment_snapshot' as never),
+  const [enviosRowsRaw, leadsRowsRaw, destinosResult, resultadosResult, tipoPuntoResult] = await Promise.all([
+    selectAllRowsPaginated(
+      'envios',
+      'fecha_envio,id_lead_ganado,id_destino,id_resultado,cobro_entrega,pago_moto,excedente_pagado_moto,ingreso_total_fila,costo_total_fila,observaciones,id_tipo_punto,extra_punto_moto,extra_punto_empresa',
+      'fecha_envio',
+    ),
+    selectAllRowsPaginated(
+      'leads_ganados',
+      'business_id,tienda_nombre_snapshot,vendedor_nombre_snapshot,fullfilment_snapshot',
+      'business_id',
+    ),
     supabase.from('destinos' as never).select('business_id,destino' as never),
     supabase.from('resultados' as never).select('business_id,resultado' as never),
     supabase.from('tipo_punto' as never).select('business_id,tipo_punto' as never),
   ]);
 
-  if (enviosResult.error) throw new Error(enviosResult.error.message || 'No se pudo consultar envíos.');
-  if (leadsResult.error) throw new Error(leadsResult.error.message || 'No se pudo consultar leads ganados.');
-
   const leadsById = new Map<number, { tienda: string; vendedor: string; fullfilment: string }>();
-  for (const row of (leadsResult.data ?? []) as Array<Record<string, unknown>>) {
+  for (const row of leadsRowsRaw) {
     const id = Number(row.business_id);
     if (!Number.isFinite(id)) continue;
     leadsById.set(id, {
@@ -400,7 +435,7 @@ async function fetchEnviosRows(dateFrom: string, dateTo: string) {
     if (Number.isFinite(id)) tipoPuntoById.set(id, String(row.tipo_punto ?? ''));
   }
 
-  const mapped = ((enviosResult.data ?? []) as Array<Record<string, unknown>>)
+  const mapped = enviosRowsRaw
     .filter((row) => isDateInRange(row.fecha_envio, dateFrom, dateTo))
     .map((row) => {
     const leadId = Number(row.id_lead_ganado);
@@ -433,15 +468,13 @@ async function fetchEnviosRows(dateFrom: string, dateTo: string) {
 }
 
 async function fetchLeadsGanadosRows(dateFrom: string, dateTo: string) {
-  const supabase = getSupabaseAdminClient();
-  const { data, error } = await supabase
-    .from('leads_ganados' as never)
-    .select('fecha_ingreso_lead,fecha_lead_ganado,dias_lead_a_ganado,notas,distrito,cantidad_envios,anulados_fullfilment,ingreso_anulados_fullfilment,tienda_nombre_snapshot,vendedor_nombre_snapshot,origen_snapshot,fullfilment_snapshot' as never)
-    .order('fecha_lead_ganado' as never, { ascending: true });
+  const rowsRaw = await selectAllRowsPaginated(
+    'leads_ganados',
+    'fecha_ingreso_lead,fecha_lead_ganado,dias_lead_a_ganado,notas,distrito,cantidad_envios,anulados_fullfilment,ingreso_anulados_fullfilment,tienda_nombre_snapshot,vendedor_nombre_snapshot,origen_snapshot,fullfilment_snapshot',
+    'fecha_lead_ganado',
+  );
 
-  if (error) throw new Error(error.message || 'No se pudo consultar leads ganados.');
-
-  const mapped = ((data ?? []) as Array<Record<string, unknown>>)
+  const mapped = rowsRaw
     .filter((row) => isDateInRange(row.fecha_lead_ganado, dateFrom, dateTo))
     .map((row) => ({
       Tienda: String(row.tienda_nombre_snapshot ?? ''),
@@ -485,7 +518,11 @@ async function replaceSheetData(spreadsheetId: string, sheetName: string, column
     await sheet.addRows(chunk as never);
   }
 
-  await applyBasicSheetStyles(spreadsheetId, sheet, columns, rows.length);
+  try {
+    await applyBasicSheetStyles(spreadsheetId, sheet, columns, rows.length);
+  } catch {
+    // Si falla el estilo no bloqueamos la exportación de datos.
+  }
 }
 
 export function listExportJobs() {
