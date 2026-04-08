@@ -625,9 +625,9 @@ export function KommoLeadsInsights() {
   const hourlyIncomingAverageData = useMemo(
     () => (insightsQuery.data?.created.hourly_incoming ?? []).map((row) => ({
       ...row,
-      avg_incoming: row.total_incoming / incomingDaysDivider,
+      avg_incoming: row.total_incoming,
     })),
-    [incomingDaysDivider, insightsQuery.data?.created.hourly_incoming],
+    [insightsQuery.data?.created.hourly_incoming],
   );
 
   const handleExportPdf = useCallback(async () => {
