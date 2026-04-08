@@ -1,8 +1,8 @@
 import type { ReactNode } from 'react';
-import { Activity, CheckCircle2, Clock3, Database, Filter, RefreshCw } from 'lucide-react';
+import { Activity, Clock3, Database, Filter, RefreshCw } from 'lucide-react';
 import { formatCurrencyPen, formatNumberEs } from '../../../lib/tableHelpers';
 import type { MetaAdAccountOption, MetaSyncRunRow } from './types';
-import { formatDateTime, formatDateRangeLabel, formatDurationMs, formatSyncResourceSummary } from './metaAdsUtils';
+import { formatDateTime, formatDurationMs, formatSyncResourceSummary } from './metaAdsUtils';
 
 export function MetaAdsPageHero({
   title,
@@ -29,9 +29,6 @@ export function MetaAdsPageHero({
 }
 
 export function MetaAdsFiltersPanel({
-  appliedAccountId,
-  appliedDateFrom,
-  appliedDateTo,
   draftDateFrom,
   draftDateTo,
   onDraftDateFromChange,
@@ -42,9 +39,6 @@ export function MetaAdsFiltersPanel({
   extra,
 }: {
   accounts: MetaAdAccountOption[];
-  appliedAccountId: string;
-  appliedDateFrom: string;
-  appliedDateTo: string;
   draftAccountId: string;
   draftDateFrom: string;
   draftDateTo: string;
@@ -56,6 +50,7 @@ export function MetaAdsFiltersPanel({
   isApplyDisabled?: boolean;
   extra?: ReactNode;
 }) {
+  const hasExtra = Boolean(extra);
 
   return (
     <div className="rounded-[28px] border border-gray-200 bg-white/95 p-5 shadow-[0_24px_52px_-38px_rgba(15,23,42,0.95)] backdrop-blur-sm space-y-5">
@@ -68,7 +63,7 @@ export function MetaAdsFiltersPanel({
         </div>
       </div>
 
-      <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1.3fr)_repeat(2,minmax(0,0.8fr))]">
+      <div className={`grid grid-cols-1 gap-4 ${hasExtra ? 'xl:grid-cols-[minmax(0,1.3fr)_repeat(2,minmax(0,1fr))_auto]' : 'xl:grid-cols-[repeat(2,minmax(0,1fr))_auto]'}`}>
 
         {extra}
 
@@ -91,22 +86,8 @@ export function MetaAdsFiltersPanel({
             className="mt-2 w-full rounded-xl border border-gray-300 bg-white px-3 py-2.5 text-sm text-gray-800 outline-none transition focus:border-red-300 focus:ring-2 focus:ring-red-100"
           />
         </label>
-      </div>
 
-      <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-gray-200 bg-gradient-to-r from-gray-50 to-white px-4 py-3">
-        <div className="flex flex-wrap items-center gap-2 text-xs text-gray-500">
-          <span className="inline-flex items-center gap-2 rounded-full border border-gray-200 bg-white px-3 py-1 font-medium">
-            <CheckCircle2 size={13} className="text-emerald-500" />
-            Rango aplicado: {formatDateRangeLabel(appliedDateFrom, appliedDateTo)}
-          </span>
-          {appliedAccountId ? (
-            <span className="rounded-full border border-red-100 bg-red-50 px-3 py-1 font-medium text-red-700">
-              Cuenta {appliedAccountId}
-            </span>
-          ) : null}
-        </div>
-
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex items-end justify-start gap-2 xl:justify-end">
           <button
             type="button"
             onClick={onClear}
