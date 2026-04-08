@@ -3,7 +3,7 @@ import { GoogleSpreadsheet } from 'google-spreadsheet';
 import { randomUUID } from 'node:crypto';
 import { getSupabaseAdminClient } from '../../kommo/_shared.js';
 
-export type ExportResource = 'ENVIOS' | 'LEADS GANADOS';
+export type ExportResource = 'ENVIOS' | 'LEADS GANADOS' | 'RECOJOS';
 
 export type ExportJobRequest = {
   resource: ExportResource;
@@ -62,6 +62,20 @@ const LEADS_GANADOS_EXPORT_COLUMNS = [
   'Origen',
   'Anulados Fullfilment',
   'Ingreso anulados fullfilment',
+] as const;
+
+const RECOJOS_EXPORT_COLUMNS = [
+  'Fecha',
+  'Lead Ganado',
+  'Tienda',
+  'Vendedor',
+  'Tipo de cobro',
+  'Veces',
+  'Cobro a tienda',
+  'Pago a moto',
+  'Ingreso recojo total',
+  'Costo recojo total',
+  'Observaciones',
 ] as const;
 
 function nowIso() {
@@ -187,6 +201,7 @@ function getAlignmentByHeader(header: string) {
     || normalized.includes('costo')
     || normalized.includes('extra')
     || normalized.includes('cantidad')
+    || normalized.includes('veces')
     || normalized.includes('dias')
     || normalized.includes('anulados')
   ) {
@@ -214,7 +229,7 @@ function isCurrencyHeader(header: string) {
 
 function isNumberHeader(header: string) {
   const normalized = header.trim().toLowerCase();
-  return normalized.includes('cantidad') || normalized.includes('dias') || normalized.includes('anulados');
+  return normalized.includes('cantidad') || normalized.includes('veces') || normalized.includes('dias') || normalized.includes('anulados');
 }
 
 async function applyBasicSheetStyles(
@@ -553,6 +568,56 @@ async function fetchLeadsGanadosRows(dateFrom: string, dateTo: string) {
   };
 }
 
+async function fetchRecojosRows(dateFrom: string, dateTo: string) {
+  const [recojosRowsRaw, leadsRowsRaw] = await Promise.all([
+    selectAllRowsPaginated(
+      'recojos',
+      'fecha,id_lead_ganado,tipo_cobro,veces,cobro_a_tienda,pago_a_moto,ingreso_recojo_total,costo_recojo_total,observaciones',
+      'fecha',
+      { column: 'fecha', from: dateFrom, to: dateTo },
+    ),
+    selectAllRowsPaginated(
+      'leads_ganados',
+      'business_id,tienda_nombre_snapshot,vendedor_nombre_snapshot',
+      'business_id',
+    ),
+  ]);
+
+  const leadsById = new Map<number, { tienda: string; vendedor: string }>();
+  for (const row of leadsRowsRaw) {
+    const id = Number(row.business_id);
+    if (!Number.isFinite(id)) continue;
+    leadsById.set(id, {
+      tienda: String(row.tienda_nombre_snapshot ?? ''),
+      vendedor: String(row.vendedor_nombre_snapshot ?? ''),
+    });
+  }
+
+  const mapped = recojosRowsRaw.map((row) => {
+    const leadId = Number(row.id_lead_ganado);
+    const lead = leadsById.get(leadId);
+
+    return {
+      Fecha: toDmyDisplayDate(row.fecha),
+      'Lead Ganado': Number.isFinite(leadId) ? String(leadId) : '',
+      Tienda: lead?.tienda ?? '',
+      Vendedor: lead?.vendedor ?? '',
+      'Tipo de cobro': String(row.tipo_cobro ?? ''),
+      Veces: String(row.veces ?? 0),
+      'Cobro a tienda': formatCost(row.cobro_a_tienda),
+      'Pago a moto': formatCost(row.pago_a_moto),
+      'Ingreso recojo total': formatCost(row.ingreso_recojo_total),
+      'Costo recojo total': formatCost(row.costo_recojo_total),
+      Observaciones: String(row.observaciones ?? ''),
+    };
+  });
+
+  return {
+    columns: [...RECOJOS_EXPORT_COLUMNS],
+    rows: mapped,
+  };
+}
+
 async function replaceSheetData(spreadsheetId: string, sheetName: string, columns: string[], rows: Array<Record<string, unknown>>) {
   const doc = new GoogleSpreadsheet(spreadsheetId, getGoogleJwt());
   await doc.loadInfo();
@@ -625,8 +690,8 @@ export function cancelExportJob(id: string) {
 }
 
 export function validateExportRequest(input: Partial<ExportJobRequest>) {
-  if (!input.resource || (input.resource !== 'ENVIOS' && input.resource !== 'LEADS GANADOS')) {
-    return 'resource inválido. Permitidos: ENVIOS | LEADS GANADOS';
+  if (!input.resource || (input.resource !== 'ENVIOS' && input.resource !== 'LEADS GANADOS' && input.resource !== 'RECOJOS')) {
+    return 'resource inválido. Permitidos: ENVIOS | LEADS GANADOS | RECOJOS';
   }
 
   if (!input.date_from || !parseDateInput(input.date_from)) {
@@ -669,7 +734,9 @@ export async function runExportJob(id: string) {
   try {
     const dataset = running.request.resource === 'ENVIOS'
       ? await fetchEnviosRows(running.request.date_from, running.request.date_to)
-      : await fetchLeadsGanadosRows(running.request.date_from, running.request.date_to);
+      : running.request.resource === 'RECOJOS'
+        ? await fetchRecojosRows(running.request.date_from, running.request.date_to)
+        : await fetchLeadsGanadosRows(running.request.date_from, running.request.date_to);
 
     await replaceSheetData(
       running.request.destination.spreadsheet_id,

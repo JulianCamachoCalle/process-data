@@ -1,7 +1,8 @@
 import { useState, type FormEvent } from 'react';
 import { ExternalLink, Send, Table2 } from 'lucide-react';
+import Swal from 'sweetalert2';
 
-type ExportResource = 'ENVIOS' | 'LEADS GANADOS';
+type ExportResource = 'ENVIOS' | 'LEADS GANADOS' | 'RECOJOS';
 
 /* type ExportJob = {
   id: string;
@@ -25,21 +26,23 @@ type ExportResource = 'ENVIOS' | 'LEADS GANADOS';
 const defaultFrom = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().slice(0, 10);
 const defaultTo = new Date().toISOString().slice(0, 10);
 
-export function GoogleSheetsExportTester() {
+export function GoogleSheetsExportPage() {
   const [resource, setResource] = useState<ExportResource>('ENVIOS');
   const [dateFrom, setDateFrom] = useState(defaultFrom);
   const [dateTo, setDateTo] = useState(defaultTo);
   const [spreadsheetId, setSpreadsheetId] = useState('');
   const [sheetName, setSheetName] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [message, setMessage] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+
+    if (dateFrom > dateTo) {
+      void Swal.fire('Validación', 'La fecha desde no puede ser mayor que la fecha hasta.', 'warning');
+      return;
+    }
+
     setIsSubmitting(true);
-    setError(null);
-    setMessage(null);
 
     try {
       const response = await fetch('/api/export/google-sheets/jobs', {
@@ -61,14 +64,13 @@ export function GoogleSheetsExportTester() {
       const payload = await response.json();
 
       if (!response.ok || !payload?.success) {
-        setError(payload?.error ?? 'No se pudo ejecutar la exportación.');
+        void Swal.fire('Error', payload?.error ?? 'No se pudo ejecutar la exportación.', 'error');
         return;
       }
 
-      // setJob(payload.job as ExportJob);
-      setMessage('Exportación ejecutada. Revisá estado y filas exportadas abajo.');
+      void Swal.fire('Exportación completada con éxito', 'success');
     } catch {
-      setError('Error de red al intentar exportar.');
+      void Swal.fire('Error', 'Error de red al intentar exportar.', 'error');
     } finally {
       setIsSubmitting(false);
     }
@@ -84,10 +86,10 @@ export function GoogleSheetsExportTester() {
         <p className="text-xs font-semibold uppercase tracking-[0.22em] text-gray-500">Exportaciones</p>
         <h1 className="mt-2 inline-flex items-center gap-2 text-2xl font-extrabold uppercase tracking-[0.08em] text-gray-900">
           <Table2 className="text-red-600" size={22} />
-          Google Sheets Export Tester
+          Google Sheets Export
         </h1>
         <p className="mt-2 text-sm text-gray-600">
-          Esta sección es para probar exportación de BD → Google Sheets (sin extracción desde Sheets).
+          Exportación de BD → Google Sheets.
         </p>
       </header>
 
@@ -101,6 +103,7 @@ export function GoogleSheetsExportTester() {
               className="w-full rounded-xl border border-gray-300 bg-white px-3 py-2.5 text-sm"
             >
               <option value="ENVIOS">ENVIOS</option>
+              <option value="RECOJOS">RECOJOS</option>
               <option value="LEADS GANADOS">LEADS GANADOS</option>
             </select>
           </label>
@@ -163,9 +166,6 @@ export function GoogleSheetsExportTester() {
             </button>
           </div>
         </form>
-
-        {message ? <p className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">{message}</p> : null}
-        {error ? <p className="mt-4 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p> : null}
 
         <div className="mt-5 rounded-xl border border-amber-200 bg-amber-50 p-4 text-xs text-amber-900 space-y-2">
           <p className="font-semibold uppercase tracking-[0.12em]">Configuración necesaria</p>
