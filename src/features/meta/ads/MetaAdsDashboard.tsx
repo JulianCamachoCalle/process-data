@@ -90,9 +90,10 @@ export function MetaAdsDashboard() {
 
     const adIdsInScope = new Set(rows.map((row) => row.ad_business_id).filter(Boolean));
     const scopedHourlyRows = hourlyRows.filter((row) => adIdsInScope.has(row.ad_business_id));
+    const hourlyRowsForTrend = scopedHourlyRows.length > 0 ? scopedHourlyRows : hourlyRows;
 
     const hourlyByDateMap = new Map<string, number[]>();
-    for (const row of scopedHourlyRows) {
+    for (const row of hourlyRowsForTrend) {
       const hour = parseHourFromBucket(row.hour_bucket);
       if (hour === null) continue;
 
