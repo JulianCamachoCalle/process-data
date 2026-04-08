@@ -97,9 +97,6 @@ export function MetaAdsDataPage() {
 
       <MetaAdsFiltersPanel
         accounts={accounts}
-        appliedAccountId={accountId}
-        appliedDateFrom={dateFrom}
-        appliedDateTo={dateTo}
         draftAccountId={draftAccountId}
         draftDateFrom={draftDateFrom}
         draftDateTo={draftDateTo}

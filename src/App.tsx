@@ -11,6 +11,7 @@ import { KommoExplorer } from './features/kommo/explorer/KommoExplorer';
 import { KommoLeadsInsights } from './features/kommo/insights/KommoLeadsInsights';
 import { MetaAdsDashboard } from './features/meta/ads/MetaAdsDashboard';
 import { MetaAdsDataPage } from './features/meta/ads/MetaAdsDataPage';
+import { LandingPage } from './features/landing/LandingPage';
 import { prefetchSheetData } from './hooks/useSheetData';
 import { isSupabaseConfigured, supabase } from './lib/supabase';
 
@@ -209,6 +210,7 @@ export default function App() {
   return (
     <Routes>
       <Route path="/login" element={<Login />} />
+      <Route path="/land-page" element={<LandingPage />} />
       <Route path="/*" element={
         <ProtectedRoute>
           <Layout />

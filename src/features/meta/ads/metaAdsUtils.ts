@@ -232,7 +232,7 @@ export function buildComparisonMetrics(left?: MetaPerformanceEntry, right?: Meta
   if (!left || !right) return [];
 
   return [
-    createComparisonMetric('Gasto', left.spend, right.spend, 'currency', 'higher'),
+    createComparisonMetric('Gasto', left.spend, right.spend, 'currency', 'lower'),
     createComparisonMetric('Clicks', left.clicks, right.clicks, 'number', 'higher'),
     createComparisonMetric('CTR', left.ctr, right.ctr, 'percent', 'higher'),
     createComparisonMetric('CPC', left.cpc, right.cpc, 'currency', 'lower'),

@@ -1,29 +1,21 @@
 import { useMemo, useState } from 'react';
-import { Activity, BadgeDollarSign, BarChart3, LineChart as LineChartIcon, Megaphone, MousePointerClick, PieChart as PieChartIcon, Sparkles, Target, TrendingUp, TriangleAlert, Trophy, Wrench } from 'lucide-react';
-import { Bar, BarChart, CartesianGrid, Cell, Line, LineChart, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
+import { Activity, BadgeDollarSign, BarChart3, LineChart as LineChartIcon, Megaphone, MousePointerClick, PieChart as PieChartIcon, Target, Trophy } from 'lucide-react';
+import { Bar, BarChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { formatNumberEs } from '../../../lib/tableHelpers';
-import { ChartCard, InsightBadge, KpiCard, KpiGrid, LeaderboardList, MetaAdsFiltersPanel, MetaAdsPageHero, Section } from './metaAdsShared';
+import { ChartCard, KpiCard, KpiGrid, MetaAdsFiltersPanel, MetaAdsPageHero, Section } from './metaAdsShared';
 import {
-  aggregateBreakdown,
   aggregateLeaderboard,
   aggregatePerformanceEntries,
   aggregateTrendRows,
   buildComparisonMetrics,
-  buildDecisionSignals,
-  buildRecommendationBuckets,
   formatCompactMetric,
-  getCreativeInsightEntries,
-  getWeakPerformers,
   pickComparisonPair,
   safeDivide,
   sumBy,
   type MetaComparisonMetric,
-  type MetaDecisionSignal,
   type MetaPerformanceEntry,
 } from './metaAdsUtils';
 import { useMetaAdsReporting } from './useMetaAdsReporting';
-
-const COLORS = ['#dc2626', '#ef4444', '#f97316', '#f59e0b', '#8b5cf6', '#14b8a6', '#22c55e'];
 
 export function MetaAdsDashboard() {
   const [accountId, setAccountId] = useState('');
@@ -51,22 +43,35 @@ export function MetaAdsDashboard() {
     const overallCpc = safeDivide(totalSpend, totalClicks);
 
     const trend = aggregateTrendRows(rows);
-    const objectiveBreakdown = aggregateBreakdown(rows, (row) => row.objective).slice(0, 6);
-    const topCampaigns = aggregateLeaderboard(rows, {
+    const trendEfficiency = trend.map((point) => ({
+      ...point,
+      ctr: safeDivide(point.clicks * 100, point.impressions),
+      cpc: safeDivide(point.spend, point.clicks),
+    }));
+
+    const topCampaignsByClicks = aggregateLeaderboard(rows, {
       getId: (row) => row.campaign_business_id,
       getTitle: (row) => row.campaign_name,
       getSubtitle: (row) => row.account_name ?? row.account_business_id,
-    }).slice(0, 5);
-    const topAdsets = aggregateLeaderboard(rows, {
-      getId: (row) => row.adset_business_id,
-      getTitle: (row) => row.adset_name,
-      getSubtitle: (row) => row.campaign_name ?? row.campaign_business_id,
-    }).slice(0, 5);
-    const topAds = aggregateLeaderboard(rows, {
+    })
+      .sort((left, right) => {
+        if (right.clicks !== left.clicks) return right.clicks - left.clicks;
+        if (right.ctr !== left.ctr) return right.ctr - left.ctr;
+        return left.cpc - right.cpc;
+      })
+      .slice(0, 5);
+
+    const topAdsByClicks = aggregateLeaderboard(rows, {
       getId: (row) => row.ad_business_id,
       getTitle: (row) => row.ad_name ?? row.ad_business_id,
       getSubtitle: (row) => row.creative_name ?? row.creative_id ?? 'Sin creative',
-    }).slice(0, 5);
+    })
+      .sort((left, right) => {
+        if (right.clicks !== left.clicks) return right.clicks - left.clicks;
+        if (right.ctr !== left.ctr) return right.ctr - left.ctr;
+        return left.cpc - right.cpc;
+      })
+      .slice(0, 5);
 
     const campaignPerformance = aggregatePerformanceEntries(rows, {
       getId: (row) => row.campaign_business_id,
@@ -79,10 +84,6 @@ export function MetaAdsDashboard() {
       getSubtitle: (row) => row.campaign_name ?? row.campaign_business_id,
       getCreativeName: (row) => row.creative_name ?? row.creative_id ?? 'Sin creative',
     });
-    const adDecisionSignals = buildDecisionSignals(adPerformance);
-    const recommendationBuckets = buildRecommendationBuckets(adPerformance);
-    const weakAds = getWeakPerformers(adPerformance).slice(0, 5);
-    const creativeInsights = getCreativeInsightEntries(adPerformance, 5);
 
     return {
       totalSpend,
@@ -95,16 +96,11 @@ export function MetaAdsDashboard() {
       overallCtr,
       overallCpc,
       trend,
-      objectiveBreakdown,
-      topCampaigns,
-      topAdsets,
-      topAds,
+      trendEfficiency,
+      topCampaignsByClicks,
+      topAdsByClicks,
       campaignPerformance,
       adPerformance,
-      adDecisionSignals,
-      recommendationBuckets,
-      weakAds,
-      creativeInsights,
     };
   }, [reportingQuery.data?.rows]);
 
@@ -200,9 +196,6 @@ export function MetaAdsDashboard() {
 
       <MetaAdsFiltersPanel
         accounts={accounts}
-        appliedAccountId={accountId}
-        appliedDateFrom={dateFrom}
-        appliedDateTo={dateTo}
         draftAccountId={draftAccountId}
         draftDateFrom={draftDateFrom}
         draftDateTo={draftDateTo}
@@ -252,24 +245,23 @@ export function MetaAdsDashboard() {
             </ResponsiveContainer>
           </ChartCard>
 
-          <ChartCard title="Gasto por objetivo" icon={<PieChartIcon size={16} className="text-red-600" />}>
+          <ChartCard title="Tendencia diaria de CTR y CPC" icon={<PieChartIcon size={16} className="text-red-600" />}>
             <ResponsiveContainer width="100%" height={300}>
-              <PieChart>
-                <Pie
-                  data={dashboard.objectiveBreakdown}
-                  dataKey="value"
-                  nameKey="name"
-                  cx="50%"
-                  cy="50%"
-                  outerRadius={105}
-                  label={(entry) => String(entry.name ?? '')}
-                >
-                  {dashboard.objectiveBreakdown.map((entry, index) => (
-                    <Cell key={`${entry.name}-${index}`} fill={COLORS[index % COLORS.length]} />
-                  ))}
-                </Pie>
-                <Tooltip formatter={(value) => formatCompactMetric(Number(value ?? 0), 'currency')} />
-              </PieChart>
+              <LineChart data={dashboard.trendEfficiency}>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                <XAxis dataKey="date_start" tick={{ fontSize: 12 }} />
+                <YAxis yAxisId="left" tick={{ fontSize: 12 }} tickFormatter={(value) => `${Number(value).toFixed(1)}%`} />
+                <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 12 }} tickFormatter={(value) => `S/ ${Number(value).toFixed(1)}`} />
+                <Tooltip
+                  formatter={(value, key) => {
+                    const numeric = Number(value ?? 0);
+                    if (key === 'ctr') return formatCompactMetric(numeric, 'percent');
+                    return formatCompactMetric(numeric, 'currency');
+                  }}
+                />
+                <Line yAxisId="left" type="monotone" dataKey="ctr" name="CTR" stroke="#dc2626" strokeWidth={2.5} dot={{ r: 2 }} />
+                <Line yAxisId="right" type="monotone" dataKey="cpc" name="CPC" stroke="#f97316" strokeWidth={2.2} dot={{ r: 2 }} />
+              </LineChart>
             </ResponsiveContainer>
           </ChartCard>
         </div>
@@ -279,12 +271,12 @@ export function MetaAdsDashboard() {
         <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
           <ChartCard title="Campañas con mayor gasto" icon={<BarChart3 size={16} className="text-red-600" />}>
             <ResponsiveContainer width="100%" height={300}>
-              <BarChart data={dashboard.topCampaigns}>
+              <BarChart data={dashboard.topCampaignsByClicks}>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} />
                 <XAxis dataKey="title" tick={{ fontSize: 12 }} interval={0} angle={-15} textAnchor="end" height={60} />
                 <YAxis tick={{ fontSize: 12 }} />
-                <Tooltip formatter={(value) => formatCompactMetric(Number(value ?? 0), 'currency')} />
-                <Bar dataKey="spend" name="Gasto" fill="#dc2626" radius={[8, 8, 0, 0]} />
+                <Tooltip formatter={(value) => formatCompactMetric(Number(value ?? 0), 'number')} />
+                <Bar dataKey="clicks" name="Clicks" fill="#dc2626" radius={[8, 8, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
           </ChartCard>
@@ -302,15 +294,12 @@ export function MetaAdsDashboard() {
           </ChartCard>
         </div>
 
-        <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
+        <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
           <ChartCard title="Top campañas" icon={<Megaphone size={16} className="text-red-600" />}>
-            <LeaderboardList items={dashboard.topCampaigns} emptyMessage="No hay campañas para mostrar con los filtros actuales." />
-          </ChartCard>
-          <ChartCard title="Top ad sets" icon={<Target size={16} className="text-red-600" />}>
-            <LeaderboardList items={dashboard.topAdsets} emptyMessage="No hay ad sets para mostrar con los filtros actuales." />
+            <TopPerformanceList items={dashboard.topCampaignsByClicks} emptyMessage="No hay campañas para mostrar con los filtros actuales." />
           </ChartCard>
           <ChartCard title="Top ads" icon={<Activity size={16} className="text-red-600" />}>
-            <LeaderboardList items={dashboard.topAds} emptyMessage="No hay ads para mostrar con los filtros actuales." />
+            <TopPerformanceList items={dashboard.topAdsByClicks} emptyMessage="No hay ads para mostrar con los filtros actuales." />
           </ChartCard>
         </div>
       </Section>
@@ -334,57 +323,53 @@ export function MetaAdsDashboard() {
         />
       </Section>
 
-      <Section title="Señales para decidir">
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
-          {dashboard.adDecisionSignals.map((signal) => (
-            <DecisionSignalCard key={signal.title} signal={signal} />
-          ))}
-        </div>
-      </Section>
-
-      <Section title="Recomendaciones accionables">
-        <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
-          {dashboard.recommendationBuckets.map((bucket) => (
-            <RecommendationBucketCard key={bucket.key} bucket={bucket} />
-          ))}
-        </div>
-      </Section>
-
-      <Section title="Rankings accionables">
-        <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-          <PerformanceTableCard
-            title="Ranking de campañas"
-            description="Ordenadas por gasto para revisar rápido dónde defender presupuesto y dónde reasignar."
-            rows={dashboard.campaignPerformance.slice(0, 5)}
-            emptyMessage="No hay campañas para rankear con los filtros actuales."
-            showCreative={false}
-          />
-          <PerformanceTableCard
-            title="Ranking de ads"
-            description="Lectura rápida para detectar qué pieza mueve volumen y cuál necesita revisión."
-            rows={dashboard.adPerformance.slice(0, 5)}
-            emptyMessage="No hay ads para rankear con los filtros actuales."
-            showCreative
-          />
-        </div>
-      </Section>
-
-      <Section title="Contenido e insights">
-        <div className="grid grid-cols-1 gap-4 xl:grid-cols-[1.15fr_0.85fr]">
-          <ChartCard title="Creatividades que están empujando resultados" icon={<Sparkles size={16} className="text-red-600" />}>
-            <InsightList entries={dashboard.creativeInsights} emptyMessage="No hay ads suficientes para extraer insights de contenido." />
-          </ChartCard>
-          <ChartCard title="Ads para revisar primero" icon={<BadgeDollarSign size={16} className="text-red-600" />}>
-            <InsightList entries={dashboard.weakAds} emptyMessage="No hay señales claras de debilidad con los filtros actuales." emphasis="warning" />
-          </ChartCard>
-        </div>
-      </Section>
-
       {dashboard.trend.length === 0 ? (
         <div className="rounded-2xl border border-dashed border-gray-300 bg-white px-5 py-8 text-center text-sm text-gray-500">
           No hay datos de Meta Ads para los filtros actuales. Probá limpiarlos o ajustar el rango.
         </div>
       ) : null}
+    </div>
+  );
+}
+
+function TopPerformanceList({
+  items,
+  emptyMessage,
+}: {
+  items: Array<{ id: string; title: string; subtitle: string; clicks: number; ctr: number; cpc: number }>;
+  emptyMessage: string;
+}) {
+  if (items.length === 0) {
+    return <div className="rounded-xl border border-dashed border-gray-200 bg-gray-50 px-4 py-6 text-sm text-gray-500">{emptyMessage}</div>;
+  }
+
+  return (
+    <ul className="space-y-2">
+      {items.slice(0, 5).map((item, index) => (
+        <li key={item.id} className="rounded-xl border border-gray-100 bg-gray-50/70 px-4 py-3">
+          <div className="flex items-start justify-between gap-4">
+            <div className="min-w-0">
+              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-red-600">#{index + 1}</p>
+              <p className="font-semibold text-gray-900 truncate">{item.title}</p>
+              <p className="text-xs text-gray-500 truncate">{item.subtitle}</p>
+            </div>
+            <div className="grid grid-cols-3 gap-4 text-right shrink-0">
+              <Metric label="Clicks" value={formatNumberEs(item.clicks)} />
+              <Metric label="CTR" value={`${item.ctr.toFixed(2)}%`} />
+              <Metric label="CPC" value={formatCompactMetric(item.cpc, 'currency')} />
+            </div>
+          </div>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function Metric({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-gray-500">{label}</p>
+      <p className="text-sm font-semibold text-gray-900">{value}</p>
     </div>
   );
 }
@@ -438,68 +423,32 @@ function UnifiedComparisonCard({
         onRightChange={onRightChange}
       />
 
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        {[left, right].map((entry, index) => (
-          <div key={entry.id} className="rounded-[24px] border border-gray-200 bg-gradient-to-br from-white to-gray-50/80 p-5">
-            <div className="flex items-start justify-between gap-3">
-              <div className="min-w-0">
-                <span className={`inline-flex items-center rounded-full border px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] ${index === 0 ? 'border-red-200 bg-red-50 text-red-700' : 'border-slate-200 bg-slate-50 text-slate-700'}`}>
-                  {index === 0 ? 'Lado A' : 'Lado B'}
-                </span>
-                <p className="mt-3 text-lg font-bold text-gray-900">{entry.title}</p>
-                <p className="mt-1 text-sm text-gray-500">{entry.subtitle}</p>
-              </div>
-              <div className="shrink-0 rounded-2xl border border-gray-200 bg-white px-3 py-2 text-right">
-                <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-400">Gasto</p>
-                <p className="mt-1 text-sm font-bold text-gray-900">{formatCompactMetric(entry.spend, 'currency')}</p>
-              </div>
-            </div>
-
-            <div className="mt-4 grid grid-cols-3 gap-2 rounded-2xl bg-white/80 p-3 text-xs">
-              <MetricMiniCard label="Clicks" value={formatCompactMetric(entry.clicks, 'number')} />
-              <MetricMiniCard label="CTR" value={formatCompactMetric(entry.ctr, 'percent')} />
-              <MetricMiniCard label="CPC" value={formatCompactMetric(entry.cpc, 'currency')} />
-            </div>
-
-            <div className="mt-4 flex flex-wrap gap-2">
-              {(entry.labels.length ? entry.labels : ['Sin alerta destacada']).map((label) => (
-                <InsightBadge key={label} label={label} tone={getBadgeTone(label)} />
-              ))}
-            </div>
-          </div>
-        ))}
-      </div>
-
-      <div className="overflow-x-auto">
-        <table className="min-w-full text-sm">
+      <div className="overflow-x-auto rounded-2xl border border-gray-200 bg-white shadow-[0_14px_30px_-24px_rgba(15,23,42,0.75)]">
+        <table className="min-w-full table-fixed text-sm">
+          <colgroup>
+            <col className="w-[32%]" />
+            <col className="w-[34%]" />
+            <col className="w-[34%]" />
+          </colgroup>
           <thead>
-            <tr className="text-left text-xs uppercase tracking-wide text-gray-500">
-              <th className="pb-2 pr-3">Métrica</th>
-              <th className="pb-2 px-3">{left.title}</th>
-              <th className="pb-2 px-3">{right.title}</th>
+            <tr className="text-left text-xs uppercase tracking-[0.2em] text-gray-500 bg-gray-50 border-y border-gray-200">
+              <th className="py-3.5 pr-3 pl-4">Métrica</th>
+              <th className="py-3.5 px-3">A · {left.title}</th>
+              <th className="py-3.5 px-3 pr-4">B · {right.title}</th>
             </tr>
           </thead>
           <tbody>
             {metrics.map((metric) => (
-              <tr key={metric.label} className="border-t border-gray-100 text-gray-700">
-                <td className="py-3 pr-3 font-semibold text-gray-900">{metric.label}</td>
-                <td className={`py-3 px-3 ${getComparisonCellClassName(metric, 'left')}`}>{formatCompactMetric(metric.leftValue, metric.format)}</td>
-                <td className={`py-3 px-3 ${getComparisonCellClassName(metric, 'right')}`}>{formatCompactMetric(metric.rightValue, metric.format)}</td>
+              <tr key={metric.label} className="border-t border-gray-100 text-gray-700 even:bg-gray-50/35">
+                <td className="py-3.5 pr-3 pl-4 font-semibold text-gray-900">{metric.label}</td>
+                <td className={`py-3.5 px-3 text-base tabular-nums ${getComparisonCellClassName(metric, 'left')}`}>{formatCompactMetric(metric.leftValue, metric.format)}</td>
+                <td className={`py-3.5 px-3 pr-4 text-base tabular-nums ${getComparisonCellClassName(metric, 'right')}`}>{formatCompactMetric(metric.rightValue, metric.format)}</td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
     </ChartCard>
-  );
-}
-
-function MetricMiniCard({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-xl border border-gray-200 bg-gray-50/80 px-3 py-2.5">
-      <p className="uppercase tracking-wide text-[11px] font-semibold text-gray-400">{label}</p>
-      <p className="mt-1 font-semibold text-gray-900">{value}</p>
-    </div>
   );
 }
 
@@ -525,9 +474,11 @@ function ComparisonControls({
   onRightChange: (value: string) => void;
 }) {
   return (
-    <div className="grid grid-cols-1 gap-3 rounded-[24px] border border-gray-200 bg-gray-50/80 p-4 xl:grid-cols-[auto_repeat(2,minmax(0,1fr))]">
-      <div className="rounded-2xl border border-gray-200 bg-white p-1">
-        <div className="grid grid-cols-2 gap-1">
+    <div className="space-y-4 rounded-[24px] border border-gray-200 bg-gradient-to-br from-gray-50/90 to-white p-4 shadow-[0_16px_34px_-28px_rgba(15,23,42,0.8)]">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <p className="text-xs font-semibold uppercase tracking-[0.22em] text-gray-500">Tipo de comparativa</p>
+        <div className="rounded-2xl border border-gray-200 bg-white p-1 shadow-sm">
+          <div className="grid grid-cols-2 gap-1">
           {[
             { key: 'campaigns', label: 'Campañas' },
             { key: 'ads', label: 'Ads' },
@@ -538,28 +489,35 @@ function ComparisonControls({
                 key={option.key}
                 type="button"
                 onClick={() => onComparisonTypeChange(option.key as 'campaigns' | 'ads')}
-                className={`rounded-xl px-4 py-2 text-sm font-semibold transition ${isActive ? 'bg-gray-900 text-white shadow-sm' : 'text-gray-600 hover:bg-gray-100'}`}
+                className={`rounded-xl px-4 py-2 text-sm font-semibold transition ${isActive ? 'bg-red-600 text-white shadow-sm' : 'text-gray-600 hover:bg-gray-100'}`}
               >
                 {option.label}
               </button>
             );
           })}
+          </div>
         </div>
       </div>
-      <ComparisonSelect
-        label={leftLabel}
-        value={leftValue}
-        options={options}
-        selectedPeer={rightValue}
-        onChange={onLeftChange}
-      />
-      <ComparisonSelect
-        label={rightLabel}
-        value={rightValue}
-        options={options}
-        selectedPeer={leftValue}
-        onChange={onRightChange}
-      />
+
+      <div className="grid grid-cols-1 items-center gap-3 xl:grid-cols-[1fr_auto_1fr]">
+        <ComparisonSelect
+          label={leftLabel}
+          value={leftValue}
+          options={options}
+          selectedPeer={rightValue}
+          onChange={onLeftChange}
+        />
+        <div className="mx-auto hidden h-9 items-center rounded-full px-4 text-lg font-extrabold uppercase tracking-[0.1em] text-red-600 xl:inline-flex">
+          VS
+        </div>
+        <ComparisonSelect
+          label={rightLabel}
+          value={rightValue}
+          options={options}
+          selectedPeer={leftValue}
+          onChange={onRightChange}
+        />
+      </div>
     </div>
   );
 }
@@ -578,12 +536,12 @@ function ComparisonSelect({
   onChange: (value: string) => void;
 }) {
   return (
-    <label className="rounded-2xl border border-gray-200 bg-white px-4 py-3 text-sm text-gray-600 shadow-inner shadow-white/50">
-      <span className="text-xs font-semibold uppercase tracking-wide text-gray-500">{label}</span>
+    <label className="rounded-2xl border border-gray-200 bg-white px-4 py-3 text-sm text-gray-600 shadow-[inset_0_1px_0_rgba(255,255,255,0.85)]">
+      <span className="text-xs font-semibold uppercase tracking-[0.18em] text-gray-500">{label}</span>
       <select
         value={value}
         onChange={(event) => onChange(event.target.value)}
-        className="mt-2 w-full rounded-xl border border-gray-300 bg-white px-3 py-2.5 text-sm text-gray-800 outline-none transition focus:border-red-300 focus:ring-2 focus:ring-red-100"
+        className="mt-2 w-full rounded-xl border border-gray-300 bg-white px-3 py-2.5 text-sm font-medium text-gray-800 outline-none transition focus:border-red-300 focus:ring-2 focus:ring-red-100"
       >
         {options.map((option) => (
           <option key={option.id} value={option.id} disabled={option.id === selectedPeer}>
@@ -595,238 +553,14 @@ function ComparisonSelect({
   );
 }
 
-function DecisionSignalCard({ signal }: { signal: MetaDecisionSignal }) {
-  const toneClassName = signal.tone === 'positive'
-    ? 'border-emerald-200 bg-emerald-50/50'
-    : signal.tone === 'warning'
-      ? 'border-amber-200 bg-amber-50/60'
-      : 'border-gray-200 bg-white';
-
-  return (
-    <div className={`rounded-[24px] border p-5 shadow-[0_20px_36px_-30px_rgba(15,23,42,0.8)] ${toneClassName}`}>
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-gray-500">{signal.title}</p>
-          <p className="mt-3 text-2xl font-bold text-gray-900">{formatCompactMetric(signal.metricValue, signal.metricFormat)}</p>
-          <p className="mt-2 truncate text-sm font-semibold text-gray-800">{signal.entry?.title ?? 'Sin data suficiente'}</p>
-        </div>
-        <InsightBadge
-          label={signal.tone === 'warning' ? 'Revisar' : signal.tone === 'positive' ? 'Escalar' : 'Seguir de cerca'}
-          tone={signal.tone}
-        />
-      </div>
-
-      <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
-        <p className="text-xs leading-5 text-gray-500">{signal.helper}</p>
-        <div className="rounded-2xl border border-white/80 bg-white/80 px-3 py-2 text-right">
-          <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-400">{signal.metricLabel}</p>
-          <p className="mt-1 text-sm font-semibold text-gray-900">{formatCompactMetric(signal.metricValue, signal.metricFormat)}</p>
-        </div>
-      </div>
-
-      {signal.entry ? (
-        <p className="mt-3 text-xs text-gray-500">
-          {signal.entry.subtitle}
-        </p>
-      ) : null}
-    </div>
-  );
-}
-
-function RecommendationBucketCard({
-  bucket,
-}: {
-  bucket: ReturnType<typeof buildRecommendationBuckets>[number];
-}) {
-  const toneClassName = bucket.tone === 'positive'
-    ? 'border-emerald-200 bg-emerald-50/70'
-    : bucket.tone === 'warning'
-      ? 'border-amber-200 bg-amber-50/80'
-      : 'border-gray-200 bg-gray-50/80';
-
-  const metricToneClassName = bucket.tone === 'positive'
-    ? 'text-emerald-700'
-    : bucket.tone === 'warning'
-      ? 'text-amber-700'
-      : 'text-slate-700';
-
-  const Icon = bucket.key === 'escalar' ? TrendingUp : bucket.key === 'revisar' ? TriangleAlert : Wrench;
-
-  return (
-    <div className={`rounded-2xl border p-5 shadow-[0_20px_36px_-30px_rgba(15,23,42,0.8)] ${toneClassName}`}>
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <p className="inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.2em] text-gray-500">
-            <Icon size={14} />
-            {bucket.title}
-          </p>
-          <h3 className="mt-2 text-lg font-bold text-gray-900">{bucket.entries.length} ads</h3>
-          <p className="mt-2 text-sm text-gray-600">{bucket.description}</p>
-        </div>
-        <InsightBadge label={bucket.title} tone={bucket.tone} />
-      </div>
-
-      <p className="mt-3 rounded-2xl border border-white/70 bg-white/80 px-3 py-2 text-xs text-gray-600">
-        {bucket.helper}
-      </p>
-
-      {bucket.entries.length === 0 ? (
-        <div className="mt-4 rounded-xl border border-dashed border-gray-200 bg-white/70 px-4 py-5 text-sm text-gray-500">
-          No hay piezas para este bucket con los filtros actuales.
-        </div>
-      ) : (
-        <ul className="mt-4 space-y-3">
-          {bucket.entries.slice(0, 4).map((entry) => (
-            <li key={entry.id} className="rounded-2xl border border-white/80 bg-white/90 px-4 py-4">
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <p className="font-semibold text-gray-900">{entry.title}</p>
-                  <p className="mt-1 text-xs text-gray-500">{entry.subtitle}</p>
-                  <p className="mt-2 text-xs text-gray-500">Creative: {entry.creativeName}</p>
-                </div>
-                <div className={`shrink-0 text-right text-xs font-semibold ${metricToneClassName}`}>
-                  <p>{formatCompactMetric(entry.spend, 'currency')}</p>
-                  <p className="mt-1">{formatCompactMetric(entry.clicks, 'number')} clicks</p>
-                </div>
-              </div>
-
-              <div className="mt-3 grid grid-cols-3 gap-2 rounded-xl bg-gray-50/80 px-3 py-2 text-xs text-gray-600">
-                <div>
-                  <p className="uppercase tracking-wide text-gray-400">CTR</p>
-                  <p className="mt-1 font-semibold text-gray-900">{formatCompactMetric(entry.ctr, 'percent')}</p>
-                </div>
-                <div>
-                  <p className="uppercase tracking-wide text-gray-400">CPC</p>
-                  <p className="mt-1 font-semibold text-gray-900">{formatCompactMetric(entry.cpc, 'currency')}</p>
-                </div>
-                <div>
-                  <p className="uppercase tracking-wide text-gray-400">Imp.</p>
-                  <p className="mt-1 font-semibold text-gray-900">{formatCompactMetric(entry.impressions, 'number')}</p>
-                </div>
-              </div>
-            </li>
-          ))}
-        </ul>
-      )}
-    </div>
-  );
-}
-
-function PerformanceTableCard({
-  title,
-  description,
-  rows,
-  emptyMessage,
-  showCreative,
-}: {
-  title: string;
-  description: string;
-  rows: MetaPerformanceEntry[];
-  emptyMessage: string;
-  showCreative: boolean;
-}) {
-  return (
-    <ChartCard title={title} icon={<BarChart3 size={16} className="text-red-600" />}>
-      <p className="text-sm text-gray-500">{description}</p>
-      {rows.length === 0 ? (
-        <EmptyState message={emptyMessage} />
-      ) : (
-        <ol className="space-y-3">
-          {rows.map((row, index) => (
-            <li key={row.id} className="rounded-[24px] border border-gray-200 bg-gray-50/70 p-4">
-              <div className="flex items-start justify-between gap-4">
-                <div className="min-w-0">
-                  <div className="flex items-center gap-3">
-                    <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-gray-200 bg-white text-sm font-bold text-gray-700">
-                      {index + 1}
-                    </span>
-                    <div className="min-w-0">
-                      <p className="truncate font-semibold text-gray-900">{row.title}</p>
-                      <p className="mt-1 truncate text-xs text-gray-500">{row.subtitle}</p>
-                    </div>
-                  </div>
-                  {showCreative ? <p className="mt-3 text-xs text-gray-500">Creative: {row.creativeName}</p> : null}
-                </div>
-                <div className="shrink-0 rounded-2xl border border-white/80 bg-white px-3 py-2 text-right">
-                  <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-400">Gasto</p>
-                  <p className="mt-1 text-sm font-bold text-gray-900">{formatCompactMetric(row.spend, 'currency')}</p>
-                </div>
-              </div>
-
-              <div className="mt-4 grid grid-cols-2 gap-2 md:grid-cols-4">
-                <MetricMiniCard label="Gasto" value={formatCompactMetric(row.spend, 'currency')} />
-                <MetricMiniCard label="Clicks" value={formatCompactMetric(row.clicks, 'number')} />
-                <MetricMiniCard label="CTR" value={formatCompactMetric(row.ctr, 'percent')} />
-                <MetricMiniCard label="CPC" value={formatCompactMetric(row.cpc, 'currency')} />
-              </div>
-
-              <div className="mt-4 flex flex-wrap gap-2">
-                {(row.labels.length ? row.labels : ['Sin alerta destacada']).map((label) => (
-                  <InsightBadge key={label} label={label} tone={getBadgeTone(label)} />
-                ))}
-              </div>
-            </li>
-          ))}
-        </ol>
-      )}
-    </ChartCard>
-  );
-}
-
-function InsightList({
-  entries,
-  emptyMessage,
-  emphasis = 'positive',
-}: {
-  entries: MetaPerformanceEntry[];
-  emptyMessage: string;
-  emphasis?: 'positive' | 'warning';
-}) {
-  if (entries.length === 0) {
-    return <EmptyState message={emptyMessage} />;
-  }
-
-  return (
-    <ul className="space-y-3">
-      {entries.map((entry) => (
-        <li key={entry.id} className="rounded-2xl border border-gray-100 bg-gray-50/70 px-4 py-4">
-          <div className="flex items-start justify-between gap-4">
-            <div className="min-w-0">
-              <p className="font-semibold text-gray-900">{entry.title}</p>
-              <p className="mt-1 text-xs text-gray-500">{entry.subtitle}</p>
-              <p className="mt-2 text-xs text-gray-500">Creative: {entry.creativeName}</p>
-              <div className="mt-3 flex flex-wrap gap-2">
-                {(entry.labels.length ? entry.labels : [emphasis === 'warning' ? 'Revisar pieza' : 'Contenido con tracción']).map((label) => (
-                  <InsightBadge key={label} label={label} tone={entry.labels.length ? getBadgeTone(label) : emphasis} />
-                ))}
-              </div>
-            </div>
-            <div className="shrink-0 text-right text-sm text-gray-600">
-              <p className="font-semibold text-gray-900">{formatCompactMetric(entry.clicks, 'number')} clicks</p>
-              <p className="mt-1">CTR {formatCompactMetric(entry.ctr, 'percent')}</p>
-              <p className="mt-1">CPC {formatCompactMetric(entry.cpc, 'currency')}</p>
-            </div>
-          </div>
-        </li>
-      ))}
-    </ul>
-  );
-}
-
 function EmptyState({ message }: { message: string }) {
   return <div className="rounded-xl border border-dashed border-gray-200 bg-gray-50 px-4 py-6 text-sm text-gray-500">{message}</div>;
 }
 
-function getBadgeTone(label: string): 'positive' | 'warning' | 'neutral' {
-  if (label.toLowerCase().includes('ganador') || label.toLowerCase().includes('atrae')) return 'positive';
-  if (label.toLowerCase().includes('baja eficiencia')) return 'warning';
-  return 'neutral';
-}
-
 function getComparisonCellClassName(metric: MetaComparisonMetric, side: 'left' | 'right') {
   if (metric.winner === 'tie') return 'font-medium text-gray-700';
-  if (metric.winner === side) return 'font-bold text-emerald-700 bg-emerald-50';
-  return 'font-semibold text-red-600 bg-red-50';
+  if (metric.winner === side) return 'font-extrabold text-emerald-700 bg-emerald-50/90';
+  return 'font-semibold text-red-600 bg-red-50/90';
 }
 
 function resolveComparisonEntries(
