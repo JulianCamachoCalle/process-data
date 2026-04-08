@@ -6,6 +6,7 @@ import {
   BarChart3,
   Clock3,
   FileText,
+  Filter,
   Layers,
   PieChart as PieChartIcon,
   Users,
@@ -201,7 +202,19 @@ function buildShareLabel(value: number, total: number) {
 }
 
 function formatStatusLegendLabel(label: string) {
-  return truncateLabel(label, 28);
+  const normalized = label.trim().toUpperCase();
+  const mapped = {
+    'LEADS NUEVOS A RESPONDER': 'Leads Nuevos',
+    NEGOCIACION: 'Negociación',
+    'CLOSED - LOST': 'Leads Perdidos',
+    'CLOSED - WON': 'Leads Ganados',
+    'ANUNCIO DE TRABAJO': 'Anuncio de Trabajo',
+    REGISTRADOS: 'Registrados',
+    SOPORTE: 'Soporte',
+    COMENTARIOS: 'Comentarios',
+  }[normalized] ?? label;
+
+  return truncateLabel(mapped, 28);
 }
 
 function escapeHtml(value: string) {
@@ -584,74 +597,83 @@ export function KommoLeadsInsights() {
     [insightsQuery.data?.created.status_volume_by_name],
   );
 
-  const statusByPipelineData = useMemo(() => {
-    const source = insightsQuery.data?.created.status_volume ?? [];
-    const topStatuses = source
-      .slice()
-      .sort((a, b) => b.total_leads - a.total_leads)
-      .slice(0, 8)
-      .map((status) => status.status_name);
-
-    const byPipeline = new Map<string, Record<string, number | string>>();
-
-    for (const status of source) {
-      const key = `${status.pipeline_id ?? 'null'}-${status.pipeline_name}`;
-      if (!byPipeline.has(key)) {
-        byPipeline.set(key, { pipeline_name: status.pipeline_name });
-      }
-
-      const row = byPipeline.get(key);
-      if (!row) continue;
-
-      const statusKey = topStatuses.includes(status.status_name) ? status.status_name : 'Otros';
-      const currentValue = Number(row[statusKey] ?? 0);
-      row[statusKey] = currentValue + status.total_leads;
-    }
-
-    const rows = Array.from(byPipeline.values());
-    return {
-      rows,
-      stackKeys: Array.from(new Set([...topStatuses, 'Otros'])).filter((key) =>
-        rows.some((row) => Number(row[key] ?? 0) > 0),
-      ),
-    };
-  }, [insightsQuery.data?.created.status_volume]);
-
   const createdPipelineChartData = useMemo(
     () => (insightsQuery.data?.created.pipeline_volume ?? [])
+      .filter((pipeline) => {
+        const key = normalizePipelineKey(pipeline.pipeline_name);
+        return key !== 'DATADELEADS' && key !== 'LEADSENTRANTESPRINCIPAL';
+      })
+      .sort((a, b) => b.total_leads - a.total_leads)
       .slice(0, 8)
       .map((pipeline) => ({
         label: truncateLabel(pipeline.pipeline_name, 28),
         total_leads: pipeline.total_leads,
         fullLabel: pipeline.pipeline_name,
-      }))
-      .reverse(),
+      })),
     [insightsQuery.data?.created.pipeline_volume],
   );
 
   const wonSellerChartData = useMemo(
     () => (insightsQuery.data?.won.sellers ?? [])
+      .filter((seller) => !shouldExcludePrimaryEntity(seller.seller_name))
+      .sort((a, b) => b.total_won - a.total_won)
       .slice(0, 8)
       .map((seller) => ({
         label: truncateLabel(seller.seller_name, 28),
         total_won: seller.total_won,
         fullLabel: seller.seller_name,
-      }))
-      .reverse(),
+      })),
     [insightsQuery.data?.won.sellers],
   );
 
-  const wonPipelineChartData = useMemo(
-    () => (insightsQuery.data?.won.pipelines ?? [])
+  const ownerCurrentStateChartData = useMemo(
+    () => (insightsQuery.data?.created.owner_volume ?? [])
+      .filter((owner) => !shouldExcludePrimaryEntity(owner.responsible_user_name))
+      .sort((a, b) => b.total_leads - a.total_leads)
       .slice(0, 8)
-      .map((pipeline) => ({
-        label: truncateLabel(pipeline.pipeline_name, 28),
-        total_won: pipeline.total_won,
-        fullLabel: pipeline.pipeline_name,
-      }))
-      .reverse(),
-    [insightsQuery.data?.won.pipelines],
+      .map((owner) => ({
+        label: truncateLabel(owner.responsible_user_name, 28),
+        total_leads: owner.total_leads,
+        fullLabel: owner.responsible_user_name,
+      })),
+    [insightsQuery.data?.created.owner_volume],
   );
+
+  const incomingDaysDivider = useMemo(
+    () => resolveRangeDays(insightsQuery.data?.filters.start_date ?? null, insightsQuery.data?.filters.end_date ?? null),
+    [insightsQuery.data?.filters.end_date, insightsQuery.data?.filters.start_date],
+  );
+
+  const hourlyIncomingAverageData = useMemo(
+    () => (insightsQuery.data?.created.hourly_incoming ?? []).map((row) => ({
+      ...row,
+      avg_incoming: row.total_incoming / incomingDaysDivider,
+    })),
+    [incomingDaysDivider, insightsQuery.data?.created.hourly_incoming],
+  );
+
+  const leadsComparatorData = useMemo(() => {
+    const source = insightsQuery.data;
+    if (!source) return [] as Array<{ metric: string; created: number; won: number }>;
+
+    return [
+      {
+        metric: 'Total periodo',
+        created: source.created.summary.total_leads,
+        won: source.won.summary.total_won,
+      },
+      {
+        metric: 'Top pipeline',
+        created: source.created.summary.top_pipeline?.total_leads ?? 0,
+        won: source.won.summary.top_pipeline?.total_won ?? 0,
+      },
+      {
+        metric: 'Top responsable',
+        created: source.created.summary.top_owner?.total_leads ?? 0,
+        won: source.won.summary.top_seller?.total_won ?? 0,
+      },
+    ];
+  }, [insightsQuery.data]);
 
   const handleExportPdf = useCallback(async () => {
     if (isExportingPdf) return;
@@ -718,7 +740,6 @@ export function KommoLeadsInsights() {
   }
 
   const data = insightsQuery.data;
-  const appliedRangeLabel = `${data.filters.start_date ?? 'sin inicio'} — ${data.filters.end_date ?? 'sin fin'}`;
 
   return (
     <div className="space-y-6">
@@ -755,8 +776,10 @@ export function KommoLeadsInsights() {
       <section className="space-y-5 rounded-[28px] border border-gray-200 bg-white p-5 shadow-[0_20px_36px_-30px_rgba(15,23,42,0.8)]">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-gray-500">Filtros</p>
-            <p className="mt-1 text-sm text-gray-500">Aplicá el mismo rango a actividad creada e historial de ganados.</p>
+            <p className="inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.22em] text-gray-500">
+              <Filter size={14} />
+              Filtros
+            </p>
           </div>
           {insightsQuery.isFetching ? <span className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">Actualizando…</span> : null}
         </div>
@@ -768,7 +791,7 @@ export function KommoLeadsInsights() {
           <QuickRangeButton label="Todo" onClick={() => applyQuickRange('all')} />
         </div>
 
-        <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+        <div className="grid grid-cols-1 gap-3 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] xl:items-end">
           <label className="rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3 text-xs font-semibold uppercase tracking-wide text-gray-600">
             <span>Desde</span>
             <input
@@ -787,39 +810,35 @@ export function KommoLeadsInsights() {
               onChange={(event) => setDraftEndDate(event.target.value || null)}
             />
           </label>
-        </div>
 
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={applyFilters}
-            className="inline-flex items-center rounded-2xl bg-red-600 px-4 py-2.5 text-xs font-semibold uppercase tracking-[0.16em] text-white shadow-[0_18px_32px_-18px_rgba(220,38,38,0.9)] transition hover:bg-red-700"
-          >
-            Aplicar filtros
-          </button>
-          <button
-            type="button"
-            onClick={clearFilters}
-            className="inline-flex items-center rounded-2xl border border-gray-200 bg-white px-4 py-2.5 text-xs font-semibold uppercase tracking-[0.16em] text-gray-700 transition hover:bg-gray-50"
-          >
-            Limpiar
-          </button>
-        </div>
-
-        <div className="flex flex-wrap items-center gap-2 text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">
-          <span className="rounded-full border border-gray-200 bg-gray-50 px-3 py-1.5">Rango aplicado: {appliedRangeLabel}</span>
-          <span className="rounded-full border border-gray-200 bg-white px-3 py-1.5">Creados / incoming → fecha de creación</span>
-          <span className="rounded-full border border-gray-200 bg-white px-3 py-1.5">Ganados → fecha_lead_ganado</span>
+          <div className="flex items-end justify-start gap-2 xl:justify-end">
+            <button
+              type="button"
+              onClick={clearFilters}
+              className="inline-flex items-center rounded-2xl border border-gray-200 bg-white px-4 py-2.5 text-xs font-semibold uppercase tracking-[0.16em] text-gray-700 transition hover:bg-gray-50"
+            >
+              Limpiar
+            </button>
+            <button
+              type="button"
+              onClick={applyFilters}
+              className="inline-flex items-center rounded-2xl bg-red-600 px-4 py-2.5 text-xs font-semibold uppercase tracking-[0.16em] text-white shadow-[0_18px_32px_-18px_rgba(220,38,38,0.9)] transition hover:bg-red-700"
+            >
+              Aplicar filtros
+            </button>
+          </div>
         </div>
       </section>
 
       <InsightsReportSections
         data={data}
         statusesByNameForPie={statusesByNameForPie}
-        statusByPipelineData={statusByPipelineData}
+        leadsComparatorData={leadsComparatorData}
         createdPipelineChartData={createdPipelineChartData}
+        hourlyIncomingAverageData={hourlyIncomingAverageData}
+        incomingDaysDivider={incomingDaysDivider}
+        ownerCurrentStateChartData={ownerCurrentStateChartData}
         wonSellerChartData={wonSellerChartData}
-        wonPipelineChartData={wonPipelineChartData}
       />
     </div>
   );
@@ -828,17 +847,21 @@ export function KommoLeadsInsights() {
 function InsightsReportSections({
   data,
   statusesByNameForPie,
-  statusByPipelineData,
+  leadsComparatorData,
   createdPipelineChartData,
+  hourlyIncomingAverageData,
+  incomingDaysDivider,
+  ownerCurrentStateChartData,
   wonSellerChartData,
-  wonPipelineChartData,
 }: {
   data: LeadsInsightsPayload;
   statusesByNameForPie: StatusByNameInsight[];
-  statusByPipelineData: { rows: Array<Record<string, number | string>>; stackKeys: string[] };
+  leadsComparatorData: Array<{ metric: string; created: number; won: number }>;
   createdPipelineChartData: Array<{ label: string; total_leads: number; fullLabel: string }>;
+  hourlyIncomingAverageData: Array<{ hour: number; total_incoming: number; avg_incoming: number }>;
+  incomingDaysDivider: number;
+  ownerCurrentStateChartData: Array<{ label: string; total_leads: number; fullLabel: string }>;
   wonSellerChartData: Array<{ label: string; total_won: number; fullLabel: string }>;
-  wonPipelineChartData: Array<{ label: string; total_won: number; fullLabel: string }>;
 }) {
   if (data.created.summary.total_leads === 0 && data.won.summary.total_won === 0) {
     return (
@@ -853,35 +876,24 @@ function InsightsReportSections({
 
   return (
     <>
-      <section className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <SemanticSectionCard
-          title="Actividad creada en el periodo"
-          description="El rango filtra por fecha de creación. Los estados y responsables describen cómo está hoy ese cohort creado dentro del periodo."
-        >
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
-            <KpiCard title="Leads creados" value={formatNumber(data.created.summary.total_leads)} helper="Base del análisis del periodo" compact />
-            <KpiCard title="Incoming entrantes" value={formatNumber(data.created.summary.total_incoming)} helper={`Participación ${buildShareLabel(data.created.summary.total_incoming, data.created.summary.total_leads)}`} compact />
-            <KpiCard title="Abiertos hoy" value={formatNumber(data.created.summary.total_open)} helper="Estado actual del cohort creado" compact />
-            <KpiCard title="Cerrados hoy" value={formatNumber(data.created.summary.total_closed)} helper="No representa cierre histórico" compact />
-            <KpiCard title="Perdidos hoy" value={formatNumber(data.created.summary.total_lost)} helper="Foto actual del cohort" compact />
-            <KpiCard title="Ticket promedio" value={formatCurrency(data.created.summary.avg_price)} helper="Precio promedio del cohort creado" compact />
-          </div>
-        </SemanticSectionCard>
-
-        <SemanticSectionCard
-          title="Ganados registrados en el periodo"
-          description="El rango filtra por fecha_lead_ganado. Los rankings usan snapshots históricos de vendedor y pipeline al momento del ganado."
-        >
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-            <KpiCard title="Leads ganados" value={formatNumber(data.won.summary.total_won)} helper="Serie histórica defendible" compact />
-            <KpiCard title="Top vendedor" value={data.won.summary.top_seller?.seller_name ?? 'N/D'} helper="Snapshot al momento del ganado" compact />
-            <KpiCard title="Top pipeline" value={data.won.summary.top_pipeline?.pipeline_name ?? 'N/D'} helper="No se mezcla con estados actuales" compact />
-          </div>
-        </SemanticSectionCard>
+      <section>
+        <ChartCard title="Comparativa directa de leads" description="Comparador de cohort creado vs ganados históricos en el mismo rango." icon={<BarChart3 size={16} className="text-red-600" />}>
+          <ResponsiveContainer width="100%" height={300}>
+            <BarChart data={leadsComparatorData} margin={{ top: 8, right: 12, bottom: 8, left: 0 }}>
+              <CartesianGrid stroke={CHART_GRID} strokeDasharray="3 3" vertical={false} />
+              <XAxis dataKey="metric" tick={{ fontSize: 12, fill: CHART_AXIS }} axisLine={false} tickLine={false} />
+              <YAxis tick={{ fontSize: 12, fill: CHART_AXIS }} axisLine={false} tickLine={false} allowDecimals={false} />
+              <Tooltip contentStyle={CHART_TOOLTIP_STYLE} formatter={(value) => formatNumber(asChartNumber(value))} />
+              <Legend verticalAlign="top" height={30} wrapperStyle={{ fontSize: '12px' }} />
+              <Bar dataKey="created" name="Cohort creado" fill="#dc2626" radius={[8, 8, 0, 0]} barSize={24} />
+              <Bar dataKey="won" name="Ganados históricos" fill="#f97316" radius={[8, 8, 0, 0]} barSize={24} />
+            </BarChart>
+          </ResponsiveContainer>
+        </ChartCard>
       </section>
 
       <section className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-        <ChartCard title="Leads creados por pipeline" description="Top pipelines del cohort creado en el rango." icon={<Layers size={16} className="text-red-600" />}>
+        <ChartCard title="Leads Creados por Personal" description="Top pipelines del cohort creado en el rango." icon={<Layers size={16} className="text-red-600" />}>
           <ResponsiveContainer width="100%" height={300}>
             <BarChart data={createdPipelineChartData} layout="vertical" margin={{ top: 8, right: 12, bottom: 8, left: 8 }}>
               <CartesianGrid stroke={CHART_GRID} strokeDasharray="3 3" horizontal={false} />
@@ -898,9 +910,9 @@ function InsightsReportSections({
           </ResponsiveContainer>
         </ChartCard>
 
-        <ChartCard title="Horas con más leads entrantes" description="Distribución horaria de incoming del periodo." icon={<Clock3 size={16} className="text-red-600" />}>
+        <ChartCard title="Horas con más leads entrantes" description={`Promedio diario por hora (incoming) en ${incomingDaysDivider} día(s) del rango.`} icon={<Clock3 size={16} className="text-red-600" />}>
           <ResponsiveContainer width="100%" height={300}>
-            <AreaChart data={data.created.hourly_incoming} margin={{ top: 12, right: 12, bottom: 0, left: 0 }}>
+            <AreaChart data={hourlyIncomingAverageData} margin={{ top: 12, right: 12, bottom: 0, left: 0 }}>
               <defs>
                 <linearGradient id="incomingFill" x1="0" y1="0" x2="0" y2="1">
                   <stop offset="5%" stopColor="#dc2626" stopOpacity={0.22} />
@@ -909,14 +921,14 @@ function InsightsReportSections({
               </defs>
               <CartesianGrid stroke={CHART_GRID} strokeDasharray="3 3" vertical={false} />
               <XAxis dataKey="hour" tickFormatter={formatHour} tick={{ fontSize: 12, fill: CHART_AXIS }} axisLine={false} tickLine={false} />
-              <YAxis tick={{ fontSize: 12, fill: CHART_AXIS }} axisLine={false} tickLine={false} allowDecimals={false} />
+              <YAxis tick={{ fontSize: 12, fill: CHART_AXIS }} axisLine={false} tickLine={false} />
               <Tooltip
                 contentStyle={CHART_TOOLTIP_STYLE}
                 labelFormatter={(hour) => `Hora ${formatHour(Number(hour))}`}
-                formatter={(value) => formatNumber(asChartNumber(value))}
+                formatter={(value) => Number(asChartNumber(value)).toFixed(2)}
               />
-              <Area type="monotone" dataKey="total_incoming" stroke="#dc2626" fill="url(#incomingFill)" strokeWidth={2.5} />
-              <Line type="monotone" dataKey="total_incoming" stroke="#dc2626" strokeWidth={2.5} dot={{ r: 3, strokeWidth: 2, fill: '#ffffff' }} activeDot={{ r: 5 }} />
+              <Area type="monotone" dataKey="avg_incoming" stroke="#dc2626" fill="url(#incomingFill)" strokeWidth={2.5} />
+              <Line type="monotone" dataKey="avg_incoming" stroke="#dc2626" strokeWidth={2.5} dot={{ r: 3, strokeWidth: 2, fill: '#ffffff' }} activeDot={{ r: 5 }} />
             </AreaChart>
           </ResponsiveContainer>
         </ChartCard>
@@ -964,77 +976,31 @@ function InsightsReportSections({
           </div>
         </ChartCard>
 
-        <ChartCard title="Estados actuales por pipeline" description="Lectura comparativa por pipeline sin asumir performance histórica." icon={<BarChart3 size={16} className="text-red-600" />}>
+        <ChartCard title="Estado actual por personal" description="Lectura comparativa por personal." icon={<Users size={16} className="text-red-600" />}>
           <ResponsiveContainer width="100%" height={300}>
-            <BarChart data={statusByPipelineData.rows} margin={{ top: 8, right: 16, bottom: 56, left: 0 }}>
-              <CartesianGrid stroke={CHART_GRID} strokeDasharray="3 3" vertical={false} />
-              <XAxis
-                dataKey="pipeline_name"
-                tick={{ fontSize: 12, fill: CHART_AXIS }}
-                tickFormatter={(value) => truncateLabel(String(value), 22)}
-                interval={0}
-                angle={-20}
-                textAnchor="end"
-                height={58}
-                axisLine={false}
-                tickLine={false}
+            <BarChart data={ownerCurrentStateChartData} layout="vertical" margin={{ top: 8, right: 12, bottom: 8, left: 8 }}>
+              <CartesianGrid stroke={CHART_GRID} strokeDasharray="3 3" horizontal={false} />
+              <XAxis type="number" tick={{ fontSize: 12, fill: CHART_AXIS }} axisLine={false} tickLine={false} allowDecimals={false} />
+              <YAxis type="category" dataKey="label" width={152} tick={{ fontSize: 12, fill: CHART_AXIS }} axisLine={false} tickLine={false} />
+              <Tooltip
+                cursor={{ fill: '#f8fafc' }}
+                contentStyle={CHART_TOOLTIP_STYLE}
+                formatter={(value) => formatNumber(asChartNumber(value))}
+                labelFormatter={(_, payload) => String(payload?.[0]?.payload?.fullLabel ?? '')}
               />
-              <YAxis tick={{ fontSize: 12, fill: CHART_AXIS }} axisLine={false} tickLine={false} allowDecimals={false} />
-              <Tooltip contentStyle={CHART_TOOLTIP_STYLE} formatter={(value) => formatNumber(asChartNumber(value))} />
-              <Legend verticalAlign="top" height={36} wrapperStyle={{ fontSize: '12px' }} />
-              {statusByPipelineData.stackKeys.map((key, index) => (
-                <Bar key={key} dataKey={key} stackId="statuses" fill={COLORS[index % COLORS.length]} radius={index === statusByPipelineData.stackKeys.length - 1 ? [8, 8, 0, 0] : [0, 0, 0, 0]} />
-              ))}
+              <Bar dataKey="total_leads" name="Leads" radius={[0, 10, 10, 0]} fill="#f97316" barSize={18} />
             </BarChart>
           </ResponsiveContainer>
         </ChartCard>
       </section>
 
-      <section className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-        <div className="rounded-[28px] border border-gray-200 bg-white p-5 shadow-[0_20px_36px_-30px_rgba(15,23,42,0.8)]">
-          <h3 className="inline-flex items-center gap-2 text-sm font-semibold text-gray-800">
-            <Users size={16} className="text-red-600" />
-            Top responsables actuales (cohort creado)
-          </h3>
-          <ul className="mt-4 space-y-2 text-sm text-gray-700">
-            {data.created.owner_volume.slice(0, 5).map((owner) => (
-              <li key={String(owner.responsible_user_id ?? 'null')} className="flex items-center justify-between rounded-2xl border border-gray-200 bg-gray-50 px-3 py-2.5">
-                <span className="truncate pr-3">{owner.responsible_user_name}</span>
-                <span className="font-semibold text-gray-900">{formatNumber(owner.total_leads)}</span>
-              </li>
-            ))}
-          </ul>
-        </div>
-
-        <div className="rounded-[28px] border border-gray-200 bg-white p-5 shadow-[0_20px_36px_-30px_rgba(15,23,42,0.8)]">
-          <h3 className="text-sm font-semibold text-gray-800">Highlights creados / incoming</h3>
-          <ul className="mt-4 space-y-2 text-sm text-gray-700">
-            <li className="rounded-2xl border border-gray-200 bg-gray-50 px-3 py-2.5">
-              Pipeline top (creados): <span className="font-semibold text-gray-900">{data.created.summary.top_pipeline?.pipeline_name ?? 'N/D'}</span>
-            </li>
-            <li className="rounded-2xl border border-gray-200 bg-gray-50 px-3 py-2.5">
-              Responsable actual top: <span className="font-semibold text-gray-900">{data.created.summary.top_owner?.responsible_user_name ?? 'N/D'}</span>
-            </li>
-            <li className="rounded-2xl border border-gray-200 bg-gray-50 px-3 py-2.5">
-              Hora pico incoming: <span className="font-semibold text-gray-900">{data.created.insights.busiest_hour ? formatHour(data.created.insights.busiest_hour.hour) : 'N/D'}</span>
-            </li>
-            <li className="rounded-2xl border border-gray-200 bg-gray-50 px-3 py-2.5">
-              Estado actual más frecuente: <span className="font-semibold text-gray-900">{data.created.insights.top_status?.status_name ?? 'N/D'}</span>
-            </li>
-            <li className="rounded-2xl border border-gray-200 bg-gray-50 px-3 py-2.5">
-              Leads sin pipeline: <span className="font-semibold text-gray-900">{formatNumber(data.created.insights.orphan_pipeline_leads)}</span>
-            </li>
-          </ul>
-        </div>
-      </section>
-
-      <section className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-        <ChartCard title="Ganados históricos por vendedor" description="Ranking snapshot al momento del ganado." icon={<Users size={16} className="text-red-600" />}>
-          <ResponsiveContainer width="100%" height={300}>
+      <section>
+        <ChartCard title="Ganados históricos por personal" description="Ranking descendente de ganados por responsable." icon={<Users size={16} className="text-red-600" />}>
+          <ResponsiveContainer width="100%" height={320}>
             <BarChart data={wonSellerChartData} layout="vertical" margin={{ top: 8, right: 12, bottom: 8, left: 8 }}>
               <CartesianGrid stroke={CHART_GRID} strokeDasharray="3 3" horizontal={false} />
               <XAxis type="number" tick={{ fontSize: 12, fill: CHART_AXIS }} axisLine={false} tickLine={false} allowDecimals={false} />
-              <YAxis type="category" dataKey="label" width={152} tick={{ fontSize: 12, fill: CHART_AXIS }} axisLine={false} tickLine={false} />
+              <YAxis type="category" dataKey="label" width={168} tick={{ fontSize: 12, fill: CHART_AXIS }} axisLine={false} tickLine={false} />
               <Tooltip
                 cursor={{ fill: '#f8fafc' }}
                 contentStyle={CHART_TOOLTIP_STYLE}
@@ -1045,47 +1011,6 @@ function InsightsReportSections({
             </BarChart>
           </ResponsiveContainer>
         </ChartCard>
-
-        <ChartCard title="Ganados históricos por pipeline" description="Distribución histórica de ganados por pipeline snapshot." icon={<Layers size={16} className="text-red-600" />}>
-          <ResponsiveContainer width="100%" height={300}>
-            <BarChart data={wonPipelineChartData} layout="vertical" margin={{ top: 8, right: 12, bottom: 8, left: 8 }}>
-              <CartesianGrid stroke={CHART_GRID} strokeDasharray="3 3" horizontal={false} />
-              <XAxis type="number" tick={{ fontSize: 12, fill: CHART_AXIS }} axisLine={false} tickLine={false} allowDecimals={false} />
-              <YAxis type="category" dataKey="label" width={152} tick={{ fontSize: 12, fill: CHART_AXIS }} axisLine={false} tickLine={false} />
-              <Tooltip
-                cursor={{ fill: '#f8fafc' }}
-                contentStyle={CHART_TOOLTIP_STYLE}
-                formatter={(value) => formatNumber(asChartNumber(value))}
-                labelFormatter={(_, payload) => String(payload?.[0]?.payload?.fullLabel ?? '')}
-              />
-              <Bar dataKey="total_won" name="Ganados" radius={[0, 10, 10, 0]} fill="#f97316" barSize={18} />
-            </BarChart>
-          </ResponsiveContainer>
-        </ChartCard>
-      </section>
-
-      <section className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-        <DataPanel
-          title="Cohort creado por pipeline + estado actual"
-          headers={['Pipeline', 'Creados', 'Abiertos', 'Cerrados', 'Perdidos', 'Ticket prom.']}
-          rows={data.created.pipeline_current_state.slice(0, 10).map((pipeline) => [
-            pipeline.pipeline_name,
-            formatNumber(pipeline.total_leads),
-            formatNumber(pipeline.open_leads),
-            formatNumber(pipeline.closed_leads),
-            formatNumber(pipeline.lost_leads),
-            formatCurrency(pipeline.avg_price),
-          ])}
-        />
-
-        <DataPanel
-          title="Ranking histórico de ganados"
-          headers={['Entidad', 'Ganados']}
-          rows={[
-            ...data.won.sellers.slice(0, 5).map((seller) => [seller.seller_name, formatNumber(seller.total_won)]),
-            ...data.won.pipelines.slice(0, 5).map((pipeline) => [`Pipeline: ${pipeline.pipeline_name}`, formatNumber(pipeline.total_won)]),
-          ]}
-        />
       </section>
     </>
   );
@@ -1103,67 +1028,25 @@ function QuickRangeButton({ label, onClick }: { label: string; onClick: () => vo
   );
 }
 
-function KpiCard({ title, value, helper, compact = false }: { title: string; value: string; helper?: string; compact?: boolean }) {
-  return (
-    <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-[0_20px_42px_-34px_rgba(15,23,42,0.9)]">
-      <p className="text-xs font-semibold uppercase tracking-[0.18em] text-gray-500">{title}</p>
-      <p className={`${compact ? 'text-lg' : 'text-2xl'} mt-1 font-bold text-gray-900`}>{value}</p>
-      {helper ? <p className="mt-2 text-xs text-gray-500">{helper}</p> : null}
-    </div>
-  );
+function resolveRangeDays(startDate: string | null, endDate: string | null) {
+  if (!startDate || !endDate) return 1;
+  const start = new Date(`${startDate}T00:00:00`);
+  const end = new Date(`${endDate}T00:00:00`);
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || end < start) return 1;
+  const diff = end.getTime() - start.getTime();
+  return Math.max(1, Math.floor(diff / (1000 * 60 * 60 * 24)) + 1);
 }
 
-function SemanticSectionCard({
-  title,
-  description,
-  children,
-}: {
-  title: string;
-  description: string;
-  children: ReactNode;
-}) {
-  return (
-    <section className="space-y-4 rounded-[28px] border border-gray-200 bg-white p-5 shadow-[0_20px_36px_-30px_rgba(15,23,42,0.8)]">
-      <div>
-        <p className="text-xs font-semibold uppercase tracking-[0.18em] text-gray-500">Comparativa</p>
-        <h3 className="mt-1 text-base font-bold text-gray-900">{title}</h3>
-        <p className="mt-1 text-sm text-gray-500">{description}</p>
-      </div>
-      {children}
-    </section>
-  );
+function normalizePipelineKey(value: string) {
+  return value
+    .toUpperCase()
+    .replace(/\s+/g, '')
+    .replace(/_/g, '');
 }
 
-function DataPanel({ title, headers, rows }: { title: string; headers: string[]; rows: string[][] }) {
-  return (
-    <div className="rounded-[28px] border border-gray-200 bg-white p-5 shadow-[0_20px_36px_-30px_rgba(15,23,42,0.8)]">
-      <h3 className="mb-4 text-sm font-semibold text-gray-800">{title}</h3>
-      <div className="overflow-x-auto">
-        <table className="min-w-full text-sm">
-          <thead>
-            <tr className="border-b border-gray-200 text-left text-xs uppercase tracking-wide text-gray-500">
-              {headers.map((header) => (
-                <th key={header} className="px-3 py-2 font-semibold">{header}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {rows.length === 0 ? (
-              <tr>
-                <td colSpan={headers.length} className="px-3 py-4 text-gray-500">Sin datos disponibles.</td>
-              </tr>
-            ) : rows.map((row, rowIndex) => (
-              <tr key={`${title}-${rowIndex}`} className="border-b border-gray-100 last:border-b-0">
-                {row.map((cell, cellIndex) => (
-                  <td key={`${title}-${rowIndex}-${cellIndex}`} className="px-3 py-2 text-gray-700">{cell}</td>
-                ))}
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  );
+function shouldExcludePrimaryEntity(value: string) {
+  const normalized = normalizePipelineKey(value);
+  return normalized === 'DATADELEADS' || normalized === 'LEADSENTRANTESPRINCIPAL' || normalized === 'LEADSENTRANTESPRINCIPALES';
 }
 
 function ChartCard({ title, description, icon, children }: { title: string; description?: string; icon: ReactNode; children: ReactNode }) {
