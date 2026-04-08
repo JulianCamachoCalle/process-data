@@ -168,88 +168,142 @@ function isNumberHeader(header: string) {
 }
 
 async function applyBasicSheetStyles(
+  spreadsheetId: string,
   sheet: GoogleSpreadsheet['sheetsByIndex'][number],
   columns: string[],
   rowsCount: number,
 ) {
-  await sheet.updateProperties({
-    gridProperties: {
-      rowCount: sheet.rowCount,
-      columnCount: sheet.columnCount,
-      frozenRowCount: 1,
-    },
-  });
-
   const columnsCount = columns.length;
   if (columnsCount <= 0) return;
 
-  const endColumnLetter = columnIndexToLetter(columnsCount);
-  const lastRow = Math.max(1, rowsCount + 1);
-  await sheet.loadCells(`A1:${endColumnLetter}${lastRow}`);
+  const requests: Array<Record<string, unknown>> = [
+    {
+      updateSheetProperties: {
+        properties: {
+          sheetId: sheet.sheetId,
+          gridProperties: {
+            frozenRowCount: 1,
+          },
+        },
+        fields: 'gridProperties.frozenRowCount',
+      },
+    },
+    {
+      repeatCell: {
+        range: {
+          sheetId: sheet.sheetId,
+          startRowIndex: 0,
+          endRowIndex: 1,
+          startColumnIndex: 0,
+          endColumnIndex: columnsCount,
+        },
+        cell: {
+          userEnteredFormat: {
+            backgroundColor: { red: 0.86, green: 0.15, blue: 0.15 },
+            horizontalAlignment: 'CENTER',
+            textFormat: {
+              bold: true,
+              fontSize: 10,
+              foregroundColor: { red: 1, green: 1, blue: 1 },
+            },
+          },
+        },
+        fields: 'userEnteredFormat(backgroundColor,textFormat,horizontalAlignment)',
+      },
+    },
+  ];
 
-  for (let columnIndex = 0; columnIndex < columnsCount; columnIndex += 1) {
-    const headerCell = sheet.getCell(0, columnIndex);
-    headerCell.textFormat = {
-      ...(headerCell.textFormat ?? {}),
-      bold: true,
-      foregroundColor: { red: 1, green: 1, blue: 1 },
-      fontSize: 10,
-    };
-    headerCell.backgroundColor = { red: 0.86, green: 0.15, blue: 0.15 };
-    headerCell.horizontalAlignment = 'CENTER';
-  }
-
-  if (rowsCount <= 0) return;
-
-  const currencyFormat = {
-    type: 'CURRENCY' as const,
-    pattern: '[$S/ ] #,##0.00',
-  };
-
-  const numberFormat = {
-    type: 'NUMBER' as const,
-    pattern: '#,##0',
-  };
-
-  for (let rowIndex = 1; rowIndex <= rowsCount; rowIndex += 1) {
-    const isOddVisualRow = rowIndex % 2 === 1;
-    const rowBackground = isOddVisualRow
-      ? { red: 1, green: 1, blue: 1 }
-      : { red: 0.98, green: 0.98, blue: 0.98 };
+  if (rowsCount > 0) {
+    requests.push({
+      repeatCell: {
+        range: {
+          sheetId: sheet.sheetId,
+          startRowIndex: 1,
+          endRowIndex: rowsCount + 1,
+          startColumnIndex: 0,
+          endColumnIndex: columnsCount,
+        },
+        cell: {
+          userEnteredFormat: {
+            textFormat: {
+              fontSize: 10,
+              foregroundColor: { red: 0.17, green: 0.17, blue: 0.17 },
+            },
+          },
+        },
+        fields: 'userEnteredFormat.textFormat',
+      },
+    });
 
     for (let colIndex = 0; colIndex < columnsCount; colIndex += 1) {
       const header = columns[colIndex] ?? '';
-      const cell = sheet.getCell(rowIndex, colIndex);
+      const alignment = getAlignmentByHeader(header);
 
-      cell.backgroundColor = rowBackground;
-      cell.textFormat = {
-        ...(cell.textFormat ?? {}),
-        fontSize: 10,
-      };
-      cell.horizontalAlignment = getAlignmentByHeader(header);
+      requests.push({
+        repeatCell: {
+          range: {
+            sheetId: sheet.sheetId,
+            startRowIndex: 1,
+            endRowIndex: rowsCount + 1,
+            startColumnIndex: colIndex,
+            endColumnIndex: colIndex + 1,
+          },
+          cell: {
+            userEnteredFormat: {
+              horizontalAlignment: alignment,
+            },
+          },
+          fields: 'userEnteredFormat.horizontalAlignment',
+        },
+      });
 
       if (isCurrencyHeader(header)) {
-        cell.numberFormat = currencyFormat;
+        requests.push({
+          repeatCell: {
+            range: {
+              sheetId: sheet.sheetId,
+              startRowIndex: 1,
+              endRowIndex: rowsCount + 1,
+              startColumnIndex: colIndex,
+              endColumnIndex: colIndex + 1,
+            },
+            cell: {
+              userEnteredFormat: {
+                numberFormat: {
+                  type: 'CURRENCY',
+                  pattern: '[$S/ ] #,##0.00',
+                },
+              },
+            },
+            fields: 'userEnteredFormat.numberFormat',
+          },
+        });
       } else if (isNumberHeader(header)) {
-        cell.numberFormat = numberFormat;
+        requests.push({
+          repeatCell: {
+            range: {
+              sheetId: sheet.sheetId,
+              startRowIndex: 1,
+              endRowIndex: rowsCount + 1,
+              startColumnIndex: colIndex,
+              endColumnIndex: colIndex + 1,
+            },
+            cell: {
+              userEnteredFormat: {
+                numberFormat: {
+                  type: 'NUMBER',
+                  pattern: '#,##0',
+                },
+              },
+            },
+            fields: 'userEnteredFormat.numberFormat',
+          },
+        });
       }
     }
   }
 
-  await sheet.saveUpdatedCells();
-}
-
-function columnIndexToLetter(columnIndex1Based: number): string {
-  let index = columnIndex1Based;
-  let letter = '';
-
-  while (index > 0) {
-    const remainder = (index - 1) % 26;
-    letter = String.fromCharCode(65 + remainder) + letter;
-    index = Math.floor((index - 1) / 26);
-  }
-
-  return letter;
+  await applySheetBatchUpdate(spreadsheetId, requests);
 }
 
 function getGoogleJwt() {
@@ -267,6 +321,35 @@ function getGoogleJwt() {
       'https://www.googleapis.com/auth/drive.file',
     ],
   });
+}
+
+async function applySheetBatchUpdate(
+  spreadsheetId: string,
+  requests: Array<Record<string, unknown>>,
+) {
+  if (requests.length === 0) return;
+
+  const auth = getGoogleJwt();
+  await auth.authorize();
+
+  const accessToken = auth.credentials.access_token;
+  if (!accessToken) {
+    throw new Error('No se pudo obtener token de Google para aplicar estilos.');
+  }
+
+  const response = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}:batchUpdate`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ requests }),
+  });
+
+  if (!response.ok) {
+    const bodyText = await response.text();
+    throw new Error(`No se pudieron aplicar estilos (${response.status}): ${bodyText}`);
+  }
 }
 
 async function fetchEnviosRows(dateFrom: string, dateTo: string) {
@@ -402,7 +485,7 @@ async function replaceSheetData(spreadsheetId: string, sheetName: string, column
     await sheet.addRows(chunk as never);
   }
 
-  await applyBasicSheetStyles(sheet, columns, rows.length);
+  await applyBasicSheetStyles(spreadsheetId, sheet, columns, rows.length);
 }
 
 export function listExportJobs() {
