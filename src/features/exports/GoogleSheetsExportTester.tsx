@@ -180,9 +180,11 @@ export function GoogleSheetsExportTester() {
         <div className="mt-5 rounded-xl border border-amber-200 bg-amber-50 p-4 text-xs text-amber-900 space-y-2">
           <p className="font-semibold uppercase tracking-[0.12em]">Configuración necesaria</p>
           <ul className="list-disc pl-5 space-y-1">
-            <li>Variables de entorno: <code>GOOGLE_SERVICE_ACCOUNT_EMAIL</code> y <code>GOOGLE_PRIVATE_KEY</code>.</li>
-            <li>No hace falta <code>GOOGLE_SHEET_ID</code> para este flujo nuevo (el usuario pasa su propio spreadsheet ID).</li>
-            <li>Debes compartir el Google Sheet destino con el email de service account (Editor).</li>
+            <li>1. Cambia la accesibilidad del Google Sheet a público</li>
+            <li>2. Copia el ID del Google Sheet (lo que va entre /d/ y /edit)</li>
+            <li>3. Pega el ID en el campo SpreadSheet ID</li>
+            <li>4. Rellena los otros campos correspondientes </li>
+            <li>5. Exporta los datos</li>
           </ul>
           {spreadsheetLink ? (
             <a

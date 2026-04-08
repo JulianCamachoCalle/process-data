@@ -128,7 +128,50 @@ function isDateInRange(raw: unknown, dateFrom: string, dateTo: string) {
   return comparable >= dateFrom && comparable <= dateTo;
 }
 
-async function applyBasicSheetStyles(sheet: GoogleSpreadsheet['sheetsByIndex'][number], columnsCount: number) {
+function getAlignmentByHeader(header: string) {
+  const normalized = header.trim().toLowerCase();
+
+  if (
+    normalized.includes('cobro')
+    || normalized.includes('pago')
+    || normalized.includes('ingreso')
+    || normalized.includes('costo')
+    || normalized.includes('extra')
+    || normalized.includes('cantidad')
+    || normalized.includes('dias')
+    || normalized.includes('anulados')
+  ) {
+    return 'RIGHT' as const;
+  }
+
+  if (normalized.includes('fecha')) {
+    return 'CENTER' as const;
+  }
+
+  return 'LEFT' as const;
+}
+
+function isCurrencyHeader(header: string) {
+  const normalized = header.trim().toLowerCase();
+  return (
+    normalized.includes('cobro')
+    || normalized.includes('pago')
+    || normalized.includes('ingreso')
+    || normalized.includes('costo')
+    || normalized.includes('extra')
+  );
+}
+
+function isNumberHeader(header: string) {
+  const normalized = header.trim().toLowerCase();
+  return normalized.includes('cantidad') || normalized.includes('dias') || normalized.includes('anulados');
+}
+
+async function applyBasicSheetStyles(
+  sheet: GoogleSpreadsheet['sheetsByIndex'][number],
+  columns: string[],
+  rowsCount: number,
+) {
   try {
     await sheet.updateProperties({
       gridProperties: {
@@ -142,6 +185,7 @@ async function applyBasicSheetStyles(sheet: GoogleSpreadsheet['sheetsByIndex'][n
   }
 
   try {
+    const columnsCount = columns.length;
     if (columnsCount <= 0) return;
     const endColumnLetter = columnIndexToLetter(columnsCount);
     await sheet.loadCells(`A1:${endColumnLetter}1`);
@@ -163,6 +207,56 @@ async function applyBasicSheetStyles(sheet: GoogleSpreadsheet['sheetsByIndex'][n
         blue: 0.15,
       };
       cell.horizontalAlignment = 'CENTER';
+    }
+
+    await sheet.saveUpdatedCells();
+  } catch {
+    // no-op: estilo opcional
+  }
+
+  if (rowsCount <= 0) return;
+
+  try {
+    const columnsCount = columns.length;
+    const endColumnLetter = columnIndexToLetter(columnsCount);
+    const lastRow = rowsCount + 1;
+    await sheet.loadCells(`A2:${endColumnLetter}${lastRow}`);
+
+    const currencyFormat = {
+      type: 'CURRENCY' as const,
+      pattern: '[$S/ ] #,##0.00',
+    };
+
+    const numberFormat = {
+      type: 'NUMBER' as const,
+      pattern: '#,##0',
+    };
+
+    for (let rowIndex = 1; rowIndex <= rowsCount; rowIndex += 1) {
+      const isOddVisualRow = rowIndex % 2 === 1;
+      const rowBackground = isOddVisualRow
+        ? { red: 1, green: 1, blue: 1 }
+        : { red: 0.98, green: 0.98, blue: 0.98 };
+
+      for (let colIndex = 0; colIndex < columnsCount; colIndex += 1) {
+        const header = columns[colIndex] ?? '';
+        const cell = sheet.getCell(rowIndex, colIndex);
+
+        cell.backgroundColor = rowBackground;
+        cell.textFormat = {
+          ...(cell.textFormat ?? {}),
+          fontSize: 10,
+          foregroundColor: { red: 0.17, green: 0.17, blue: 0.17 },
+        };
+
+        cell.horizontalAlignment = getAlignmentByHeader(header);
+
+        if (isCurrencyHeader(header)) {
+          cell.numberFormat = currencyFormat;
+        } else if (isNumberHeader(header)) {
+          cell.numberFormat = numberFormat;
+        }
+      }
     }
 
     await sheet.saveUpdatedCells();
@@ -328,13 +422,13 @@ async function replaceSheetData(spreadsheetId: string, sheetName: string, column
     headerValues: columns,
   });
 
-  await applyBasicSheetStyles(sheet, columns.length);
-
   const chunkSize = 1000;
   for (let offset = 0; offset < rows.length; offset += chunkSize) {
     const chunk = rows.slice(offset, offset + chunkSize);
     await sheet.addRows(chunk as never);
   }
+
+  await applyBasicSheetStyles(sheet, columns, rows.length);
 }
 
 export function listExportJobs() {
