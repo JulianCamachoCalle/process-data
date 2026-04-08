@@ -66,3 +66,18 @@ h3 {
 	background-size: 64px 64px;
 	mask-image: linear-gradient(180deg, rgba(0, 0, 0, 0.88), transparent 92%);
 }
+
+.landing-noise {
+	background-image:
+		radial-gradient(circle at 20% 20%, rgba(255, 255, 255, 0.05) 0 1px, transparent 1px),
+		radial-gradient(circle at 70% 35%, rgba(255, 255, 255, 0.04) 0 1px, transparent 1px),
+		radial-gradient(circle at 40% 80%, rgba(255, 255, 255, 0.04) 0 1px, transparent 1px);
+	background-size: 18px 18px, 24px 24px, 22px 22px;
+	mix-blend-mode: soft-light;
+}
+
+.editorial-rule {
+	height: 1px;
+	width: min(100%, 22rem);
+	background: linear-gradient(90deg, rgba(230, 0, 0, 0.9), rgba(255, 255, 255, 0.22), transparent);
+}
