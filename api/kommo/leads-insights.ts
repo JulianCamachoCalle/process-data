@@ -8,6 +8,14 @@ import {
 
 const INSIGHTS_SECRET_HEADER = 'x-kommo-insights-secret';
 const INSIGHTS_SECRET_ENV = 'KOMMO_INSIGHTS_SECRET';
+const INSIGHTS_CACHE_TTL_MS = 60 * 1000;
+
+type InsightsCacheEntry = {
+  expiresAt: number;
+  payload: Record<string, unknown>;
+};
+
+const insightsCache = new Map<string, InsightsCacheEntry>();
 
 type LeadRow = {
   pipeline_id: number | null;
@@ -190,19 +198,40 @@ function isLikelyLostStatus(statusName: string) {
 async function safeSelectPaginated<T extends Record<string, unknown>>(
   table: string,
   columns: string,
-  batchSize = 1000,
+  options?: {
+    batchSize?: number;
+    dateFilter?: {
+      column: string;
+      startDate: string | null;
+      endDate: string | null;
+      widenByOneDay?: boolean;
+    };
+  },
 ): Promise<T[]> {
   try {
     const supabase = getSupabaseAdminClient();
     const rows: T[] = [];
     let from = 0;
+    const batchSize = options?.batchSize ?? 1000;
 
     while (true) {
       const to = from + batchSize - 1;
-      const { data, error } = await supabase
+      let query = supabase
         .from(table as never)
         .select(columns as never)
         .range(from, to);
+
+      if (options?.dateFilter) {
+        query = applyDateRangeQuery(
+          query,
+          options.dateFilter.column,
+          options.dateFilter.startDate,
+          options.dateFilter.endDate,
+          { widenByOneDay: options.dateFilter.widenByOneDay },
+        );
+      }
+
+      const { data, error } = await query;
 
       if (error || !Array.isArray(data)) {
         return [];
@@ -274,6 +303,50 @@ function parseDateInput(value: string | undefined) {
   }
 
   return value;
+}
+
+function shiftIsoDate(isoDate: string, deltaDays: number) {
+  const [yearRaw, monthRaw, dayRaw] = isoDate.split('-');
+  const date = new Date(Date.UTC(Number(yearRaw), Number(monthRaw) - 1, Number(dayRaw)));
+  if (Number.isNaN(date.getTime())) return isoDate;
+  date.setUTCDate(date.getUTCDate() + deltaDays);
+  return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}-${String(date.getUTCDate()).padStart(2, '0')}`;
+}
+
+function buildInsightsCacheKey(startDate: string | null, endDate: string | null) {
+  return `${startDate ?? 'null'}::${endDate ?? 'null'}`;
+}
+
+function applyDateRangeQuery<T extends { gte: (column: string, value: string) => T; lte: (column: string, value: string) => T }>(
+  query: T,
+  column: string,
+  startDate: string | null,
+  endDate: string | null,
+  options?: { widenByOneDay?: boolean },
+): T {
+  let next = query;
+
+  const normalizedStart = startDate
+    ? options?.widenByOneDay
+      ? shiftIsoDate(startDate, -1)
+      : startDate
+    : null;
+
+  const normalizedEnd = endDate
+    ? options?.widenByOneDay
+      ? shiftIsoDate(endDate, 1)
+      : endDate
+    : null;
+
+  if (normalizedStart) {
+    next = next.gte(column, normalizedStart);
+  }
+
+  if (normalizedEnd) {
+    next = next.lte(column, normalizedEnd);
+  }
+
+  return next;
 }
 
 function toLimaDateString(dateLike: string) {
@@ -377,6 +450,12 @@ export default async function kommoLeadsInsightsHandler(req: VercelRequest, res:
       });
     }
 
+    const cacheKey = buildInsightsCacheKey(startDate, endDate);
+    const cached = insightsCache.get(cacheKey);
+    if (cached && cached.expiresAt > Date.now()) {
+      return res.status(200).json(cached.payload);
+    }
+
     const [
       leads,
       wonLeads,
@@ -385,11 +464,17 @@ export default async function kommoLeadsInsightsHandler(req: VercelRequest, res:
       unsortedLeads,
       users,
     ] = await Promise.all([
-      safeSelectPaginated<LeadRow>('kommo_leads', 'pipeline_id,status_id,price,is_deleted,closed_at,created_at,responsible_user_id'),
-      safeSelectPaginated<LeadGanadoRow>('leads_ganados', 'fecha_lead_ganado,vendedor_nombre_snapshot,pipeline_id_snapshot,kommo_lead_id'),
+      safeSelectPaginated<LeadRow>('kommo_leads', 'pipeline_id,status_id,price,is_deleted,closed_at,created_at,responsible_user_id', {
+        dateFilter: { column: 'created_at', startDate, endDate, widenByOneDay: true },
+      }),
+      safeSelectPaginated<LeadGanadoRow>('leads_ganados', 'fecha_lead_ganado,vendedor_nombre_snapshot,pipeline_id_snapshot,kommo_lead_id', {
+        dateFilter: { column: 'fecha_lead_ganado', startDate, endDate },
+      }),
       safeSelectPaginated<PipelineRow>('kommo_pipelines', 'business_id,name'),
       safeSelectPaginated<PipelineStatusRow>('kommo_pipeline_statuses', 'business_id,pipeline_id,name,type'),
-      safeSelectPaginated<UnsortedLeadRow>('kommo_unsorted_leads', 'created_at'),
+      safeSelectPaginated<UnsortedLeadRow>('kommo_unsorted_leads', 'created_at', {
+        dateFilter: { column: 'created_at', startDate, endDate, widenByOneDay: true },
+      }),
       safeSelectPaginated<UserRow>('kommo_users', 'business_id,name'),
     ]);
 
@@ -656,11 +741,18 @@ export default async function kommoLeadsInsightsHandler(req: VercelRequest, res:
       },
     };
 
-    return res.status(200).json({
+    const successPayload = {
       success: true,
       timezone: 'America/Lima',
       ...response,
+    };
+
+    insightsCache.set(cacheKey, {
+      expiresAt: Date.now() + INSIGHTS_CACHE_TTL_MS,
+      payload: successPayload,
     });
+
+    return res.status(200).json(successPayload);
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : 'Error interno del servidor';
     return res.status(500).json({
