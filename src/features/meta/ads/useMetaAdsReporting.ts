@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { isSupabaseConfigured, supabase } from '../../../lib/supabase';
-import type { MetaAdsOverviewFilters, MetaAdsOverviewPayload, MetaAdsReportingRow } from './types';
+import type { MetaAdsHourlyRow, MetaAdsOverviewFilters, MetaAdsOverviewPayload, MetaAdsReportingRow } from './types';
 
 type MetaAdAccountRow = {
   business_id: string;
@@ -37,14 +37,29 @@ export function useMetaAdsReporting(filters: MetaAdsOverviewFilters) {
         reportingQuery = reportingQuery.lte('date_start', filters.dateTo);
       }
 
+      let hourlyQuery = supabase
+        .from('meta_ad_insights_hourly')
+        .select('ad_business_id,date_start,hour_bucket,spend,impressions,reach,clicks,ctr,cpc')
+        .order('date_start', { ascending: true })
+        .order('hour_bucket', { ascending: true });
+
+      if (filters.dateFrom) {
+        hourlyQuery = hourlyQuery.gte('date_start', filters.dateFrom);
+      }
+
+      if (filters.dateTo) {
+        hourlyQuery = hourlyQuery.lte('date_start', filters.dateTo);
+      }
+
       const accountsPromise = supabase
         .from('meta_ad_accounts')
         .select('business_id, name')
         .order('name', { ascending: true });
 
-      const [accountsResult, reportingResult] = await Promise.all([
+      const [accountsResult, reportingResult, hourlyResult] = await Promise.all([
         accountsPromise,
         reportingQuery,
+        hourlyQuery,
       ]);
 
       if (accountsResult.error) {
@@ -55,9 +70,14 @@ export function useMetaAdsReporting(filters: MetaAdsOverviewFilters) {
         throw new Error(`No se pudo cargar el detalle de Meta Ads: ${reportingResult.error.message}`);
       }
 
+      const hourlyRows = hourlyResult.error
+        ? []
+        : ((hourlyResult.data ?? []) as MetaAdsHourlyRow[]);
+
       return {
         accounts: (accountsResult.data ?? []) as MetaAdAccountRow[],
         rows: (reportingResult.data ?? []) as MetaAdsReportingRow[],
+        hourlyRows,
       };
     },
     staleTime: 60 * 1000,

@@ -123,6 +123,19 @@ type MetaInsightRow = {
   raw_payload: JsonRecord;
 };
 
+type MetaInsightHourlyRow = {
+  ad_business_id: string;
+  date_start: string;
+  hour_bucket: string;
+  spend: number;
+  impressions: number;
+  reach: number;
+  clicks: number;
+  ctr: number | null;
+  cpc: number | null;
+  raw_payload: JsonRecord;
+};
+
 function asSingleParam(value: unknown): string | undefined {
   if (Array.isArray(value)) {
     const first = value[0];
@@ -567,6 +580,29 @@ function mapInsightRow(payload: JsonRecord): MetaInsightRow | null {
   };
 }
 
+function mapInsightHourlyRow(payload: JsonRecord): MetaInsightHourlyRow | null {
+  const adBusinessId = toNullableText(payload.ad_id);
+  const dateStart = toNullableText(payload.date_start);
+  const hourBucket = toNullableText(payload.hourly_stats_aggregated_by_advertiser_time_zone);
+
+  if (!adBusinessId || !dateStart || !hourBucket) {
+    return null;
+  }
+
+  return {
+    ad_business_id: adBusinessId,
+    date_start: dateStart,
+    hour_bucket: hourBucket,
+    spend: toNumberOrZero(payload.spend),
+    impressions: Math.trunc(toNumberOrZero(payload.impressions)),
+    reach: Math.trunc(toNumberOrZero(payload.reach)),
+    clicks: Math.trunc(toNumberOrZero(payload.clicks)),
+    ctr: toNullableNumber(payload.ctr),
+    cpc: toNullableNumber(payload.cpc),
+    raw_payload: payload,
+  };
+}
+
 export default async function metaAdsSyncHandler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'GET' && req.method !== 'POST') {
     return res.status(405).json({ error: 'Método no permitido' });
@@ -792,6 +828,36 @@ export default async function metaAdsSyncHandler(req: VercelRequest, res: Vercel
       });
       baseSummary.insights = insightsResult.summary;
       earlyStop = insightsResult.earlyStop;
+    }
+
+    if (!earlyStop) {
+      try {
+        const hourlyInsightsResult = await syncPagedResource<JsonRecord, MetaInsightHourlyRow>({
+          token,
+          label: 'insights',
+          path: `${accountBusinessId}/insights`,
+          params: {
+            level: 'ad',
+            fields: 'ad_id,date_start,spend,impressions,reach,clicks,ctr,cpc,hourly_stats_aggregated_by_advertiser_time_zone',
+            breakdowns: 'hourly_stats_aggregated_by_advertiser_time_zone',
+            date_preset: datePreset,
+            time_increment: '1',
+            limit: String(limit),
+          },
+          maxPages,
+          startedAt,
+          maxRuntimeMs,
+          mapItem: mapInsightHourlyRow,
+          table: 'meta_ad_insights_hourly',
+          onConflict: 'ad_business_id,date_start,hour_bucket',
+        });
+
+        if (!earlyStop) {
+          earlyStop = hourlyInsightsResult.earlyStop;
+        }
+      } catch (hourlyError) {
+        console.warn('[meta-ads-sync] hourly insights skipped:', hourlyError);
+      }
     }
 
     const durationMs = Date.now() - startedAt;

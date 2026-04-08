@@ -44,6 +44,19 @@ export type MetaAdsOverviewFilters = {
 export type MetaAdsOverviewPayload = {
   accounts: MetaAdAccountOption[];
   rows: MetaAdsReportingRow[];
+  hourlyRows: MetaAdsHourlyRow[];
+};
+
+export type MetaAdsHourlyRow = {
+  ad_business_id: string;
+  date_start: string;
+  hour_bucket: string;
+  spend: number | null;
+  impressions: number | null;
+  reach: number | null;
+  clicks: number | null;
+  ctr: number | null;
+  cpc: number | null;
 };
 
 export type MetaSyncRunResourceSummary = {
