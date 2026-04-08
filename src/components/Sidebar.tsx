@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { LayoutDashboard, Database, Layers3, Workflow, Settings, PanelLeftClose, X, Megaphone, BarChart3, BookMarked } from 'lucide-react';
+import { LayoutDashboard, Database, Layers3, Workflow, Settings, PanelLeftClose, X, Megaphone, BarChart3, BookMarked, Send } from 'lucide-react';
 import { getSheetLabel, groupSheetsByDomain } from '../lib/sheetLabels';
 
 interface SidebarPrefetchHandlers {
@@ -36,6 +36,7 @@ export function Sidebar({
   const isKommoInsightsActive = location.pathname === '/kommo/leads-insights';
   const isMetaAdsDashboardActive = location.pathname === '/meta/ads/dashboard' || location.pathname === '/meta/ads';
   const isMetaAdsDataActive = location.pathname === '/meta/ads/data';
+  const isGoogleSheetsExportActive = location.pathname === '/exports/google-sheets';
 
   const renderGroup = (groupName: string, icon: ReactNode, groupSheets: string[]) => {
     if (!groupSheets.length) return null;
@@ -207,6 +208,29 @@ export function Sidebar({
           >
             <Database size={16} className={isKommoInsightsActive ? 'text-red-500' : 'text-gray-500 group-hover:text-red-400'} />
             <span className={`text-[12px] text-gray-400 font-semibold uppercase tracking-[0.05em] ${collapsed ? 'md:hidden' : ''}`}>Leads Insights</span>
+          </Link>
+        </div>
+
+        <div className="space-y-1.5 pt-2">
+          <div
+            className={`px-4 pt-3 pb-2 text-[11px] font-semibold text-gray-400 uppercase tracking-[0.18em] inline-flex items-center gap-2 ${collapsed ? 'md:justify-center' : ''}`}
+            title={collapsed ? 'Exportaciones' : undefined}
+          >
+            <Send size={12} className="text-red-500" />
+            <span className={collapsed ? 'md:hidden' : ''}>Exportaciones</span>
+          </div>
+
+          <Link
+            to="/exports/google-sheets"
+            onClick={() => onNavigate?.()}
+            title={collapsed ? 'Google Sheets Export' : undefined}
+            className={`group flex items-center w-full text-left px-4 py-2.5 rounded-xl border transition-all duration-200 ${isGoogleSheetsExportActive
+                ? 'bg-white/10 text-white font-semibold border-red-500/70 shadow-[0_8px_24px_-18px_rgba(255,255,255,0.8)]'
+                : 'text-gray-400 border-transparent hover:bg-white/5 hover:text-gray-100 hover:border-white/10'
+              } ${collapsed ? 'md:justify-center md:px-2' : 'gap-3'}`}
+          >
+            <Send size={16} className={isGoogleSheetsExportActive ? 'text-red-500' : 'text-gray-500 group-hover:text-red-400'} />
+            <span className={`text-[12px] text-gray-400 font-semibold uppercase tracking-[0.05em] ${collapsed ? 'md:hidden' : ''}`}>Google Sheets</span>
           </Link>
         </div>
       </nav>
