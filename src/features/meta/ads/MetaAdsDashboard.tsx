@@ -661,10 +661,19 @@ function resolveComparisonSelection(
 }
 
 function parseHourFromBucket(hourBucket: string) {
-  const match = String(hourBucket ?? '').trim().match(/^(\d{1,2})/);
-  if (!match) return null;
+  const value = String(hourBucket ?? '').trim();
+  if (!value) return null;
 
-  const hour = Number.parseInt(match[1] ?? '', 10);
+  const candidates = [
+    value.match(/^(\d{1,2})/),
+    value.match(/(\d{1,2}):\d{2}/),
+    value.match(/(\d{1,2})\s*(?:am|pm)/i),
+  ];
+
+  const rawHour = candidates.map((match) => match?.[1]).find(Boolean);
+  if (!rawHour) return null;
+
+  const hour = Number.parseInt(rawHour, 10);
   if (!Number.isInteger(hour) || hour < 0 || hour > 23) return null;
   return hour;
 }

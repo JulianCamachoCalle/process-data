@@ -18,6 +18,29 @@ const DEFAULT_MAX_RUNTIME_MS = 45_000;
 const UPSERT_CHUNK_SIZE = 200;
 const RUNTIME_BUFFER_MS = 1_500;
 
+const ALLOWED_DATE_PRESETS = new Set([
+  'today',
+  'yesterday',
+  'this_month',
+  'last_month',
+  'this_quarter',
+  'maximum',
+  'data_maximum',
+  'last_3d',
+  'last_7d',
+  'last_14d',
+  'last_28d',
+  'last_30d',
+  'last_90d',
+  'last_week_mon_sun',
+  'last_week_sun_sat',
+  'last_quarter',
+  'last_year',
+  'this_week_mon_today',
+  'this_week_sun_today',
+  'this_year',
+]);
+
 type JsonRecord = Record<string, unknown>;
 
 type SyncRunInsertRow = {
@@ -218,6 +241,16 @@ function resolveAccountId(req: VercelRequest, body: JsonRecord) {
   }
 
   throw new Error('El parámetro account_id es obligatorio. También podés configurar META_ADS_ACCOUNT_ID para corridas automáticas.');
+}
+
+function resolveDatePreset(req: VercelRequest, body: JsonRecord) {
+  const candidate = (getRequestParam(req, body, 'date_preset') ?? 'last_30d').trim();
+  const normalized = candidate.toLowerCase();
+  if (ALLOWED_DATE_PRESETS.has(normalized)) {
+    return normalized;
+  }
+
+  return 'last_30d';
 }
 
 function resolveSyncResource(req: VercelRequest, body: JsonRecord): MetaSyncResource {
@@ -459,6 +492,23 @@ async function syncPagedResource<TItem, TRow extends JsonRecord>(options: {
   };
 }
 
+async function getAdIdsForAccount(accountBusinessId: string, limit = 40) {
+  const supabase = getSupabaseAdminClient();
+  const { data, error } = await supabase
+    .from('meta_ads' as never)
+    .select('business_id' as never)
+    .eq('account_business_id' as never, accountBusinessId as never)
+    .limit(limit);
+
+  if (error) {
+    throw new Error(`No se pudo leer ads para hourly fallback: ${error.message}`);
+  }
+
+  return ((data ?? []) as Array<{ business_id?: string | null }>)
+    .map((row) => toNullableText(row.business_id))
+    .filter((value): value is string => Boolean(value));
+}
+
 async function fetchMetaCollection(options: {
   token: string;
   path: string;
@@ -635,7 +685,7 @@ export default async function metaAdsSyncHandler(req: VercelRequest, res: Vercel
     const resource = resolveSyncResource(req, body);
     const accountBusinessId = resource === 'ads' ? resolveAccountId(req, body) : null;
     accountBusinessIdForRun = accountBusinessId;
-    const datePreset = getRequestParam(req, body, 'date_preset')?.trim() || 'last_30d';
+    const datePreset = resolveDatePreset(req, body);
     const timeIncrement = getRequestParam(req, body, 'time_increment')?.trim() || '1';
     const limit = parsePositiveInt(getRequestParam(req, body, 'limit'), DEFAULT_LIMIT, 500);
     const maxPages = parsePositiveInt(getRequestParam(req, body, 'max_pages'), DEFAULT_MAX_PAGES);
@@ -877,6 +927,44 @@ export default async function metaAdsSyncHandler(req: VercelRequest, res: Vercel
           skipped: false,
           error: null,
         };
+
+        if (hourlyDebug.pulled === 0 && hasRuntimeBudget(startedAt, maxRuntimeMs)) {
+          const adIds = await getAdIdsForAccount(accountBusinessId, 30);
+
+          for (const adId of adIds) {
+            if (!hasRuntimeBudget(startedAt, maxRuntimeMs)) {
+              break;
+            }
+
+            const perAdHourly = await syncPagedResource<JsonRecord, MetaInsightHourlyRow>({
+              token,
+              label: 'insights',
+              path: `${adId}/insights`,
+              params: {
+                fields: 'date_start,spend,impressions,reach,clicks,ctr,cpc',
+                breakdowns: 'hourly_stats_aggregated_by_advertiser_time_zone',
+                date_preset: datePreset,
+                time_increment: '1',
+                limit: String(limit),
+              },
+              maxPages: 2,
+              startedAt,
+              maxRuntimeMs,
+              mapItem: (item) => mapInsightHourlyRow(item, adId),
+              table: 'meta_ad_insights_hourly',
+              onConflict: 'ad_business_id,date_start,hour_bucket',
+            });
+
+            hourlyDebug.pages_fetched += perAdHourly.summary.pages_fetched;
+            hourlyDebug.pulled += perAdHourly.summary.pulled;
+            hourlyDebug.upserted += perAdHourly.summary.upserted;
+            hourlyDebug.has_more = hourlyDebug.has_more || perAdHourly.summary.has_more;
+
+            if (perAdHourly.summary.pulled > 0) {
+              hourlyDebug.skipped = false;
+            }
+          }
+        }
 
         if (!earlyStop) {
           earlyStop = hourlyInsightsResult.earlyStop;

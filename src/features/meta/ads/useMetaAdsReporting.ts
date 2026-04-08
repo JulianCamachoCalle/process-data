@@ -70,9 +70,11 @@ export function useMetaAdsReporting(filters: MetaAdsOverviewFilters) {
         throw new Error(`No se pudo cargar el detalle de Meta Ads: ${reportingResult.error.message}`);
       }
 
-      const hourlyRows = hourlyResult.error
-        ? []
-        : ((hourlyResult.data ?? []) as MetaAdsHourlyRow[]);
+      if (hourlyResult.error) {
+        throw new Error(`No se pudo cargar el detalle horario de Meta Ads: ${hourlyResult.error.message}`);
+      }
+
+      const hourlyRows = (hourlyResult.data ?? []) as MetaAdsHourlyRow[];
 
       return {
         accounts: (accountsResult.data ?? []) as MetaAdAccountRow[],
