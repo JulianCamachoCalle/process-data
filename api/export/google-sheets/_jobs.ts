@@ -502,15 +502,20 @@ async function replaceSheetData(spreadsheetId: string, sheetName: string, column
   await doc.loadInfo();
 
   const existing = doc.sheetsByTitle[sheetName];
-  if (existing) {
-    await existing.delete();
-    await doc.loadInfo();
-  }
+  const sheet = existing
+    ? existing
+    : await doc.addSheet({
+      title: sheetName,
+      headerValues: columns,
+    });
 
-  const sheet = await doc.addSheet({
-    title: sheetName,
-    headerValues: columns,
-  });
+  await sheet.loadHeaderRow();
+  await sheet.setHeaderRow(columns as unknown as string[]);
+
+  const previousRows = await sheet.getRows();
+  for (const row of previousRows) {
+    await row.delete();
+  }
 
   const chunkSize = 1000;
   for (let offset = 0; offset < rows.length; offset += chunkSize) {
