@@ -589,8 +589,8 @@ function mapInsightRow(payload: JsonRecord): MetaInsightRow | null {
   };
 }
 
-function mapInsightHourlyRow(payload: JsonRecord): MetaInsightHourlyRow | null {
-  const adBusinessId = toNullableText(payload.ad_id);
+function mapInsightHourlyRow(payload: JsonRecord, fallbackBusinessId: string): MetaInsightHourlyRow | null {
+  const adBusinessId = toNullableText(payload.ad_id) ?? fallbackBusinessId;
   const dateStart = toNullableText(payload.date_start);
   const hourBucket = toNullableText(payload.hourly_stats_aggregated_by_advertiser_time_zone);
 
@@ -855,8 +855,7 @@ export default async function metaAdsSyncHandler(req: VercelRequest, res: Vercel
           label: 'insights',
           path: `${accountBusinessId}/insights`,
           params: {
-            level: 'ad',
-            fields: 'ad_id,date_start,spend,impressions,reach,clicks,ctr,cpc',
+            fields: 'date_start,spend,impressions,reach,clicks,ctr,cpc',
             breakdowns: 'hourly_stats_aggregated_by_advertiser_time_zone',
             date_preset: datePreset,
             time_increment: '1',
@@ -865,7 +864,7 @@ export default async function metaAdsSyncHandler(req: VercelRequest, res: Vercel
           maxPages,
           startedAt,
           maxRuntimeMs,
-          mapItem: mapInsightHourlyRow,
+          mapItem: (item) => mapInsightHourlyRow(item, accountBusinessId),
           table: 'meta_ad_insights_hourly',
           onConflict: 'ad_business_id,date_start,hour_bucket',
         });
