@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { Activity, BadgeDollarSign, BarChart3, LineChart as LineChartIcon, Megaphone, MousePointerClick, PieChart as PieChartIcon, Target, Trophy } from 'lucide-react';
-import { Bar, BarChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
+import { Bar, BarChart, CartesianGrid, LabelList, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { formatNumberEs } from '../../../lib/tableHelpers';
 import { ChartCard, KpiCard, KpiGrid, MetaAdsFiltersPanel, MetaAdsPageHero, Section } from './metaAdsShared';
 import {
@@ -17,42 +17,179 @@ import {
 } from './metaAdsUtils';
 import { useMetaAdsReporting } from './useMetaAdsReporting';
 
-const HOURLY_COLORS = ['#dc2626', '#f97316', '#ea580c', '#b91c1c', '#7f1d1d'];
+const chartTooltipStyle = {
+  contentStyle: {
+    borderRadius: '10px',
+    border: '1px solid #d1d5db',
+    backgroundColor: '#f9fafb',
+    boxShadow: '0 8px 16px -12px rgba(15,23,42,0.35)',
+    padding: '6px 8px',
+  },
+  labelStyle: {
+    color: '#374151',
+    fontWeight: 600,
+    fontSize: 12,
+  },
+  itemStyle: {
+    color: '#374151',
+    fontWeight: 500,
+    fontSize: 12,
+  },
+  cursor: {
+    fill: 'rgba(107,114,128,0.08)',
+  },
+} as const;
 
 export function MetaAdsDashboard() {
-  const [accountId, setAccountId] = useState('');
+  const [campaignId, setCampaignId] = useState('');
+  const [adsetId, setAdsetId] = useState('');
+  const [adId, setAdId] = useState('');
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
-  const [draftAccountId, setDraftAccountId] = useState('');
+  const [draftCampaignId, setDraftCampaignId] = useState('');
+  const [draftAdsetId, setDraftAdsetId] = useState('');
+  const [draftAdId, setDraftAdId] = useState('');
   const [draftDateFrom, setDraftDateFrom] = useState('');
   const [draftDateTo, setDraftDateTo] = useState('');
   const [comparisonType, setComparisonType] = useState<'campaigns' | 'ads'>('campaigns');
+  const [comparisonCampaignId, setComparisonCampaignId] = useState('');
+  const [comparisonAdId, setComparisonAdId] = useState('');
+  const [comparisonDateFrom, setComparisonDateFrom] = useState('');
+  const [comparisonDateTo, setComparisonDateTo] = useState('');
+  const [comparisonDraftCampaignId, setComparisonDraftCampaignId] = useState('');
+  const [comparisonDraftAdId, setComparisonDraftAdId] = useState('');
+  const [comparisonDraftDateFrom, setComparisonDraftDateFrom] = useState('');
+  const [comparisonDraftDateTo, setComparisonDraftDateTo] = useState('');
   const [campaignCompareIds, setCampaignCompareIds] = useState({ left: '', right: '' });
   const [adCompareIds, setAdCompareIds] = useState({ left: '', right: '' });
 
-  const reportingQuery = useMetaAdsReporting({ accountId, dateFrom, dateTo });
+  const reportingQuery = useMetaAdsReporting({ accountId: '', campaignId: '', adId: '', dateFrom, dateTo });
+  const comparisonQuery = useMetaAdsReporting({
+    accountId: '',
+    campaignId: '',
+    adId: '',
+    dateFrom: comparisonDateFrom,
+    dateTo: comparisonDateTo,
+  });
+
+  const rows = reportingQuery.data?.rows ?? [];
+
+  const campaignOptions = useMemo(() => {
+    const optionsMap = new Map<string, { id: string; label: string }>();
+
+    for (const row of rows) {
+      if (!row.campaign_business_id) continue;
+      if (optionsMap.has(row.campaign_business_id)) continue;
+
+      optionsMap.set(row.campaign_business_id, {
+        id: row.campaign_business_id,
+        label: row.campaign_name ?? row.campaign_business_id,
+      });
+    }
+
+    return Array.from(optionsMap.values()).sort((left, right) => left.label.localeCompare(right.label, 'es'));
+  }, [rows]);
+
+  const adOptions = useMemo(() => {
+    const optionsMap = new Map<string, { id: string; label: string }>();
+
+    for (const row of rows) {
+      if (!row.ad_business_id) continue;
+      if (draftCampaignId && row.campaign_business_id !== draftCampaignId) continue;
+      if (draftAdsetId && row.adset_business_id !== draftAdsetId) continue;
+      if (optionsMap.has(row.ad_business_id)) continue;
+
+      optionsMap.set(row.ad_business_id, {
+        id: row.ad_business_id,
+        label: row.ad_name ?? row.ad_business_id,
+      });
+    }
+
+    return Array.from(optionsMap.values()).sort((left, right) => left.label.localeCompare(right.label, 'es'));
+  }, [rows, draftCampaignId, draftAdsetId]);
+
+  const adsetOptions = useMemo(() => {
+    const optionsMap = new Map<string, { id: string; label: string }>();
+
+    for (const row of rows) {
+      if (!row.adset_business_id) continue;
+      if (draftCampaignId && row.campaign_business_id !== draftCampaignId) continue;
+      if (optionsMap.has(row.adset_business_id)) continue;
+
+      optionsMap.set(row.adset_business_id, {
+        id: row.adset_business_id,
+        label: row.adset_name ?? row.adset_business_id,
+      });
+    }
+
+    return Array.from(optionsMap.values()).sort((left, right) => left.label.localeCompare(right.label, 'es'));
+  }, [rows, draftCampaignId]);
+
+  const comparisonRows = comparisonQuery.data?.rows ?? [];
+
+  const comparisonCampaignOptions = useMemo(() => {
+    const optionsMap = new Map<string, { id: string; label: string }>();
+
+    for (const row of comparisonRows) {
+      if (!row.campaign_business_id) continue;
+      if (optionsMap.has(row.campaign_business_id)) continue;
+
+      optionsMap.set(row.campaign_business_id, {
+        id: row.campaign_business_id,
+        label: row.campaign_name ?? row.campaign_business_id,
+      });
+    }
+
+    return Array.from(optionsMap.values()).sort((left, right) => left.label.localeCompare(right.label, 'es'));
+  }, [comparisonRows]);
+
+  const comparisonAdOptions = useMemo(() => {
+    const optionsMap = new Map<string, { id: string; label: string }>();
+
+    for (const row of comparisonRows) {
+      if (!row.ad_business_id) continue;
+      if (comparisonDraftCampaignId && row.campaign_business_id !== comparisonDraftCampaignId) continue;
+      if (optionsMap.has(row.ad_business_id)) continue;
+
+      const adLabel = row.ad_name ?? row.ad_business_id;
+      const campaignLabel = row.campaign_name ?? row.campaign_business_id ?? 'Sin campaña';
+      optionsMap.set(row.ad_business_id, {
+        id: row.ad_business_id,
+        label: `${adLabel} · ${campaignLabel}`,
+      });
+    }
+
+    return Array.from(optionsMap.values()).sort((left, right) => left.label.localeCompare(right.label, 'es'));
+  }, [comparisonRows, comparisonDraftCampaignId]);
 
   const dashboard = useMemo(() => {
     const rows = reportingQuery.data?.rows ?? [];
     const hourlyRows = reportingQuery.data?.hourlyRows ?? [];
-    const totalSpend = sumBy(rows, (row) => row.spend);
-    const totalImpressions = sumBy(rows, (row) => row.impressions);
-    const totalReach = sumBy(rows, (row) => row.reach);
-    const totalClicks = sumBy(rows, (row) => row.clicks);
-    const totalCampaigns = new Set(rows.map((row) => row.campaign_business_id).filter(Boolean)).size;
-    const totalAdsets = new Set(rows.map((row) => row.adset_business_id).filter(Boolean)).size;
-    const totalAds = new Set(rows.map((row) => row.ad_business_id).filter(Boolean)).size;
+    const filteredRows = rows.filter((row) => {
+      if (campaignId && row.campaign_business_id !== campaignId) return false;
+      if (adsetId && row.adset_business_id !== adsetId) return false;
+      if (adId && row.ad_business_id !== adId) return false;
+      return true;
+    });
+
+    const totalSpend = sumBy(filteredRows, (row) => row.spend);
+    const totalImpressions = sumBy(filteredRows, (row) => row.impressions);
+    const totalReach = sumBy(filteredRows, (row) => row.reach);
+    const totalClicks = sumBy(filteredRows, (row) => row.clicks);
+    const totalCampaigns = new Set(filteredRows.map((row) => row.campaign_business_id).filter(Boolean)).size;
+    const totalAdsets = new Set(filteredRows.map((row) => row.adset_business_id).filter(Boolean)).size;
+    const totalAds = new Set(filteredRows.map((row) => row.ad_business_id).filter(Boolean)).size;
     const overallCtr = safeDivide(totalClicks * 100, totalImpressions);
     const overallCpc = safeDivide(totalSpend, totalClicks);
 
-    const trend = aggregateTrendRows(rows);
+    const trend = aggregateTrendRows(filteredRows);
     const trendEfficiency = trend.map((point) => ({
       ...point,
       ctr: safeDivide(point.clicks * 100, point.impressions),
       cpc: safeDivide(point.spend, point.clicks),
     }));
 
-    const topCampaignsByClicks = aggregateLeaderboard(rows, {
+    const topCampaignsByClicks = aggregateLeaderboard(filteredRows, {
       getId: (row) => row.campaign_business_id,
       getTitle: (row) => row.campaign_name,
       getSubtitle: (row) => row.account_name ?? row.account_business_id,
@@ -64,7 +201,7 @@ export function MetaAdsDashboard() {
       })
       .slice(0, 5);
 
-    const topAdsByClicks = aggregateLeaderboard(rows, {
+    const topAdsByClicks = aggregateLeaderboard(filteredRows, {
       getId: (row) => row.ad_business_id,
       getTitle: (row) => row.ad_name ?? row.ad_business_id,
       getSubtitle: (row) => row.creative_name ?? row.creative_id ?? 'Sin creative',
@@ -76,49 +213,116 @@ export function MetaAdsDashboard() {
       })
       .slice(0, 5);
 
-    const campaignPerformance = aggregatePerformanceEntries(rows, {
-      getId: (row) => row.campaign_business_id,
-      getTitle: (row) => row.campaign_name,
-      getSubtitle: (row) => row.account_name ?? row.account_business_id,
-    });
-    const adPerformance = aggregatePerformanceEntries(rows, {
-      getId: (row) => row.ad_business_id,
-      getTitle: (row) => row.ad_name ?? row.ad_business_id,
-      getSubtitle: (row) => row.campaign_name ?? row.campaign_business_id,
-      getCreativeName: (row) => row.creative_name ?? row.creative_id ?? 'Sin creative',
-    });
+    const adIdsInScope = new Set(filteredRows.map((row) => row.ad_business_id).filter(Boolean));
 
-    const adIdsInScope = new Set(rows.map((row) => row.ad_business_id).filter(Boolean));
-    const scopedHourlyRows = hourlyRows.filter((row) => adIdsInScope.has(row.ad_business_id));
+    const scopedHourlyRows = adId
+      ? hourlyRows.filter((row) => row.ad_business_id === adId)
+      : adIdsInScope.size > 0
+        ? hourlyRows.filter((row) => adIdsInScope.has(row.ad_business_id))
+        : hourlyRows;
+
     const hourlyRowsForTrend = scopedHourlyRows.length > 0 ? scopedHourlyRows : hourlyRows;
 
-    const hourlyByDateMap = new Map<string, number[]>();
+    const hourlyClicksByDateMap = new Map<string, number[]>();
+    const hourlyImpressionsByDateMap = new Map<string, number[]>();
+    const hourlySpendByDateMap = new Map<string, number[]>();
     for (const row of hourlyRowsForTrend) {
       const hour = parseHourFromBucket(row.hour_bucket);
       if (hour === null) continue;
 
       const date = row.date_start;
-      const current = hourlyByDateMap.get(date) ?? Array<number>(24).fill(0);
-      current[hour] += Number(row.clicks ?? 0);
-      hourlyByDateMap.set(date, current);
+      const clicksCurrent = hourlyClicksByDateMap.get(date) ?? Array<number>(24).fill(0);
+      clicksCurrent[hour] += Number(row.clicks ?? 0);
+      hourlyClicksByDateMap.set(date, clicksCurrent);
+
+      const impressionsCurrent = hourlyImpressionsByDateMap.get(date) ?? Array<number>(24).fill(0);
+      impressionsCurrent[hour] += Number(row.impressions ?? 0);
+      hourlyImpressionsByDateMap.set(date, impressionsCurrent);
+
+      const spendCurrent = hourlySpendByDateMap.get(date) ?? Array<number>(24).fill(0);
+      spendCurrent[hour] += Number(row.spend ?? 0);
+      hourlySpendByDateMap.set(date, spendCurrent);
     }
 
-    const selectedHourlyDates = Array.from(hourlyByDateMap.keys())
-      .sort()
-      .slice(-5);
+    const hourlyDates = Array.from(hourlyClicksByDateMap.keys()).sort();
 
-    const hourlyTrendByDay = Array.from({ length: 24 }).map((_, hour) => {
-      const row: Record<string, string | number> = {
+    const hourlyAverageClicks = Array.from({ length: 24 }).map((_, hour) => {
+      const total = hourlyDates.reduce((acc, date) => acc + (hourlyClicksByDateMap.get(date)?.[hour] ?? 0), 0);
+      const average = hourlyDates.length > 0 ? total / hourlyDates.length : 0;
+      return {
         hour,
         label: `${String(hour).padStart(2, '0')}:00`,
+        avg_clicks: average,
       };
-
-      for (const date of selectedHourlyDates) {
-        row[date] = hourlyByDateMap.get(date)?.[hour] ?? 0;
-      }
-
-      return row;
     });
+
+    const hourlyTotalClicks = Array.from({ length: 24 }).map((_, hour) => {
+      const total = hourlyDates.reduce((acc, date) => acc + (hourlyClicksByDateMap.get(date)?.[hour] ?? 0), 0);
+      return {
+        hour,
+        label: `${String(hour).padStart(2, '0')}:00`,
+        total_clicks: total,
+      };
+    });
+
+    const hourlyAverageImpressions = Array.from({ length: 24 }).map((_, hour) => {
+      const total = hourlyDates.reduce((acc, date) => acc + (hourlyImpressionsByDateMap.get(date)?.[hour] ?? 0), 0);
+      const average = hourlyDates.length > 0 ? total / hourlyDates.length : 0;
+      return {
+        hour,
+        label: `${String(hour).padStart(2, '0')}:00`,
+        avg_impressions: average,
+      };
+    });
+
+    const hourlyTotalImpressions = Array.from({ length: 24 }).map((_, hour) => {
+      const total = hourlyDates.reduce((acc, date) => acc + (hourlyImpressionsByDateMap.get(date)?.[hour] ?? 0), 0);
+      return {
+        hour,
+        label: `${String(hour).padStart(2, '0')}:00`,
+        total_impressions: total,
+      };
+    });
+
+    const hourlyAverageSpend = Array.from({ length: 24 }).map((_, hour) => {
+      const total = hourlyDates.reduce((acc, date) => acc + (hourlySpendByDateMap.get(date)?.[hour] ?? 0), 0);
+      const average = hourlyDates.length > 0 ? total / hourlyDates.length : 0;
+      return {
+        hour,
+        label: `${String(hour).padStart(2, '0')}:00`,
+        avg_spend: average,
+      };
+    });
+
+    const hourlyTotalSpend = Array.from({ length: 24 }).map((_, hour) => {
+      const total = hourlyDates.reduce((acc, date) => acc + (hourlySpendByDateMap.get(date)?.[hour] ?? 0), 0);
+      return {
+        hour,
+        label: `${String(hour).padStart(2, '0')}:00`,
+        total_spend: total,
+      };
+    });
+
+    const trendAveragesByDay = (() => {
+      const chronological = [...trend].sort((left, right) => left.date_start.localeCompare(right.date_start));
+      let accSpend = 0;
+      let accImpressions = 0;
+      let accClicks = 0;
+
+      return chronological.map((point, index) => {
+        accSpend += point.spend;
+        accImpressions += point.impressions;
+        accClicks += point.clicks;
+
+        const denominator = index + 1;
+        return {
+          date_start: point.date_start,
+          avg_spend: denominator > 0 ? accSpend / denominator : 0,
+          avg_impressions: denominator > 0 ? accImpressions / denominator : 0,
+          avg_clicks: denominator > 0 ? accClicks / denominator : 0,
+        };
+      });
+    })();
 
     return {
       totalSpend,
@@ -131,37 +335,80 @@ export function MetaAdsDashboard() {
       overallCtr,
       overallCpc,
       trend,
+      trendAveragesByDay,
       trendEfficiency,
       topCampaignsByClicks,
       topAdsByClicks,
-      campaignPerformance,
-      adPerformance,
-      hourlyTrendByDay,
-      selectedHourlyDates,
+      hourlyAverageClicks,
+      hourlyTotalClicks,
+      hourlyAverageImpressions,
+      hourlyTotalImpressions,
+      hourlyAverageSpend,
+      hourlyTotalSpend,
+      hourlyRowsCount: hourlyRowsForTrend.length,
+      hourlyRowsRawCount: hourlyRows.length,
     };
-  }, [reportingQuery.data?.hourlyRows, reportingQuery.data?.rows]);
+  }, [adId, adsetId, campaignId, reportingQuery.data?.hourlyRows, reportingQuery.data?.rows]);
 
-  const accounts = reportingQuery.data?.accounts ?? [];
-  const isFiltersDirty = accountId !== draftAccountId || dateFrom !== draftDateFrom || dateTo !== draftDateTo;
+  const isFiltersDirty = campaignId !== draftCampaignId
+    || adsetId !== draftAdsetId
+    || adId !== draftAdId
+    || dateFrom !== draftDateFrom
+    || dateTo !== draftDateTo;
+
+  const isComparisonFiltersDirty = comparisonCampaignId !== comparisonDraftCampaignId
+    || comparisonAdId !== comparisonDraftAdId
+    || comparisonDateFrom !== comparisonDraftDateFrom
+    || comparisonDateTo !== comparisonDraftDateTo;
+
+  const comparisonFilteredRows = useMemo(() => {
+    return comparisonRows.filter((row) => {
+      if (comparisonCampaignId && row.campaign_business_id !== comparisonCampaignId) return false;
+      if (comparisonAdId && row.ad_business_id !== comparisonAdId) return false;
+      return true;
+    });
+  }, [comparisonAdId, comparisonCampaignId, comparisonRows]);
+
+  const comparisonCampaignPerformance = useMemo(() => {
+    return aggregatePerformanceEntries(comparisonFilteredRows, {
+      getId: (row) => row.campaign_business_id,
+      getTitle: (row) => row.campaign_name,
+      getSubtitle: (row) => row.account_name ?? row.account_business_id,
+    });
+  }, [comparisonFilteredRows]);
+
+  const comparisonAdPerformance = useMemo(() => {
+    return aggregatePerformanceEntries(comparisonFilteredRows, {
+      getId: (row) => row.ad_business_id,
+      getTitle: (row) => row.ad_name ?? row.ad_business_id,
+      getSubtitle: (row) => row.campaign_name ?? row.campaign_business_id,
+      getCreativeName: (row) => row.creative_name ?? row.creative_id ?? 'Sin creative',
+    });
+  }, [comparisonFilteredRows]);
+
+  const showHourlyLabels = dashboard.hourlyTotalClicks.length <= 25;
+  const showDailyLabels = dashboard.trend.length <= 25;
+  const showAverageDailyLabels = dashboard.trendAveragesByDay.length <= 25;
+  const showEfficiencyLabels = dashboard.trendEfficiency.length <= 25;
 
   const resolvedCampaignCompareIds = useMemo(
-    () => resolveComparisonSelection(dashboard.campaignPerformance, campaignCompareIds),
-    [dashboard.campaignPerformance, campaignCompareIds],
+    () => resolveComparisonSelection(comparisonCampaignPerformance, campaignCompareIds),
+    [comparisonCampaignPerformance, campaignCompareIds],
   );
 
   const resolvedAdCompareIds = useMemo(
-    () => resolveComparisonSelection(dashboard.adPerformance, adCompareIds),
-    [dashboard.adPerformance, adCompareIds],
+    () => resolveComparisonSelection(comparisonAdPerformance, adCompareIds),
+    [comparisonAdPerformance, adCompareIds],
   );
 
   const selectedCampaignComparison = useMemo(
-    () => resolveComparisonEntries(dashboard.campaignPerformance, resolvedCampaignCompareIds),
-    [dashboard.campaignPerformance, resolvedCampaignCompareIds],
+    () => resolveComparisonEntries(comparisonCampaignPerformance, resolvedCampaignCompareIds),
+    [comparisonCampaignPerformance, resolvedCampaignCompareIds],
   );
 
   const selectedAdComparison = useMemo(
-    () => resolveComparisonEntries(dashboard.adPerformance, resolvedAdCompareIds),
-    [dashboard.adPerformance, resolvedAdCompareIds],
+    () => resolveComparisonEntries(comparisonAdPerformance, resolvedAdCompareIds),
+    [comparisonAdPerformance, resolvedAdCompareIds],
   );
 
   const selectedCampaignComparisonMetrics = useMemo(
@@ -180,26 +427,26 @@ export function MetaAdsDashboard() {
         emptyMessage: 'Todavía no hay suficientes campañas con data para comparar.',
         leftLabel: 'Campaña A',
         rightLabel: 'Campaña B',
-        options: dashboard.campaignPerformance,
+        options: comparisonCampaignPerformance,
         selection: resolvedCampaignCompareIds,
         left: selectedCampaignComparison[0],
         right: selectedCampaignComparison[1],
         metrics: selectedCampaignComparisonMetrics,
-        onLeftChange: (value: string) => setCampaignCompareIds((current) => resolveComparisonSelection(dashboard.campaignPerformance, { ...current, left: value })),
-        onRightChange: (value: string) => setCampaignCompareIds((current) => resolveComparisonSelection(dashboard.campaignPerformance, { ...current, right: value })),
+        onLeftChange: (value: string) => setCampaignCompareIds((current) => resolveComparisonSelection(comparisonCampaignPerformance, { ...current, left: value })),
+        onRightChange: (value: string) => setCampaignCompareIds((current) => resolveComparisonSelection(comparisonCampaignPerformance, { ...current, right: value })),
       }
     : {
         title: 'Comparación directa',
         emptyMessage: 'Todavía no hay suficientes ads con data para comparar.',
         leftLabel: 'Ad A',
         rightLabel: 'Ad B',
-        options: dashboard.adPerformance,
+        options: comparisonAdPerformance,
         selection: resolvedAdCompareIds,
         left: selectedAdComparison[0],
         right: selectedAdComparison[1],
         metrics: selectedAdComparisonMetrics,
-        onLeftChange: (value: string) => setAdCompareIds((current) => resolveComparisonSelection(dashboard.adPerformance, { ...current, left: value })),
-        onRightChange: (value: string) => setAdCompareIds((current) => resolveComparisonSelection(dashboard.adPerformance, { ...current, right: value })),
+        onLeftChange: (value: string) => setAdCompareIds((current) => resolveComparisonSelection(comparisonAdPerformance, { ...current, left: value })),
+        onRightChange: (value: string) => setAdCompareIds((current) => resolveComparisonSelection(comparisonAdPerformance, { ...current, right: value })),
       };
 
   if (reportingQuery.isLoading) {
@@ -232,23 +479,84 @@ export function MetaAdsDashboard() {
       />
 
       <MetaAdsFiltersPanel
-        accounts={accounts}
-        draftAccountId={draftAccountId}
         draftDateFrom={draftDateFrom}
         draftDateTo={draftDateTo}
-        onDraftAccountIdChange={setDraftAccountId}
         onDraftDateFromChange={setDraftDateFrom}
         onDraftDateToChange={setDraftDateTo}
+        extra={(
+          <>
+            <label className="rounded-2xl border border-gray-200 bg-gray-50/70 px-4 py-3 text-sm text-gray-600 shadow-inner shadow-white/50">
+              <span className="text-xs font-semibold uppercase tracking-wide text-gray-500">Campaña</span>
+              <select
+                value={draftCampaignId}
+                onChange={(event) => {
+                  setDraftCampaignId(event.target.value);
+                  setDraftAdsetId('');
+                  setDraftAdId('');
+                }}
+                className="mt-2 w-full rounded-xl border border-gray-300 bg-white px-3 py-2.5 text-sm font-medium text-gray-800 outline-none transition focus:border-red-300 focus:ring-2 focus:ring-red-100"
+              >
+                <option value="">Todas las campañas</option>
+                {campaignOptions.map((campaign) => (
+                  <option key={campaign.id} value={campaign.id}>
+                    {campaign.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="rounded-2xl border border-gray-200 bg-gray-50/70 px-4 py-3 text-sm text-gray-600 shadow-inner shadow-white/50">
+              <span className="text-xs font-semibold uppercase tracking-wide text-gray-500">Conjunto de ads</span>
+              <select
+                value={draftAdsetId}
+                onChange={(event) => {
+                  setDraftAdsetId(event.target.value);
+                  setDraftAdId('');
+                }}
+                className="mt-2 w-full rounded-xl border border-gray-300 bg-white px-3 py-2.5 text-sm font-medium text-gray-800 outline-none transition focus:border-red-300 focus:ring-2 focus:ring-red-100"
+              >
+                <option value="">Todos los conjuntos</option>
+                {adsetOptions.map((adset) => (
+                  <option key={adset.id} value={adset.id}>
+                    {adset.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="rounded-2xl border border-gray-200 bg-gray-50/70 px-4 py-3 text-sm text-gray-600 shadow-inner shadow-white/50">
+              <span className="text-xs font-semibold uppercase tracking-wide text-gray-500">Ad</span>
+              <select
+                value={draftAdId}
+                onChange={(event) => setDraftAdId(event.target.value)}
+                className="mt-2 w-full rounded-xl border border-gray-300 bg-white px-3 py-2.5 text-sm font-medium text-gray-800 outline-none transition focus:border-red-300 focus:ring-2 focus:ring-red-100"
+              >
+                <option value="">Todos los ads</option>
+                {adOptions.map((ad) => (
+                  <option key={ad.id} value={ad.id}>
+                    {ad.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </>
+        )}
         onApply={() => {
-          setAccountId(draftAccountId);
+          setCampaignId(draftCampaignId);
+          setAdsetId(draftAdsetId);
+          setAdId(draftAdId);
           setDateFrom(draftDateFrom);
           setDateTo(draftDateTo);
         }}
         onClear={() => {
-          setAccountId('');
+          setCampaignId('');
+          setAdsetId('');
+          setAdId('');
           setDateFrom('');
           setDateTo('');
-          setDraftAccountId('');
+          setDraftCampaignId('');
+          setDraftAdsetId('');
+          setDraftAdId('');
           setDraftDateFrom('');
           setDraftDateTo('');
         }}
@@ -268,96 +576,258 @@ export function MetaAdsDashboard() {
         </KpiGrid>
       </Section>
 
-      <Section title="Tendencias y composición">
-        <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-          <ChartCard title="Tendencia diaria de gasto" icon={<LineChartIcon size={16} className="text-red-600" />}>
-            <ResponsiveContainer width="100%" height={300}>
-              <LineChart data={dashboard.trend}>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                <XAxis dataKey="date_start" tick={{ fontSize: 12 }} />
-                <YAxis tick={{ fontSize: 12 }} />
-                <Tooltip formatter={(value) => formatCompactMetric(Number(value ?? 0), 'currency')} />
-                <Line type="monotone" dataKey="spend" name="Gasto" stroke="#dc2626" strokeWidth={2.5} dot={{ r: 2 }} />
-              </LineChart>
-            </ResponsiveContainer>
-          </ChartCard>
+      <Section title="Gráficos">
+        <div className="space-y-3">
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-gray-500">Clicks</p>
+          <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+            <ChartCard title="Clicks por hora (totales)" icon={<MousePointerClick size={16} className="text-red-600" />}>
+              {dashboard.hourlyRowsCount === 0 ? (
+                <div className="rounded-xl border border-dashed border-gray-200 bg-gray-50 px-4 py-6 text-sm text-gray-500">
+                  Sin data horaria para calcular clicks por hora. Filas en scope: {dashboard.hourlyRowsCount}. Filas horarias totales: {dashboard.hourlyRowsRawCount}
+                </div>
+              ) : (
+                <ResponsiveContainer width="100%" height={300}>
+                  <BarChart data={dashboard.hourlyTotalClicks}>
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                    <XAxis dataKey="label" tick={{ fontSize: 12 }} interval={1} />
+                    <YAxis tick={{ fontSize: 12 }} />
+                    <Tooltip {...chartTooltipStyle} formatter={(value) => formatCompactMetric(Number(value ?? 0), 'number')} />
+                    <Bar dataKey="total_clicks" name="Clicks totales" fill="#dc2626" radius={[8, 8, 0, 0]} isAnimationActive={false}>
+                      {showHourlyLabels ? <LabelList dataKey="total_clicks" position="top" formatter={(value) => formatCompactMetric(Number(value ?? 0), 'number')} className="fill-gray-600 text-[10px] font-semibold" /> : null}
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+              )}
+            </ChartCard>
 
-          <ChartCard title="Tendencia diaria de CTR y CPC" icon={<PieChartIcon size={16} className="text-red-600" />}>
-            <ResponsiveContainer width="100%" height={300}>
-              <LineChart data={dashboard.trendEfficiency}>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                <XAxis dataKey="date_start" tick={{ fontSize: 12 }} />
-                <YAxis yAxisId="left" tick={{ fontSize: 12 }} tickFormatter={(value) => `${Number(value).toFixed(1)}%`} />
-                <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 12 }} tickFormatter={(value) => `S/ ${Number(value).toFixed(1)}`} />
-                <Tooltip
-                  formatter={(value, key) => {
-                    const numeric = Number(value ?? 0);
-                    if (key === 'ctr') return formatCompactMetric(numeric, 'percent');
-                    return formatCompactMetric(numeric, 'currency');
-                  }}
-                />
-                <Line yAxisId="left" type="monotone" dataKey="ctr" name="CTR" stroke="#dc2626" strokeWidth={2.5} dot={{ r: 2 }} />
-                <Line yAxisId="right" type="monotone" dataKey="cpc" name="CPC" stroke="#f97316" strokeWidth={2.2} dot={{ r: 2 }} />
-              </LineChart>
-            </ResponsiveContainer>
-          </ChartCard>
+            <ChartCard title="Promedio de clicks por hora" icon={<LineChartIcon size={16} className="text-red-600" />}>
+              {dashboard.hourlyRowsCount === 0 ? (
+                <div className="rounded-xl border border-dashed border-gray-200 bg-gray-50 px-4 py-6 text-sm text-gray-500">
+                  Sin data horaria para calcular promedio por hora. Filas en scope: {dashboard.hourlyRowsCount}. Filas horarias totales: {dashboard.hourlyRowsRawCount}
+                </div>
+              ) : (
+                <ResponsiveContainer width="100%" height={300}>
+                  <LineChart data={dashboard.hourlyAverageClicks}>
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                    <XAxis dataKey="label" tick={{ fontSize: 12 }} interval={1} />
+                    <YAxis tick={{ fontSize: 12 }} />
+                    <Tooltip {...chartTooltipStyle} formatter={(value) => Number(value ?? 0).toFixed(2)} />
+                    <Line type="monotone" dataKey="avg_clicks" name="Promedio clicks" stroke="#f97316" strokeWidth={2.4} dot={{ r: 2 }} isAnimationActive={false}>
+                      {showHourlyLabels ? <LabelList dataKey="avg_clicks" position="top" formatter={(value) => Number(value ?? 0).toFixed(1)} className="fill-gray-600 text-[10px] font-semibold" /> : null}
+                    </Line>
+                  </LineChart>
+                </ResponsiveContainer>
+              )}
+            </ChartCard>
+
+            <ChartCard title="Clicks por día (totales)" icon={<MousePointerClick size={16} className="text-red-600" />}>
+              <ResponsiveContainer width="100%" height={300}>
+                <BarChart data={dashboard.trend}>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                  <XAxis dataKey="date_start" tick={{ fontSize: 12 }} />
+                  <YAxis tick={{ fontSize: 12 }} />
+                  <Tooltip {...chartTooltipStyle} formatter={(value) => formatCompactMetric(Number(value ?? 0), 'number')} />
+                  <Bar dataKey="clicks" name="Clicks" fill="#dc2626" radius={[8, 8, 0, 0]} isAnimationActive={false}>
+                    {showDailyLabels ? <LabelList dataKey="clicks" position="top" formatter={(value) => formatCompactMetric(Number(value ?? 0), 'number')} className="fill-gray-600 text-[10px] font-semibold" /> : null}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            </ChartCard>
+
+            <ChartCard title="Promedio diario de clicks" icon={<LineChartIcon size={16} className="text-red-600" />}>
+              <ResponsiveContainer width="100%" height={300}>
+                <LineChart data={dashboard.trendAveragesByDay}>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                  <XAxis dataKey="date_start" tick={{ fontSize: 12 }} />
+                  <YAxis tick={{ fontSize: 12 }} />
+                  <Tooltip {...chartTooltipStyle} formatter={(value) => Number(value ?? 0).toFixed(2)} />
+                  <Line type="monotone" dataKey="avg_clicks" name="Promedio clicks" stroke="#f97316" strokeWidth={2.4} dot={{ r: 2 }} isAnimationActive={false}>
+                    {showAverageDailyLabels ? <LabelList dataKey="avg_clicks" position="top" formatter={(value) => Number(value ?? 0).toFixed(1)} className="fill-gray-600 text-[10px] font-semibold" /> : null}
+                  </Line>
+                </LineChart>
+              </ResponsiveContainer>
+            </ChartCard>
+          </div>
         </div>
 
-        <ChartCard title="Tendencia por hora x día (Clicks)" icon={<LineChartIcon size={16} className="text-red-600" />}>
-          {dashboard.selectedHourlyDates.length === 0 ? (
-            <div className="rounded-xl border border-dashed border-gray-200 bg-gray-50 px-4 py-6 text-sm text-gray-500">
-              Todavía no hay data horaria. Ejecutá sync de Meta Ads con breakdown horario.
-            </div>
-          ) : (
-            <ResponsiveContainer width="100%" height={320}>
-              <LineChart data={dashboard.hourlyTrendByDay}>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                <XAxis dataKey="label" tick={{ fontSize: 12 }} />
-                <YAxis tick={{ fontSize: 12 }} allowDecimals={false} />
-                <Tooltip formatter={(value) => formatCompactMetric(Number(value ?? 0), 'number')} />
-                {dashboard.selectedHourlyDates.map((date, index) => (
-                  <Line
-                    key={date}
-                    type="monotone"
-                    dataKey={date}
-                    name={date}
-                    stroke={HOURLY_COLORS[index % HOURLY_COLORS.length]}
-                    strokeWidth={2.1}
-                    dot={{ r: 1.8 }}
+        <div className="space-y-3">
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-gray-500">Impresiones</p>
+          <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+            <ChartCard title="Impresiones por hora (totales)" icon={<Megaphone size={16} className="text-red-600" />}>
+              {dashboard.hourlyRowsCount === 0 ? (
+                <div className="rounded-xl border border-dashed border-gray-200 bg-gray-50 px-4 py-6 text-sm text-gray-500">
+                  Sin data horaria para calcular impresiones por hora. Filas en scope: {dashboard.hourlyRowsCount}. Filas horarias totales: {dashboard.hourlyRowsRawCount}
+                </div>
+              ) : (
+                <ResponsiveContainer width="100%" height={300}>
+                  <BarChart data={dashboard.hourlyTotalImpressions}>
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                    <XAxis dataKey="label" tick={{ fontSize: 12 }} interval={1} />
+                    <YAxis tick={{ fontSize: 12 }} />
+                    <Tooltip {...chartTooltipStyle} formatter={(value) => formatCompactMetric(Number(value ?? 0), 'number')} />
+                    <Bar dataKey="total_impressions" name="Impresiones totales" fill="#dc2626" radius={[8, 8, 0, 0]} isAnimationActive={false}>
+                      {showHourlyLabels ? <LabelList dataKey="total_impressions" position="top" formatter={(value) => formatCompactMetric(Number(value ?? 0), 'number')} className="fill-gray-600 text-[10px] font-semibold" /> : null}
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+              )}
+            </ChartCard>
+
+            <ChartCard title="Promedio de impresiones por hora" icon={<LineChartIcon size={16} className="text-red-600" />}>
+              {dashboard.hourlyRowsCount === 0 ? (
+                <div className="rounded-xl border border-dashed border-gray-200 bg-gray-50 px-4 py-6 text-sm text-gray-500">
+                  Sin data horaria para calcular promedio de impresiones por hora. Filas en scope: {dashboard.hourlyRowsCount}. Filas horarias totales: {dashboard.hourlyRowsRawCount}
+                </div>
+              ) : (
+                <ResponsiveContainer width="100%" height={300}>
+                  <LineChart data={dashboard.hourlyAverageImpressions}>
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                    <XAxis dataKey="label" tick={{ fontSize: 12 }} interval={1} />
+                    <YAxis tick={{ fontSize: 12 }} />
+                    <Tooltip {...chartTooltipStyle} formatter={(value) => Number(value ?? 0).toFixed(2)} />
+                    <Line type="monotone" dataKey="avg_impressions" name="Promedio impresiones" stroke="#f97316" strokeWidth={2.4} dot={{ r: 2 }} isAnimationActive={false}>
+                      {showHourlyLabels ? <LabelList dataKey="avg_impressions" position="top" formatter={(value) => Number(value ?? 0).toFixed(1)} className="fill-gray-600 text-[10px] font-semibold" /> : null}
+                    </Line>
+                  </LineChart>
+                </ResponsiveContainer>
+              )}
+            </ChartCard>
+
+            <ChartCard title="Impresiones por día (totales)" icon={<LineChartIcon size={16} className="text-red-600" />}>
+              <ResponsiveContainer width="100%" height={300}>
+                <BarChart data={dashboard.trend}>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                  <XAxis dataKey="date_start" tick={{ fontSize: 12 }} />
+                  <YAxis tick={{ fontSize: 12 }} allowDecimals={false} />
+                  <Tooltip {...chartTooltipStyle} formatter={(value) => formatCompactMetric(Number(value ?? 0), 'number')} />
+                  <Bar dataKey="impressions" name="Impresiones" fill="#dc2626" radius={[8, 8, 0, 0]} isAnimationActive={false}>
+                    {showDailyLabels ? <LabelList dataKey="impressions" position="top" formatter={(value) => formatCompactMetric(Number(value ?? 0), 'number')} className="fill-gray-600 text-[10px] font-semibold" /> : null}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            </ChartCard>
+
+            <ChartCard title="Promedio diario de impresiones" icon={<LineChartIcon size={16} className="text-red-600" />}>
+              <ResponsiveContainer width="100%" height={300}>
+                <LineChart data={dashboard.trendAveragesByDay}>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                  <XAxis dataKey="date_start" tick={{ fontSize: 12 }} />
+                  <YAxis tick={{ fontSize: 12 }} allowDecimals={false} />
+                  <Tooltip {...chartTooltipStyle} formatter={(value) => Number(value ?? 0).toFixed(2)} />
+                  <Line type="monotone" dataKey="avg_impressions" name="Promedio impresiones" stroke="#f97316" strokeWidth={2.4} dot={{ r: 2 }} isAnimationActive={false}>
+                    {showAverageDailyLabels ? <LabelList dataKey="avg_impressions" position="top" formatter={(value) => Number(value ?? 0).toFixed(1)} className="fill-gray-600 text-[10px] font-semibold" /> : null}
+                  </Line>
+                </LineChart>
+              </ResponsiveContainer>
+            </ChartCard>
+          </div>
+        </div>
+
+        <div className="space-y-3">
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-gray-500">Gasto</p>
+          <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+            <ChartCard title="Gasto por hora (total)" icon={<BadgeDollarSign size={16} className="text-red-600" />}>
+              {dashboard.hourlyRowsCount === 0 ? (
+                <div className="rounded-xl border border-dashed border-gray-200 bg-gray-50 px-4 py-6 text-sm text-gray-500">
+                  Sin data horaria para calcular gasto por hora. Filas en scope: {dashboard.hourlyRowsCount}. Filas horarias totales: {dashboard.hourlyRowsRawCount}
+                </div>
+              ) : (
+                <ResponsiveContainer width="100%" height={300}>
+                  <BarChart data={dashboard.hourlyTotalSpend}>
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                    <XAxis dataKey="label" tick={{ fontSize: 12 }} interval={1} />
+                    <YAxis tick={{ fontSize: 12 }} />
+                    <Tooltip {...chartTooltipStyle} formatter={(value) => formatCompactMetric(Number(value ?? 0), 'currency')} />
+                    <Bar dataKey="total_spend" name="Gasto total" fill="#dc2626" radius={[8, 8, 0, 0]} isAnimationActive={false}>
+                      {showHourlyLabels ? <LabelList dataKey="total_spend" position="top" formatter={(value) => formatCompactMetric(Number(value ?? 0), 'currency')} className="fill-gray-600 text-[10px] font-semibold" /> : null}
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+              )}
+            </ChartCard>
+
+            <ChartCard title="Promedio de gasto por hora" icon={<LineChartIcon size={16} className="text-red-600" />}>
+              {dashboard.hourlyRowsCount === 0 ? (
+                <div className="rounded-xl border border-dashed border-gray-200 bg-gray-50 px-4 py-6 text-sm text-gray-500">
+                  Sin data horaria para calcular promedio de gasto por hora. Filas en scope: {dashboard.hourlyRowsCount}. Filas horarias totales: {dashboard.hourlyRowsRawCount}
+                </div>
+              ) : (
+                <ResponsiveContainer width="100%" height={300}>
+                  <LineChart data={dashboard.hourlyAverageSpend}>
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                    <XAxis dataKey="label" tick={{ fontSize: 12 }} interval={1} />
+                    <YAxis tick={{ fontSize: 12 }} />
+                    <Tooltip {...chartTooltipStyle} formatter={(value) => formatCompactMetric(Number(value ?? 0), 'currency')} />
+                    <Line type="monotone" dataKey="avg_spend" name="Promedio gasto" stroke="#f97316" strokeWidth={2.4} dot={{ r: 2 }} isAnimationActive={false}>
+                      {showHourlyLabels ? <LabelList dataKey="avg_spend" position="top" formatter={(value) => formatCompactMetric(Number(value ?? 0), 'currency')} className="fill-gray-600 text-[10px] font-semibold" /> : null}
+                    </Line>
+                  </LineChart>
+                </ResponsiveContainer>
+              )}
+            </ChartCard>
+
+            <ChartCard title="Gasto por día (total)" icon={<BadgeDollarSign size={16} className="text-red-600" />}>
+              <ResponsiveContainer width="100%" height={300}>
+                <BarChart data={dashboard.trend}>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                  <XAxis dataKey="date_start" tick={{ fontSize: 12 }} />
+                  <YAxis tick={{ fontSize: 12 }} />
+                  <Tooltip {...chartTooltipStyle} formatter={(value) => formatCompactMetric(Number(value ?? 0), 'currency')} />
+                  <Bar dataKey="spend" name="Gasto" fill="#dc2626" radius={[8, 8, 0, 0]} isAnimationActive={false}>
+                    {showDailyLabels ? <LabelList dataKey="spend" position="top" formatter={(value) => formatCompactMetric(Number(value ?? 0), 'currency')} className="fill-gray-600 text-[10px] font-semibold" /> : null}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            </ChartCard>
+
+            <ChartCard title="Promedio diario de gasto" icon={<LineChartIcon size={16} className="text-red-600" />}>
+              <ResponsiveContainer width="100%" height={300}>
+                <LineChart data={dashboard.trendAveragesByDay}>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                  <XAxis dataKey="date_start" tick={{ fontSize: 12 }} />
+                  <YAxis tick={{ fontSize: 12 }} />
+                  <Tooltip {...chartTooltipStyle} formatter={(value) => formatCompactMetric(Number(value ?? 0), 'currency')} />
+                  <Line type="monotone" dataKey="avg_spend" name="Promedio gasto" stroke="#f97316" strokeWidth={2.4} dot={{ r: 2 }} isAnimationActive={false}>
+                    {showAverageDailyLabels ? <LabelList dataKey="avg_spend" position="top" formatter={(value) => formatCompactMetric(Number(value ?? 0), 'currency')} className="fill-gray-600 text-[10px] font-semibold" /> : null}
+                  </Line>
+                </LineChart>
+              </ResponsiveContainer>
+            </ChartCard>
+          </div>
+        </div>
+
+        <div className="space-y-3">
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-gray-500">Eficiencia</p>
+          <div className="grid grid-cols-1 gap-4 xl:grid-cols-1">
+            <ChartCard title="Tendencia diaria de CTR y CPC" icon={<PieChartIcon size={16} className="text-red-600" />}>
+              <ResponsiveContainer width="100%" height={300}>
+                <LineChart data={dashboard.trendEfficiency}>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                  <XAxis dataKey="date_start" tick={{ fontSize: 12 }} />
+                  <YAxis yAxisId="left" tick={{ fontSize: 12 }} tickFormatter={(value) => `${Number(value).toFixed(1)}%`} />
+                  <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 12 }} tickFormatter={(value) => `S/ ${Number(value).toFixed(1)}`} />
+                  <Tooltip
+                    {...chartTooltipStyle}
+                    formatter={(value, key) => {
+                      const numeric = Number(value ?? 0);
+                      if (key === 'ctr') return formatCompactMetric(numeric, 'percent');
+                      return formatCompactMetric(numeric, 'currency');
+                    }}
                   />
-                ))}
-              </LineChart>
-            </ResponsiveContainer>
-          )}
-        </ChartCard>
+                  <Line yAxisId="left" type="monotone" dataKey="ctr" name="CTR" stroke="#dc2626" strokeWidth={2.5} dot={{ r: 2 }} isAnimationActive={false}>
+                    {showEfficiencyLabels ? <LabelList dataKey="ctr" position="top" formatter={(value) => `${Number(value ?? 0).toFixed(1)}%`} className="fill-gray-600 text-[10px] font-semibold" /> : null}
+                  </Line>
+                  <Line yAxisId="right" type="monotone" dataKey="cpc" name="CPC" stroke="#f97316" strokeWidth={2.2} dot={{ r: 2 }} isAnimationActive={false}>
+                    {showEfficiencyLabels ? <LabelList dataKey="cpc" position="top" formatter={(value) => formatCompactMetric(Number(value ?? 0), 'currency')} className="fill-gray-600 text-[10px] font-semibold" /> : null}
+                  </Line>
+                </LineChart>
+              </ResponsiveContainer>
+            </ChartCard>
+          </div>
+        </div>
       </Section>
 
       <Section title="Top performers">
-        <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-          <ChartCard title="Campañas con mayor gasto" icon={<BarChart3 size={16} className="text-red-600" />}>
-            <ResponsiveContainer width="100%" height={300}>
-              <BarChart data={dashboard.topCampaignsByClicks}>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                <XAxis dataKey="title" tick={{ fontSize: 12 }} interval={0} angle={-15} textAnchor="end" height={60} />
-                <YAxis tick={{ fontSize: 12 }} />
-                <Tooltip formatter={(value) => formatCompactMetric(Number(value ?? 0), 'number')} />
-                <Bar dataKey="clicks" name="Clicks" fill="#dc2626" radius={[8, 8, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
-          </ChartCard>
-
-          <ChartCard title="Tendencia diaria de clicks" icon={<MousePointerClick size={16} className="text-red-600" />}>
-            <ResponsiveContainer width="100%" height={300}>
-              <BarChart data={dashboard.trend}>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                <XAxis dataKey="date_start" tick={{ fontSize: 12 }} />
-                <YAxis tick={{ fontSize: 12 }} />
-                <Tooltip formatter={(value) => formatCompactMetric(Number(value ?? 0), 'number')} />
-                <Bar dataKey="clicks" name="Clicks" fill="#f97316" radius={[8, 8, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
-          </ChartCard>
-        </div>
 
         <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
           <ChartCard title="Top campañas" icon={<Megaphone size={16} className="text-red-600" />}>
@@ -370,6 +840,99 @@ export function MetaAdsDashboard() {
       </Section>
 
       <Section title="Comparativas directas">
+        <div className="rounded-[24px] border border-gray-200 bg-white p-4 shadow-[0_16px_34px_-28px_rgba(15,23,42,0.8)] space-y-4">
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-gray-500">Filtros de comparativa (independientes)</p>
+
+          <div className="grid grid-cols-1 gap-4 xl:grid-cols-[repeat(4,minmax(0,1fr))_auto]">
+            <label className="rounded-2xl border border-gray-200 bg-gray-50/70 px-4 py-3 text-sm text-gray-600 shadow-inner shadow-white/50">
+              <span className="text-xs font-semibold uppercase tracking-wide text-gray-500">Campaña</span>
+              <select
+                value={comparisonDraftCampaignId}
+                onChange={(event) => {
+                  setComparisonDraftCampaignId(event.target.value);
+                  setComparisonDraftAdId('');
+                }}
+                className="mt-2 w-full rounded-xl border border-gray-300 bg-white px-3 py-2.5 text-sm font-medium text-gray-800 outline-none transition focus:border-red-300 focus:ring-2 focus:ring-red-100"
+              >
+                <option value="">Todas las campañas</option>
+                {comparisonCampaignOptions.map((campaign) => (
+                  <option key={campaign.id} value={campaign.id}>
+                    {campaign.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="rounded-2xl border border-gray-200 bg-gray-50/70 px-4 py-3 text-sm text-gray-600 shadow-inner shadow-white/50">
+              <span className="text-xs font-semibold uppercase tracking-wide text-gray-500">Ad</span>
+              <select
+                value={comparisonDraftAdId}
+                onChange={(event) => setComparisonDraftAdId(event.target.value)}
+                className="mt-2 w-full rounded-xl border border-gray-300 bg-white px-3 py-2.5 text-sm font-medium text-gray-800 outline-none transition focus:border-red-300 focus:ring-2 focus:ring-red-100"
+              >
+                <option value="">Todos los ads</option>
+                {comparisonAdOptions.map((ad) => (
+                  <option key={ad.id} value={ad.id}>
+                    {ad.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="rounded-2xl border border-gray-200 bg-gray-50/70 px-4 py-3 text-sm text-gray-600 shadow-inner shadow-white/50">
+              <span className="text-xs font-semibold uppercase tracking-wide text-gray-500">Fecha inicio</span>
+              <input
+                type="date"
+                value={comparisonDraftDateFrom}
+                onChange={(event) => setComparisonDraftDateFrom(event.target.value)}
+                className="mt-2 w-full rounded-xl border border-gray-300 bg-white px-3 py-2.5 text-sm text-gray-800 outline-none transition focus:border-red-300 focus:ring-2 focus:ring-red-100"
+              />
+            </label>
+
+            <label className="rounded-2xl border border-gray-200 bg-gray-50/70 px-4 py-3 text-sm text-gray-600 shadow-inner shadow-white/50">
+              <span className="text-xs font-semibold uppercase tracking-wide text-gray-500">Fecha fin</span>
+              <input
+                type="date"
+                value={comparisonDraftDateTo}
+                onChange={(event) => setComparisonDraftDateTo(event.target.value)}
+                className="mt-2 w-full rounded-xl border border-gray-300 bg-white px-3 py-2.5 text-sm text-gray-800 outline-none transition focus:border-red-300 focus:ring-2 focus:ring-red-100"
+              />
+            </label>
+
+            <div className="flex items-end justify-start gap-2 xl:justify-end">
+              <button
+                type="button"
+                onClick={() => {
+                  setComparisonCampaignId('');
+                  setComparisonAdId('');
+                  setComparisonDateFrom('');
+                  setComparisonDateTo('');
+                  setComparisonDraftCampaignId('');
+                  setComparisonDraftAdId('');
+                  setComparisonDraftDateFrom('');
+                  setComparisonDraftDateTo('');
+                }}
+                className="inline-flex items-center justify-center rounded-xl border border-gray-300 bg-white px-4 py-2 text-sm font-semibold text-gray-700 transition hover:border-gray-400 hover:bg-gray-50"
+              >
+                Limpiar
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setComparisonCampaignId(comparisonDraftCampaignId);
+                  setComparisonAdId(comparisonDraftAdId);
+                  setComparisonDateFrom(comparisonDraftDateFrom);
+                  setComparisonDateTo(comparisonDraftDateTo);
+                }}
+                disabled={!isComparisonFiltersDirty}
+                className="inline-flex items-center justify-center rounded-xl bg-red-600 px-4 py-2 text-sm font-semibold text-white shadow-[0_18px_32px_-18px_rgba(220,38,38,0.95)] transition hover:bg-red-700 disabled:cursor-not-allowed disabled:bg-red-300 disabled:shadow-none"
+              >
+                Aplicar filtros
+              </button>
+            </div>
+          </div>
+        </div>
+
         <UnifiedComparisonCard
           comparisonType={comparisonType}
           onComparisonTypeChange={setComparisonType}
@@ -661,10 +1224,19 @@ function resolveComparisonSelection(
 }
 
 function parseHourFromBucket(hourBucket: string) {
-  const match = String(hourBucket ?? '').trim().match(/^(\d{1,2})/);
-  if (!match) return null;
+  const value = String(hourBucket ?? '').trim();
+  if (!value) return null;
 
-  const hour = Number.parseInt(match[1] ?? '', 10);
+  const candidates = [
+    value.match(/^(\d{1,2})/),
+    value.match(/(\d{1,2}):\d{2}/),
+    value.match(/(\d{1,2})\s*(?:am|pm)/i),
+  ];
+
+  const rawHour = candidates.map((match) => match?.[1]).find(Boolean);
+  if (!rawHour) return null;
+
+  const hour = Number.parseInt(rawHour, 10);
   if (!Number.isInteger(hour) || hour < 0 || hour > 23) return null;
   return hour;
 }

@@ -28,10 +28,8 @@ function matchesSearch(row: MetaAdsReportingRow, query: string) {
 }
 
 export function MetaAdsDataPage() {
-  const [accountId, setAccountId] = useState('');
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
-  const [draftAccountId, setDraftAccountId] = useState('');
   const [draftDateFrom, setDraftDateFrom] = useState('');
   const [draftDateTo, setDraftDateTo] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
@@ -41,11 +39,9 @@ export function MetaAdsDataPage() {
   const [pageSize, setPageSize] = useState(25);
   const [currentPage, setCurrentPage] = useState(1);
 
-  const reportingQuery = useMetaAdsReporting({ accountId, dateFrom, dateTo });
+  const reportingQuery = useMetaAdsReporting({ accountId: '', campaignId: '', adId: '', dateFrom, dateTo });
 
   const rows = useMemo(() => reportingQuery.data?.rows ?? [], [reportingQuery.data?.rows]);
-  const accounts = useMemo(() => reportingQuery.data?.accounts ?? [], [reportingQuery.data?.accounts]);
-
   const filteredRows = useMemo(() => {
     return rows.filter((row) => {
       if (objective && row.objective !== objective) return false;
@@ -53,8 +49,7 @@ export function MetaAdsDataPage() {
     });
   }, [objective, rows, searchTerm]);
 
-  const isFiltersDirty = accountId !== draftAccountId
-    || dateFrom !== draftDateFrom
+  const isFiltersDirty = dateFrom !== draftDateFrom
     || dateTo !== draftDateTo
     || searchTerm !== draftSearchTerm
     || objective !== draftObjective;
@@ -96,15 +91,11 @@ export function MetaAdsDataPage() {
       />
 
       <MetaAdsFiltersPanel
-        accounts={accounts}
-        draftAccountId={draftAccountId}
         draftDateFrom={draftDateFrom}
         draftDateTo={draftDateTo}
-        onDraftAccountIdChange={setDraftAccountId}
         onDraftDateFromChange={setDraftDateFrom}
         onDraftDateToChange={setDraftDateTo}
         onApply={() => {
-          setAccountId(draftAccountId);
           setDateFrom(draftDateFrom);
           setDateTo(draftDateTo);
           setSearchTerm(draftSearchTerm);
@@ -112,10 +103,8 @@ export function MetaAdsDataPage() {
           setCurrentPage(1);
         }}
         onClear={() => {
-          setAccountId('');
           setDateFrom('');
           setDateTo('');
-          setDraftAccountId('');
           setDraftDateFrom('');
           setDraftDateTo('');
           setSearchTerm('');
