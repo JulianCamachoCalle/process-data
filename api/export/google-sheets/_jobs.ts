@@ -100,6 +100,90 @@ function parseDateInput(value: string) {
   return Number.isNaN(parsed.getTime()) ? null : value;
 }
 
+function normalizeDateForCompare(raw: unknown): string | null {
+  const value = String(raw ?? '').trim();
+  if (!value) return null;
+
+  const isoMatch = value.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (isoMatch) {
+    return `${isoMatch[1]}-${isoMatch[2]}-${isoMatch[3]}`;
+  }
+
+  const dmyMatch = value.match(/^(\d{2})-(\d{2})-(\d{4})$/);
+  if (dmyMatch) {
+    return `${dmyMatch[3]}-${dmyMatch[2]}-${dmyMatch[1]}`;
+  }
+
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return null;
+  const yyyy = parsed.getFullYear();
+  const mm = String(parsed.getMonth() + 1).padStart(2, '0');
+  const dd = String(parsed.getDate()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd}`;
+}
+
+function isDateInRange(raw: unknown, dateFrom: string, dateTo: string) {
+  const comparable = normalizeDateForCompare(raw);
+  if (!comparable) return false;
+  return comparable >= dateFrom && comparable <= dateTo;
+}
+
+async function applyBasicSheetStyles(sheet: GoogleSpreadsheet['sheetsByIndex'][number], columnsCount: number) {
+  try {
+    await sheet.updateProperties({
+      gridProperties: {
+        rowCount: sheet.rowCount,
+        columnCount: sheet.columnCount,
+        frozenRowCount: 1,
+      },
+    });
+  } catch {
+    // no-op: estilo opcional
+  }
+
+  try {
+    if (columnsCount <= 0) return;
+    const endColumnLetter = columnIndexToLetter(columnsCount);
+    await sheet.loadCells(`A1:${endColumnLetter}1`);
+
+    for (let columnIndex = 0; columnIndex < columnsCount; columnIndex += 1) {
+      const cell = sheet.getCell(0, columnIndex);
+      cell.textFormat = {
+        ...(cell.textFormat ?? {}),
+        bold: true,
+        foregroundColor: {
+          red: 1,
+          green: 1,
+          blue: 1,
+        },
+      };
+      cell.backgroundColor = {
+        red: 0.86,
+        green: 0.15,
+        blue: 0.15,
+      };
+      cell.horizontalAlignment = 'CENTER';
+    }
+
+    await sheet.saveUpdatedCells();
+  } catch {
+    // no-op: estilo opcional
+  }
+}
+
+function columnIndexToLetter(columnIndex1Based: number): string {
+  let index = columnIndex1Based;
+  let letter = '';
+
+  while (index > 0) {
+    const remainder = (index - 1) % 26;
+    letter = String.fromCharCode(65 + remainder) + letter;
+    index = Math.floor((index - 1) / 26);
+  }
+
+  return letter;
+}
+
 function getGoogleJwt() {
   const email = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL;
   const keyRaw = process.env.GOOGLE_PRIVATE_KEY;
@@ -124,8 +208,6 @@ async function fetchEnviosRows(dateFrom: string, dateTo: string) {
     supabase
       .from('envios' as never)
       .select('fecha_envio,id_lead_ganado,id_destino,id_resultado,cobro_entrega,pago_moto,excedente_pagado_moto,ingreso_total_fila,costo_total_fila,observaciones,id_tipo_punto,extra_punto_moto,extra_punto_empresa' as never)
-      .gte('fecha_envio' as never, dateFrom as never)
-      .lte('fecha_envio' as never, dateTo as never)
       .order('fecha_envio' as never, { ascending: true }),
     supabase
       .from('leads_ganados' as never)
@@ -167,7 +249,9 @@ async function fetchEnviosRows(dateFrom: string, dateTo: string) {
     if (Number.isFinite(id)) tipoPuntoById.set(id, String(row.tipo_punto ?? ''));
   }
 
-  const mapped = ((enviosResult.data ?? []) as Array<Record<string, unknown>>).map((row) => {
+  const mapped = ((enviosResult.data ?? []) as Array<Record<string, unknown>>)
+    .filter((row) => isDateInRange(row.fecha_envio, dateFrom, dateTo))
+    .map((row) => {
     const leadId = Number(row.id_lead_ganado);
     const lead = leadsById.get(leadId);
 
@@ -188,8 +272,8 @@ async function fetchEnviosRows(dateFrom: string, dateTo: string) {
       'Tipo Punto': tipoPuntoById.get(Number(row.id_tipo_punto)) ?? '',
       'Extra punto moto': formatCost(row.extra_punto_moto),
       'Extra punto empresa': formatCost(row.extra_punto_empresa),
-    };
-  });
+      };
+    });
 
   return {
     columns: [...ENVIOS_EXPORT_COLUMNS],
@@ -202,26 +286,26 @@ async function fetchLeadsGanadosRows(dateFrom: string, dateTo: string) {
   const { data, error } = await supabase
     .from('leads_ganados' as never)
     .select('fecha_ingreso_lead,fecha_lead_ganado,dias_lead_a_ganado,notas,distrito,cantidad_envios,anulados_fullfilment,ingreso_anulados_fullfilment,tienda_nombre_snapshot,vendedor_nombre_snapshot,origen_snapshot,fullfilment_snapshot' as never)
-    .gte('fecha_lead_ganado' as never, dateFrom as never)
-    .lte('fecha_lead_ganado' as never, dateTo as never)
     .order('fecha_lead_ganado' as never, { ascending: true });
 
   if (error) throw new Error(error.message || 'No se pudo consultar leads ganados.');
 
-  const mapped = ((data ?? []) as Array<Record<string, unknown>>).map((row) => ({
-    Tienda: String(row.tienda_nombre_snapshot ?? ''),
-    Vendedor: String(row.vendedor_nombre_snapshot ?? ''),
-    'Fecha ingreso lead': toDmyDisplayDate(row.fecha_ingreso_lead),
-    'Fecha Lead Ganado': toDmyDisplayDate(row.fecha_lead_ganado),
-    'Dias lead a ganado': String(row.dias_lead_a_ganado ?? 0),
-    FullFilment: formatBool(row.fullfilment_snapshot),
-    Notas: String(row.notas ?? ''),
-    Distrito: String(row.distrito ?? ''),
-    'Cantidad de envios': String(row.cantidad_envios ?? 0),
-    Origen: String(row.origen_snapshot ?? ''),
-    'Anulados Fullfilment': String(row.anulados_fullfilment ?? 0),
-    'Ingreso anulados fullfilment': formatCost(row.ingreso_anulados_fullfilment),
-  }));
+  const mapped = ((data ?? []) as Array<Record<string, unknown>>)
+    .filter((row) => isDateInRange(row.fecha_lead_ganado, dateFrom, dateTo))
+    .map((row) => ({
+      Tienda: String(row.tienda_nombre_snapshot ?? ''),
+      Vendedor: String(row.vendedor_nombre_snapshot ?? ''),
+      'Fecha ingreso lead': toDmyDisplayDate(row.fecha_ingreso_lead),
+      'Fecha Lead Ganado': toDmyDisplayDate(row.fecha_lead_ganado),
+      'Dias lead a ganado': String(row.dias_lead_a_ganado ?? 0),
+      FullFilment: formatBool(row.fullfilment_snapshot),
+      Notas: String(row.notas ?? ''),
+      Distrito: String(row.distrito ?? ''),
+      'Cantidad de envios': String(row.cantidad_envios ?? 0),
+      Origen: String(row.origen_snapshot ?? ''),
+      'Anulados Fullfilment': String(row.anulados_fullfilment ?? 0),
+      'Ingreso anulados fullfilment': formatCost(row.ingreso_anulados_fullfilment),
+    }));
 
   return {
     columns: [...LEADS_GANADOS_EXPORT_COLUMNS],
@@ -243,6 +327,8 @@ async function replaceSheetData(spreadsheetId: string, sheetName: string, column
     title: sheetName,
     headerValues: columns,
   });
+
+  await applyBasicSheetStyles(sheet, columns.length);
 
   const chunkSize = 1000;
   for (let offset = 0; offset < rows.length; offset += chunkSize) {
