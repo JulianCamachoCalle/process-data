@@ -12,6 +12,7 @@ import { KommoLeadsInsights } from './features/kommo/insights/KommoLeadsInsights
 import { MetaAdsDashboard } from './features/meta/ads/MetaAdsDashboard';
 import { MetaAdsDataPage } from './features/meta/ads/MetaAdsDataPage';
 import { LandingPage } from './features/landing/LandingPage';
+import { GoogleSheetsExportTester } from './features/exports/GoogleSheetsExportTester';
 import { prefetchSheetData } from './hooks/useSheetData';
 import { isSupabaseConfigured, supabase } from './lib/supabase';
 
@@ -197,6 +198,7 @@ function Layout() {
               <Route path="/meta/ads" element={<Navigate to="/meta/ads/dashboard" replace />} />
               <Route path="/meta/ads/dashboard" element={<MetaAdsDashboard />} />
               <Route path="/meta/ads/data" element={<MetaAdsDataPage />} />
+              <Route path="/exports/google-sheets" element={<GoogleSheetsExportTester />} />
             </Routes>
           </div>
         </main>
