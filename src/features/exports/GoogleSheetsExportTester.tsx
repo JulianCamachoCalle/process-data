@@ -33,7 +33,6 @@ export function GoogleSheetsExportTester() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [job, setJob] = useState<ExportJob | null>(null);
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -65,7 +64,7 @@ export function GoogleSheetsExportTester() {
         return;
       }
 
-      setJob(payload.job as ExportJob);
+      // setJob(payload.job as ExportJob);
       setMessage('Exportación ejecutada. Revisá estado y filas exportadas abajo.');
     } catch {
       setError('Error de red al intentar exportar.');
