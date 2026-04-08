@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react';
 import { Activity, Clock3, Database, Filter, RefreshCw } from 'lucide-react';
 import { formatCurrencyPen, formatNumberEs } from '../../../lib/tableHelpers';
-import type { MetaAdAccountOption, MetaSyncRunRow } from './types';
+import type { MetaSyncRunRow } from './types';
 import { formatDateTime, formatDurationMs, formatSyncResourceSummary } from './metaAdsUtils';
 
 export function MetaAdsPageHero({
@@ -38,11 +38,8 @@ export function MetaAdsFiltersPanel({
   isApplyDisabled,
   extra,
 }: {
-  accounts: MetaAdAccountOption[];
-  draftAccountId: string;
   draftDateFrom: string;
   draftDateTo: string;
-  onDraftAccountIdChange: (value: string) => void;
   onDraftDateFromChange: (value: string) => void;
   onDraftDateToChange: (value: string) => void;
   onApply: () => void;
@@ -63,7 +60,7 @@ export function MetaAdsFiltersPanel({
         </div>
       </div>
 
-      <div className={`grid grid-cols-1 gap-4 ${hasExtra ? 'xl:grid-cols-[minmax(0,1.3fr)_repeat(2,minmax(0,1fr))_auto]' : 'xl:grid-cols-[repeat(2,minmax(0,1fr))_auto]'}`}>
+      <div className={`grid grid-cols-1 gap-4 ${hasExtra ? 'xl:grid-cols-[repeat(5,minmax(0,1fr))_auto]' : 'xl:grid-cols-[repeat(2,minmax(0,1fr))_auto]'}`}>
 
         {extra}
 
@@ -87,11 +84,11 @@ export function MetaAdsFiltersPanel({
           />
         </label>
 
-        <div className="flex items-end justify-start gap-2 xl:justify-end">
+        <div className="flex min-w-[220px] items-end justify-start gap-2 xl:justify-end">
           <button
             type="button"
             onClick={onClear}
-            className="inline-flex items-center justify-center rounded-xl border border-gray-300 bg-white px-4 py-2 text-sm font-semibold text-gray-700 transition hover:border-gray-400 hover:bg-gray-50"
+            className="inline-flex h-[42px] items-center justify-center rounded-xl border border-gray-300 bg-white px-4 text-sm font-semibold text-gray-700 transition hover:border-gray-400 hover:bg-gray-50"
           >
             Limpiar
           </button>
@@ -99,7 +96,7 @@ export function MetaAdsFiltersPanel({
             type="button"
             onClick={onApply}
             disabled={isApplyDisabled}
-            className="inline-flex items-center justify-center rounded-xl bg-red-600 px-4 py-2 text-sm font-semibold text-white shadow-[0_18px_32px_-18px_rgba(220,38,38,0.95)] transition hover:bg-red-700 disabled:cursor-not-allowed disabled:bg-red-300 disabled:shadow-none"
+            className="inline-flex h-[42px] items-center justify-center rounded-xl bg-red-600 px-4 text-sm font-semibold text-white shadow-[0_18px_32px_-18px_rgba(220,38,38,0.95)] transition hover:bg-red-700 disabled:cursor-not-allowed disabled:bg-red-300 disabled:shadow-none"
           >
             Aplicar filtros
           </button>

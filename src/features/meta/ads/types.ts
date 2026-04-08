@@ -37,6 +37,8 @@ export type MetaAdsReportingRow = {
 
 export type MetaAdsOverviewFilters = {
   accountId: string;
+  campaignId: string;
+  adId: string;
   dateFrom: string;
   dateTo: string;
 };
