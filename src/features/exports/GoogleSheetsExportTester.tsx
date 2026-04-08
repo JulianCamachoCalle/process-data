@@ -68,7 +68,15 @@ export function GoogleSheetsExportPage() {
         return;
       }
 
-      void Swal.fire('Exportación completada con éxito', 'success');
+      const exportedRows = Number(payload?.job?.exported_rows ?? 0);
+      const status = String(payload?.job?.status ?? 'done').toUpperCase();
+
+      void Swal.fire({
+        title: 'Exportación completada',
+        text: `Estado: ${status} · Filas exportadas: ${exportedRows}`,
+        icon: 'success',
+        confirmButtonColor: '#dc2626',
+      });
     } catch {
       void Swal.fire('Error', 'Error de red al intentar exportar.', 'error');
     } finally {
