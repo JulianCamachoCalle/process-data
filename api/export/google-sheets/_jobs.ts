@@ -172,97 +172,71 @@ async function applyBasicSheetStyles(
   columns: string[],
   rowsCount: number,
 ) {
-  try {
-    await sheet.updateProperties({
-      gridProperties: {
-        rowCount: sheet.rowCount,
-        columnCount: sheet.columnCount,
-        frozenRowCount: 1,
-      },
-    });
-  } catch {
-    // no-op: estilo opcional
-  }
+  await sheet.updateProperties({
+    gridProperties: {
+      rowCount: sheet.rowCount,
+      columnCount: sheet.columnCount,
+      frozenRowCount: 1,
+    },
+  });
 
-  try {
-    const columnsCount = columns.length;
-    if (columnsCount <= 0) return;
-    const endColumnLetter = columnIndexToLetter(columnsCount);
-    await sheet.loadCells(`A1:${endColumnLetter}1`);
+  const columnsCount = columns.length;
+  if (columnsCount <= 0) return;
 
-    for (let columnIndex = 0; columnIndex < columnsCount; columnIndex += 1) {
-      const cell = sheet.getCell(0, columnIndex);
-      cell.textFormat = {
-        ...(cell.textFormat ?? {}),
-        bold: true,
-        foregroundColor: {
-          red: 1,
-          green: 1,
-          blue: 1,
-        },
-      };
-      cell.backgroundColor = {
-        red: 0.86,
-        green: 0.15,
-        blue: 0.15,
-      };
-      cell.horizontalAlignment = 'CENTER';
-    }
+  const endColumnLetter = columnIndexToLetter(columnsCount);
+  const lastRow = Math.max(1, rowsCount + 1);
+  await sheet.loadCells(`A1:${endColumnLetter}${lastRow}`);
 
-    await sheet.saveUpdatedCells();
-  } catch {
-    // no-op: estilo opcional
+  for (let columnIndex = 0; columnIndex < columnsCount; columnIndex += 1) {
+    const headerCell = sheet.getCell(0, columnIndex);
+    headerCell.textFormat = {
+      ...(headerCell.textFormat ?? {}),
+      bold: true,
+      foregroundColor: { red: 1, green: 1, blue: 1 },
+      fontSize: 10,
+    };
+    headerCell.backgroundColor = { red: 0.86, green: 0.15, blue: 0.15 };
+    headerCell.horizontalAlignment = 'CENTER';
   }
 
   if (rowsCount <= 0) return;
 
-  try {
-    const columnsCount = columns.length;
-    const endColumnLetter = columnIndexToLetter(columnsCount);
-    const lastRow = rowsCount + 1;
-    await sheet.loadCells(`A2:${endColumnLetter}${lastRow}`);
+  const currencyFormat = {
+    type: 'CURRENCY' as const,
+    pattern: '[$S/ ] #,##0.00',
+  };
 
-    const currencyFormat = {
-      type: 'CURRENCY' as const,
-      pattern: '[$S/ ] #,##0.00',
-    };
+  const numberFormat = {
+    type: 'NUMBER' as const,
+    pattern: '#,##0',
+  };
 
-    const numberFormat = {
-      type: 'NUMBER' as const,
-      pattern: '#,##0',
-    };
+  for (let rowIndex = 1; rowIndex <= rowsCount; rowIndex += 1) {
+    const isOddVisualRow = rowIndex % 2 === 1;
+    const rowBackground = isOddVisualRow
+      ? { red: 1, green: 1, blue: 1 }
+      : { red: 0.98, green: 0.98, blue: 0.98 };
 
-    for (let rowIndex = 1; rowIndex <= rowsCount; rowIndex += 1) {
-      const isOddVisualRow = rowIndex % 2 === 1;
-      const rowBackground = isOddVisualRow
-        ? { red: 1, green: 1, blue: 1 }
-        : { red: 0.98, green: 0.98, blue: 0.98 };
+    for (let colIndex = 0; colIndex < columnsCount; colIndex += 1) {
+      const header = columns[colIndex] ?? '';
+      const cell = sheet.getCell(rowIndex, colIndex);
 
-      for (let colIndex = 0; colIndex < columnsCount; colIndex += 1) {
-        const header = columns[colIndex] ?? '';
-        const cell = sheet.getCell(rowIndex, colIndex);
+      cell.backgroundColor = rowBackground;
+      cell.textFormat = {
+        ...(cell.textFormat ?? {}),
+        fontSize: 10,
+      };
+      cell.horizontalAlignment = getAlignmentByHeader(header);
 
-        cell.backgroundColor = rowBackground;
-        cell.textFormat = {
-          ...(cell.textFormat ?? {}),
-          fontSize: 10,
-          foregroundColor: { red: 0.17, green: 0.17, blue: 0.17 },
-        };
-
-        cell.horizontalAlignment = getAlignmentByHeader(header);
-
-        if (isCurrencyHeader(header)) {
-          cell.numberFormat = currencyFormat;
-        } else if (isNumberHeader(header)) {
-          cell.numberFormat = numberFormat;
-        }
+      if (isCurrencyHeader(header)) {
+        cell.numberFormat = currencyFormat;
+      } else if (isNumberHeader(header)) {
+        cell.numberFormat = numberFormat;
       }
     }
-
-    await sheet.saveUpdatedCells();
-  } catch {
-    // no-op: estilo opcional
   }
+
+  await sheet.saveUpdatedCells();
 }
 
 function columnIndexToLetter(columnIndex1Based: number): string {
