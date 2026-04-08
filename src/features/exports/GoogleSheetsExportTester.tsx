@@ -3,7 +3,7 @@ import { ExternalLink, Send, Table2 } from 'lucide-react';
 
 type ExportResource = 'ENVIOS' | 'LEADS GANADOS';
 
-type ExportJob = {
+/* type ExportJob = {
   id: string;
   status: 'pending' | 'running' | 'done' | 'failed' | 'cancelled';
   processed_rows: number;
@@ -20,6 +20,7 @@ type ExportJob = {
   };
   updated_at: string;
 };
+*/
 
 const defaultFrom = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().slice(0, 10);
 const defaultTo = new Date().toISOString().slice(0, 10);
