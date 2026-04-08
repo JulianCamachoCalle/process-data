@@ -856,7 +856,7 @@ export default async function metaAdsSyncHandler(req: VercelRequest, res: Vercel
           path: `${accountBusinessId}/insights`,
           params: {
             level: 'ad',
-            fields: 'ad_id,date_start,spend,impressions,reach,clicks,ctr,cpc,hourly_stats_aggregated_by_advertiser_time_zone',
+            fields: 'ad_id,date_start,spend,impressions,reach,clicks,ctr,cpc',
             breakdowns: 'hourly_stats_aggregated_by_advertiser_time_zone',
             date_preset: datePreset,
             time_increment: '1',
