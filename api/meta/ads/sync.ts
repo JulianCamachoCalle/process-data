@@ -170,6 +170,24 @@ type MetaInsightHourlyRow = {
   raw_payload: JsonRecord;
 };
 
+type MetaAdInsightBreakdownType = 'age_gender' | 'country' | 'publisher_platform';
+
+type MetaAdInsightBreakdownRow = {
+  ad_business_id: string;
+  date_start: string;
+  date_stop: string;
+  breakdown_type: MetaAdInsightBreakdownType;
+  breakdown_value_1: string;
+  breakdown_value_2: string;
+  spend: number;
+  impressions: number;
+  reach: number;
+  clicks: number;
+  ctr: number | null;
+  cpc: number | null;
+  raw_payload: JsonRecord;
+};
+
 type MetaPageRow = {
   business_id: string;
   name: string | null;
@@ -897,6 +915,51 @@ function mapInsightRow(payload: JsonRecord): MetaInsightRow | null {
   };
 }
 
+function mapInsightBreakdownRow(
+  payload: JsonRecord,
+  breakdownType: MetaAdInsightBreakdownType,
+): MetaAdInsightBreakdownRow | null {
+  const adBusinessId = toNullableText(payload.ad_id);
+  const dateStart = toNullableText(payload.date_start);
+  const dateStop = toNullableText(payload.date_stop);
+
+  if (!adBusinessId || !dateStart || !dateStop) {
+    return null;
+  }
+
+  let breakdownValue1: string | null = null;
+  let breakdownValue2: string | null = null;
+
+  if (breakdownType === 'age_gender') {
+    breakdownValue1 = toNullableText(payload.age);
+    breakdownValue2 = toNullableText(payload.gender);
+  } else if (breakdownType === 'country') {
+    breakdownValue1 = toNullableText(payload.country);
+  } else if (breakdownType === 'publisher_platform') {
+    breakdownValue1 = toNullableText(payload.publisher_platform);
+  }
+
+  if (!breakdownValue1) {
+    return null;
+  }
+
+  return {
+    ad_business_id: adBusinessId,
+    date_start: dateStart,
+    date_stop: dateStop,
+    breakdown_type: breakdownType,
+    breakdown_value_1: breakdownValue1,
+    breakdown_value_2: breakdownValue2 ?? '',
+    spend: toNumberOrZero(payload.spend),
+    impressions: Math.trunc(toNumberOrZero(payload.impressions)),
+    reach: Math.trunc(toNumberOrZero(payload.reach)),
+    clicks: Math.trunc(toNumberOrZero(payload.clicks)),
+    ctr: toNullableNumber(payload.ctr),
+    cpc: toNullableNumber(payload.cpc),
+    raw_payload: payload,
+  };
+}
+
 function mapInsightHourlyRow(payload: JsonRecord, fallbackBusinessId: string): MetaInsightHourlyRow | null {
   const adBusinessId = toNullableText(payload.ad_id) ?? fallbackBusinessId;
   const dateStart = toNullableText(payload.date_start);
@@ -1549,6 +1612,55 @@ export default async function metaAdsSyncHandler(req: VercelRequest, res: Vercel
       earlyStop = insightsResult.earlyStop;
     }
 
+    const audienceBreakdownSummary: Record<string, SyncResourceSummary> = {
+      age_gender: { pages_fetched: 0, pulled: 0, upserted: 0, has_more: false },
+      country: { pages_fetched: 0, pulled: 0, upserted: 0, has_more: false },
+      publisher_platform: { pages_fetched: 0, pulled: 0, upserted: 0, has_more: false },
+    };
+
+    if (!earlyStop) {
+      const syncBreakdown = async (
+        breakdownType: MetaAdInsightBreakdownType,
+        breakdowns: string,
+      ) => syncPagedResource<JsonRecord, MetaAdInsightBreakdownRow>({
+        token,
+        label: 'insights',
+        path: `${accountBusinessId}/insights`,
+        params: {
+          level: 'ad',
+          fields: 'ad_id,date_start,date_stop,spend,impressions,reach,clicks,ctr,cpc,age,gender,country,publisher_platform',
+          breakdowns,
+          date_preset: datePreset,
+          time_increment: timeIncrement,
+          limit: String(limit),
+        },
+        maxPages: Math.min(maxPages, 5),
+        startedAt,
+        maxRuntimeMs,
+        mapItem: (item) => mapInsightBreakdownRow(item, breakdownType),
+        table: 'meta_ad_insights_breakdown_daily',
+        onConflict: 'ad_business_id,date_start,date_stop,breakdown_type,breakdown_value_1,breakdown_value_2',
+      });
+
+      const ageGenderResult = await syncBreakdown('age_gender', 'age,gender');
+      audienceBreakdownSummary.age_gender = ageGenderResult.summary;
+      if (!earlyStop) {
+        earlyStop = ageGenderResult.earlyStop;
+      }
+
+      if (!earlyStop) {
+        const countryResult = await syncBreakdown('country', 'country');
+        audienceBreakdownSummary.country = countryResult.summary;
+        earlyStop = countryResult.earlyStop;
+      }
+
+      if (!earlyStop) {
+        const platformResult = await syncBreakdown('publisher_platform', 'publisher_platform');
+        audienceBreakdownSummary.publisher_platform = platformResult.summary;
+        earlyStop = platformResult.earlyStop;
+      }
+    }
+
     let hourlyDebug: HourlySyncDebug = {
       pages_fetched: 0,
       pulled: 0,
@@ -1655,6 +1767,7 @@ export default async function metaAdsSyncHandler(req: VercelRequest, res: Vercel
 
     const resourcesPayload: JsonRecord = {
       ...baseSummary,
+      insights_breakdown: audienceBreakdownSummary,
       insights_hourly: hourlyDebug,
     };
 

@@ -16,6 +16,7 @@ import {
   type MetaPerformanceEntry,
 } from './metaAdsUtils';
 import { useMetaAdsReporting } from './useMetaAdsReporting';
+import { useMetaAdsAudience } from './useMetaAdsAudience';
 
 const chartTooltipStyle = {
   contentStyle: {
@@ -71,8 +72,9 @@ export function MetaAdsDashboard() {
     dateFrom: comparisonDateFrom,
     dateTo: comparisonDateTo,
   });
+  const audienceQuery = useMetaAdsAudience({ dateFrom, dateTo, adId });
 
-  const rows = reportingQuery.data?.rows ?? [];
+  const rows = useMemo(() => reportingQuery.data?.rows ?? [], [reportingQuery.data?.rows]);
 
   const campaignOptions = useMemo(() => {
     const optionsMap = new Map<string, { id: string; label: string }>();
@@ -125,7 +127,7 @@ export function MetaAdsDashboard() {
     return Array.from(optionsMap.values()).sort((left, right) => left.label.localeCompare(right.label, 'es'));
   }, [rows, draftCampaignId]);
 
-  const comparisonRows = comparisonQuery.data?.rows ?? [];
+  const comparisonRows = useMemo(() => comparisonQuery.data?.rows ?? [], [comparisonQuery.data?.rows]);
 
   const comparisonCampaignOptions = useMemo(() => {
     const optionsMap = new Map<string, { id: string; label: string }>();
@@ -449,6 +451,83 @@ export function MetaAdsDashboard() {
         onRightChange: (value: string) => setAdCompareIds((current) => resolveComparisonSelection(comparisonAdPerformance, { ...current, right: value })),
       };
 
+  const scopedAudienceRows = useMemo(() => {
+    const audienceRows = audienceQuery.data ?? [];
+    const scopedRows = reportingQuery.data?.rows ?? [];
+    const scopedAdIds = new Set(
+      scopedRows
+        .filter((row) => {
+          if (campaignId && row.campaign_business_id !== campaignId) return false;
+          if (adsetId && row.adset_business_id !== adsetId) return false;
+          if (adId && row.ad_business_id !== adId) return false;
+          return true;
+        })
+        .map((row) => row.ad_business_id),
+    );
+
+    if (scopedAdIds.size === 0) {
+      return audienceRows;
+    }
+
+    return audienceRows.filter((row) => scopedAdIds.has(row.ad_business_id));
+  }, [audienceQuery.data, reportingQuery.data?.rows, campaignId, adsetId, adId]);
+
+  const audienceKpis = useMemo(() => {
+    const totals = scopedAudienceRows.reduce((acc, row) => {
+      acc.clicks += Number(row.clicks ?? 0);
+      acc.impressions += Number(row.impressions ?? 0);
+      acc.reach += Number(row.reach ?? 0);
+      return acc;
+    }, { clicks: 0, impressions: 0, reach: 0 });
+
+    return totals;
+  }, [scopedAudienceRows]);
+
+  const audienceByAgeGender = useMemo(() => {
+    const grouped = new Map<string, number>();
+
+    for (const row of scopedAudienceRows) {
+      if (row.breakdown_type !== 'age_gender') continue;
+      const key = `${row.breakdown_value_1} · ${row.breakdown_value_2 || 'unknown'}`;
+      grouped.set(key, (grouped.get(key) ?? 0) + Number(row.clicks ?? 0));
+    }
+
+    return Array.from(grouped.entries())
+      .map(([label, clicks]) => ({ label, clicks }))
+      .sort((a, b) => b.clicks - a.clicks)
+      .slice(0, 12);
+  }, [scopedAudienceRows]);
+
+  const audienceByCountry = useMemo(() => {
+    const grouped = new Map<string, number>();
+
+    for (const row of scopedAudienceRows) {
+      if (row.breakdown_type !== 'country') continue;
+      const key = row.breakdown_value_1 || 'N/D';
+      grouped.set(key, (grouped.get(key) ?? 0) + Number(row.clicks ?? 0));
+    }
+
+    return Array.from(grouped.entries())
+      .map(([label, clicks]) => ({ label, clicks }))
+      .sort((a, b) => b.clicks - a.clicks)
+      .slice(0, 10);
+  }, [scopedAudienceRows]);
+
+  const audienceByPlatform = useMemo(() => {
+    const grouped = new Map<string, number>();
+
+    for (const row of scopedAudienceRows) {
+      if (row.breakdown_type !== 'publisher_platform') continue;
+      const key = row.breakdown_value_1 || 'N/D';
+      grouped.set(key, (grouped.get(key) ?? 0) + Number(row.clicks ?? 0));
+    }
+
+    return Array.from(grouped.entries())
+      .map(([label, clicks]) => ({ label, clicks }))
+      .sort((a, b) => b.clicks - a.clicks)
+      .slice(0, 10);
+  }, [scopedAudienceRows]);
+
   if (reportingQuery.isLoading) {
     return (
       <div className="flex items-center justify-center h-full text-gray-500 bg-white rounded-2xl border border-gray-200 shadow-sm p-6">
@@ -574,6 +653,71 @@ export function MetaAdsDashboard() {
           <KpiCard title="Campañas con data" value={formatNumberEs(dashboard.totalCampaigns)} helper="Campañas únicas en el rango" icon={<BarChart3 className="text-red-600" size={18} />} />
           <KpiCard title="Ads con data" value={formatNumberEs(dashboard.totalAds)} helper={`${formatNumberEs(dashboard.totalAdsets)} ad sets únicos`} icon={<Megaphone className="text-red-600" size={18} />} />
         </KpiGrid>
+      </Section>
+
+      <Section title="Audiencia pagada (demografía y placements)">
+        <KpiGrid>
+          <KpiCard title="Clicks (breakdowns)" value={formatCompactMetric(audienceKpis.clicks, 'number')} helper="Clicks agregados desde age/gender, country y platform" icon={<MousePointerClick className="text-red-600" size={18} />} />
+          <KpiCard title="Impresiones (breakdowns)" value={formatCompactMetric(audienceKpis.impressions, 'number')} helper="Impresiones agregadas en desgloses" icon={<Megaphone className="text-red-600" size={18} />} />
+          <KpiCard title="Reach (breakdowns)" value={formatCompactMetric(audienceKpis.reach, 'number')} helper="Reach agregado en desgloses" icon={<Activity className="text-red-600" size={18} />} />
+          <KpiCard title="Filas audiencia" value={formatNumberEs(scopedAudienceRows.length)} helper="Registros SQL meta_ad_insights_breakdown_daily" icon={<BarChart3 className="text-red-600" size={18} />} />
+        </KpiGrid>
+
+        <div className="grid grid-cols-1 gap-4 xl:grid-cols-3 mt-4">
+          <ChartCard title="Clicks por edad y género" icon={<Target size={16} className="text-red-600" />}>
+            {audienceByAgeGender.length === 0 ? (
+              <div className="rounded-xl border border-dashed border-gray-200 bg-gray-50 px-4 py-6 text-sm text-gray-500">
+                No hay data de age/gender todavía. Ejecutá sync de ads para breakdowns.
+              </div>
+            ) : (
+              <ResponsiveContainer width="100%" height={280}>
+                <BarChart data={audienceByAgeGender} layout="vertical" margin={{ left: 10, right: 10 }}>
+                  <CartesianGrid strokeDasharray="3 3" horizontal={false} />
+                  <XAxis type="number" tick={{ fontSize: 12 }} />
+                  <YAxis type="category" dataKey="label" width={90} tick={{ fontSize: 11 }} />
+                  <Tooltip {...chartTooltipStyle} formatter={(value) => formatCompactMetric(Number(value ?? 0), 'number')} />
+                  <Bar dataKey="clicks" fill="#dc2626" radius={[0, 8, 8, 0]} isAnimationActive={false} />
+                </BarChart>
+              </ResponsiveContainer>
+            )}
+          </ChartCard>
+
+          <ChartCard title="Clicks por país" icon={<PieChartIcon size={16} className="text-red-600" />}>
+            {audienceByCountry.length === 0 ? (
+              <div className="rounded-xl border border-dashed border-gray-200 bg-gray-50 px-4 py-6 text-sm text-gray-500">
+                No hay data de country todavía.
+              </div>
+            ) : (
+              <ResponsiveContainer width="100%" height={280}>
+                <BarChart data={audienceByCountry}>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                  <XAxis dataKey="label" tick={{ fontSize: 11 }} interval={0} angle={-20} textAnchor="end" height={60} />
+                  <YAxis tick={{ fontSize: 12 }} />
+                  <Tooltip {...chartTooltipStyle} formatter={(value) => formatCompactMetric(Number(value ?? 0), 'number')} />
+                  <Bar dataKey="clicks" fill="#f97316" radius={[8, 8, 0, 0]} isAnimationActive={false} />
+                </BarChart>
+              </ResponsiveContainer>
+            )}
+          </ChartCard>
+
+          <ChartCard title="Clicks por publisher platform" icon={<Megaphone size={16} className="text-red-600" />}>
+            {audienceByPlatform.length === 0 ? (
+              <div className="rounded-xl border border-dashed border-gray-200 bg-gray-50 px-4 py-6 text-sm text-gray-500">
+                No hay data de publisher_platform todavía.
+              </div>
+            ) : (
+              <ResponsiveContainer width="100%" height={280}>
+                <BarChart data={audienceByPlatform}>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                  <XAxis dataKey="label" tick={{ fontSize: 11 }} interval={0} angle={-20} textAnchor="end" height={60} />
+                  <YAxis tick={{ fontSize: 12 }} />
+                  <Tooltip {...chartTooltipStyle} formatter={(value) => formatCompactMetric(Number(value ?? 0), 'number')} />
+                  <Bar dataKey="clicks" fill="#dc2626" radius={[8, 8, 0, 0]} isAnimationActive={false} />
+                </BarChart>
+              </ResponsiveContainer>
+            )}
+          </ChartCard>
+        </div>
       </Section>
 
       <Section title="Gráficos">
