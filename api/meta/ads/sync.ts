@@ -356,6 +356,46 @@ async function fetchOembedPreview(
   return null;
 }
 
+async function fetchCreativePreviewFallback(token: string, creativeId: string): Promise<{
+  image_url: string | null;
+  source_url: string | null;
+  creative_name: string | null;
+}> {
+  try {
+    const payload = await fetchMetaJson(token, creativeId, {
+      fields: 'id,name,image_url,thumbnail_url,object_url,object_story_spec,effective_object_story_id,object_story_id',
+    });
+
+    const objectStorySpec = ensureObject(payload.object_story_spec);
+    const linkData = ensureObject(objectStorySpec.link_data);
+    const videoData = ensureObject(objectStorySpec.video_data);
+
+    const imageUrl = [
+      toNullableText(payload.image_url),
+      toNullableText(payload.thumbnail_url),
+      toNullableText(linkData.picture),
+      toNullableText(videoData.image_url),
+    ].find(Boolean) ?? null;
+
+    const sourceUrl = [
+      toNullableText(payload.object_url),
+      toNullableText(linkData.link),
+    ].find(Boolean) ?? null;
+
+    return {
+      image_url: imageUrl,
+      source_url: sourceUrl,
+      creative_name: toNullableText(payload.name),
+    };
+  } catch {
+    return {
+      image_url: null,
+      source_url: null,
+      creative_name: null,
+    };
+  }
+}
+
 function requireMetaAccessToken() {
   const token = process.env.META_ACCESS_TOKEN;
   if (!token) {
@@ -769,6 +809,7 @@ export default async function metaAdsSyncHandler(req: VercelRequest, res: Vercel
 
     if (mode === 'oembed_preview') {
       const token = requireMetaAccessToken();
+      const creativeId = getRequestParam(req, body, 'creative_id')?.trim() ?? '';
       const objectStoryId =
         getRequestParam(req, body, 'effective_object_story_id')?.trim()
         || getRequestParam(req, body, 'object_story_id')?.trim()
@@ -803,15 +844,34 @@ export default async function metaAdsSyncHandler(req: VercelRequest, res: Vercel
 
       const preview = await fetchOembedPreview(token, dedupedCandidateUrls);
       if (!preview) {
+        if (creativeId) {
+          const fallback = await fetchCreativePreviewFallback(token, creativeId);
+          if (fallback.image_url) {
+            return res.status(200).json({
+              success: true,
+              mode,
+              preview_type: 'creative_image',
+              object_story_id: objectStoryId || null,
+              creative_id: creativeId,
+              creative_name: fallback.creative_name,
+              image_url: fallback.image_url,
+              source_url: fallback.source_url,
+              warning: 'oEmbed no estuvo disponible para este contenido; se devolvió preview desde creative.',
+            });
+          }
+        }
+
         return res.status(404).json({
           error: 'No se pudo resolver oEmbed para este ad/publicación. Puede no ser contenido público o no estar disponible para embed.',
           candidates: dedupedCandidateUrls,
+          creative_id: creativeId || null,
         });
       }
 
       return res.status(200).json({
         success: true,
         mode,
+        preview_type: 'oembed_html',
         object_story_id: objectStoryId || null,
         matched_endpoint: preview.endpoint,
         source_url: preview.source_url,

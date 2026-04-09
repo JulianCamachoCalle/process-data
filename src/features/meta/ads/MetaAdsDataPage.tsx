@@ -9,6 +9,9 @@ import { useMetaAdsReporting } from './useMetaAdsReporting';
 type OembedPreviewResponse = {
   error?: string;
   html?: string;
+  image_url?: string;
+  preview_type?: 'oembed_html' | 'creative_image';
+  warning?: string;
   matched_endpoint?: string;
   provider_name?: string | null;
   source_url?: string;
@@ -17,9 +20,11 @@ type OembedPreviewResponse = {
 type OembedPreviewState = {
   status: 'idle' | 'loading' | 'ready' | 'error';
   html?: string;
+  imageUrl?: string;
   endpoint?: string;
   providerName?: string;
   sourceUrl?: string;
+  warning?: string;
   error?: string;
 };
 
@@ -110,6 +115,7 @@ export function MetaAdsDataPage() {
       mode: 'oembed_preview',
       object_story_id: row.object_story_id ?? '',
       effective_object_story_id: row.effective_object_story_id ?? '',
+      creative_id: row.creative_id ?? '',
     });
 
     try {
@@ -119,7 +125,7 @@ export function MetaAdsDataPage() {
       });
 
       const payload = (await response.json()) as OembedPreviewResponse;
-      if (!response.ok || !payload.html) {
+      if (!response.ok || (!payload.html && !payload.image_url)) {
         setPreviewByKey((current) => ({
           ...current,
           [previewKey]: {
@@ -135,9 +141,11 @@ export function MetaAdsDataPage() {
         [previewKey]: {
           status: 'ready',
           html: payload.html,
+          imageUrl: payload.image_url,
           endpoint: payload.matched_endpoint,
           providerName: payload.provider_name ?? undefined,
           sourceUrl: payload.source_url,
+          warning: payload.warning,
         },
       }));
     } catch (error) {
@@ -363,6 +371,24 @@ export function MetaAdsDataPage() {
                                           </a>
                                         ) : null}
                                       </>
+                                    ) : null}
+
+                                    {previewState.status === 'ready' && !previewState.html && previewState.imageUrl ? (
+                                      <>
+                                        <p className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-gray-500">
+                                          Preview fallback · creative
+                                        </p>
+                                        <img
+                                          src={previewState.imageUrl}
+                                          alt={`Preview creative ${row.creative_name ?? row.creative_id ?? ''}`}
+                                          className="w-full rounded-lg border border-gray-200 bg-white object-cover"
+                                          loading="lazy"
+                                        />
+                                      </>
+                                    ) : null}
+
+                                    {previewState.status === 'ready' && previewState.warning ? (
+                                      <p className="mt-2 text-[11px] text-amber-700">{previewState.warning}</p>
                                     ) : null}
                                   </div>
                                 ) : null}
