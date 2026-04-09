@@ -93,6 +93,8 @@ type HourlySyncDebug = {
 
 type MetaSyncResource = 'ads' | 'instagram';
 
+type MetaOembedEndpoint = 'oembed_page' | 'oembed_post' | 'oembed_video' | 'instagram_oembed';
+
 type MetaAccountRow = {
   business_id: string;
   account_id: string | null;
@@ -271,6 +273,87 @@ function resolveInstagramUserId(req: VercelRequest, body: JsonRecord) {
   if (envValue) return envValue;
 
   throw new Error('instagram_user_id es obligatorio. También podés configurar META_INSTAGRAM_USER_ID.');
+}
+
+function resolveOembedMode(req: VercelRequest, body: JsonRecord) {
+  return (getRequestParam(req, body, 'mode') ?? '').trim().toLowerCase();
+}
+
+function buildOembedCandidateUrls(rawValue: string) {
+  const normalized = rawValue.trim();
+  if (!normalized) return [];
+
+  if (normalized.startsWith('http://') || normalized.startsWith('https://')) {
+    return [normalized.replace(/^http:\/\//i, 'https://')];
+  }
+
+  const candidates: string[] = [];
+  const [pageId, postId] = normalized.split('_');
+
+  if (pageId && postId) {
+    candidates.push(`https://www.facebook.com/${pageId}/posts/${postId}`);
+    candidates.push(`https://www.facebook.com/permalink.php?story_fbid=${postId}&id=${pageId}`);
+  }
+
+  candidates.push(`https://www.facebook.com/${normalized}`);
+
+  return [...new Set(candidates.map((item) => item.trim()).filter(Boolean))];
+}
+
+async function resolveObjectStoryPermalink(token: string, objectStoryId: string) {
+  try {
+    const payload = await fetchMetaJson(token, objectStoryId, { fields: 'permalink_url' });
+    return toNullableText(payload.permalink_url);
+  } catch {
+    return null;
+  }
+}
+
+async function fetchOembedPreview(
+  token: string,
+  candidateUrls: string[],
+): Promise<{
+  endpoint: MetaOembedEndpoint;
+  source_url: string;
+  html: string;
+  provider_name: string | null;
+  type: string | null;
+  width: number | null;
+  height: number | null;
+} | null> {
+  const endpoints: MetaOembedEndpoint[] = ['oembed_post', 'oembed_video', 'instagram_oembed', 'oembed_page'];
+
+  for (const sourceUrl of candidateUrls) {
+    for (const endpoint of endpoints) {
+      try {
+        const payload = await fetchMetaJson(token, endpoint, {
+          url: sourceUrl,
+          maxwidth: '560',
+          useiframe: 'true',
+          omitscript: 'true',
+        });
+
+        const html = toNullableText(payload.html);
+        if (!html) {
+          continue;
+        }
+
+        return {
+          endpoint,
+          source_url: sourceUrl,
+          html,
+          provider_name: toNullableText(payload.provider_name),
+          type: toNullableText(payload.type),
+          width: toNullableNumber(payload.width),
+          height: toNullableNumber(payload.height),
+        };
+      } catch {
+        // Intentional no-op: probamos el siguiente endpoint/url.
+      }
+    }
+  }
+
+  return null;
 }
 
 function requireMetaAccessToken() {
@@ -682,6 +765,64 @@ export default async function metaAdsSyncHandler(req: VercelRequest, res: Vercel
     }
 
     const body = parseBodyObject(req);
+    const mode = resolveOembedMode(req, body);
+
+    if (mode === 'oembed_preview') {
+      const token = requireMetaAccessToken();
+      const objectStoryId =
+        getRequestParam(req, body, 'effective_object_story_id')?.trim()
+        || getRequestParam(req, body, 'object_story_id')?.trim()
+        || '';
+      const directUrl = getRequestParam(req, body, 'url')?.trim() ?? '';
+
+      if (!objectStoryId && !directUrl) {
+        return res.status(400).json({
+          error: 'Debés enviar object_story_id (o effective_object_story_id) o url para probar oEmbed.',
+        });
+      }
+
+      const candidateUrls: string[] = [];
+      if (directUrl) {
+        candidateUrls.push(...buildOembedCandidateUrls(directUrl));
+      }
+
+      if (objectStoryId) {
+        const permalink = await resolveObjectStoryPermalink(token, objectStoryId);
+        if (permalink) {
+          candidateUrls.push(...buildOembedCandidateUrls(permalink));
+        }
+        candidateUrls.push(...buildOembedCandidateUrls(objectStoryId));
+      }
+
+      const dedupedCandidateUrls = [...new Set(candidateUrls.filter(Boolean))];
+      if (dedupedCandidateUrls.length === 0) {
+        return res.status(400).json({
+          error: 'No se pudo construir una URL candidata para oEmbed con los parámetros enviados.',
+        });
+      }
+
+      const preview = await fetchOembedPreview(token, dedupedCandidateUrls);
+      if (!preview) {
+        return res.status(404).json({
+          error: 'No se pudo resolver oEmbed para este ad/publicación. Puede no ser contenido público o no estar disponible para embed.',
+          candidates: dedupedCandidateUrls,
+        });
+      }
+
+      return res.status(200).json({
+        success: true,
+        mode,
+        object_story_id: objectStoryId || null,
+        matched_endpoint: preview.endpoint,
+        source_url: preview.source_url,
+        provider_name: preview.provider_name,
+        type: preview.type,
+        width: preview.width,
+        height: preview.height,
+        html: preview.html,
+      });
+    }
+
     const resource = resolveSyncResource(req, body);
     const accountBusinessId = resource === 'ads' ? resolveAccountId(req, body) : null;
     accountBusinessIdForRun = accountBusinessId;

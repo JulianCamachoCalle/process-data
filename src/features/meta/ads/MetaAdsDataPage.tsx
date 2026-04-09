@@ -1,10 +1,31 @@
-import { useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { Activity, ChevronLeft, ChevronRight, Database, Search } from 'lucide-react';
 import { formatCurrencyPen, formatNumberEs, normalizeText } from '../../../lib/tableHelpers';
 import { KpiCard, KpiGrid, MetaAdsFiltersPanel, MetaAdsPageHero, Section } from './metaAdsShared';
 import { formatPercent, formatStatus } from './metaAdsUtils';
 import type { MetaAdsReportingRow } from './types';
 import { useMetaAdsReporting } from './useMetaAdsReporting';
+
+type OembedPreviewResponse = {
+  error?: string;
+  html?: string;
+  matched_endpoint?: string;
+  provider_name?: string | null;
+  source_url?: string;
+};
+
+type OembedPreviewState = {
+  status: 'idle' | 'loading' | 'ready' | 'error';
+  html?: string;
+  endpoint?: string;
+  providerName?: string;
+  sourceUrl?: string;
+  error?: string;
+};
+
+function getPreviewKey(row: MetaAdsReportingRow) {
+  return `${row.ad_business_id}:${row.effective_object_story_id ?? row.object_story_id ?? 'none'}`;
+}
 
 function matchesSearch(row: MetaAdsReportingRow, query: string) {
   if (!query) return true;
@@ -38,6 +59,8 @@ export function MetaAdsDataPage() {
   const [draftObjective, setDraftObjective] = useState('');
   const [pageSize, setPageSize] = useState(25);
   const [currentPage, setCurrentPage] = useState(1);
+  const [expandedPreviewKey, setExpandedPreviewKey] = useState<string | null>(null);
+  const [previewByKey, setPreviewByKey] = useState<Record<string, OembedPreviewState>>({});
 
   const reportingQuery = useMetaAdsReporting({ accountId: '', campaignId: '', adId: '', dateFrom, dateTo });
 
@@ -60,6 +83,73 @@ export function MetaAdsDataPage() {
     const start = (safeCurrentPage - 1) * pageSize;
     return filteredRows.slice(start, start + pageSize);
   }, [filteredRows, pageSize, safeCurrentPage]);
+
+  const loadPreview = useCallback(async (row: MetaAdsReportingRow) => {
+    const previewKey = getPreviewKey(row);
+    const objectStoryId = row.effective_object_story_id || row.object_story_id;
+
+    if (!objectStoryId) {
+      setPreviewByKey((current) => ({
+        ...current,
+        [previewKey]: {
+          status: 'error',
+          error: 'Este ad no tiene object_story_id para probar oEmbed.',
+        },
+      }));
+      return;
+    }
+
+    setPreviewByKey((current) => ({
+      ...current,
+      [previewKey]: {
+        status: 'loading',
+      },
+    }));
+
+    const query = new URLSearchParams({
+      mode: 'oembed_preview',
+      object_story_id: row.object_story_id ?? '',
+      effective_object_story_id: row.effective_object_story_id ?? '',
+    });
+
+    try {
+      const response = await fetch(`/api/meta/ads/sync?${query.toString()}`, {
+        method: 'GET',
+        credentials: 'include',
+      });
+
+      const payload = (await response.json()) as OembedPreviewResponse;
+      if (!response.ok || !payload.html) {
+        setPreviewByKey((current) => ({
+          ...current,
+          [previewKey]: {
+            status: 'error',
+            error: payload.error ?? 'No se pudo obtener el preview oEmbed para este ad.',
+          },
+        }));
+        return;
+      }
+
+      setPreviewByKey((current) => ({
+        ...current,
+        [previewKey]: {
+          status: 'ready',
+          html: payload.html,
+          endpoint: payload.matched_endpoint,
+          providerName: payload.provider_name ?? undefined,
+          sourceUrl: payload.source_url,
+        },
+      }));
+    } catch (error) {
+      setPreviewByKey((current) => ({
+        ...current,
+        [previewKey]: {
+          status: 'error',
+          error: error instanceof Error ? error.message : 'Error inesperado al cargar preview oEmbed.',
+        },
+      }));
+    }
+  }, []);
 
   if (reportingQuery.isLoading) {
     return (
@@ -214,6 +304,71 @@ export function MetaAdsDataPage() {
                         <td className="px-4 py-3 min-w-52">
                           <p className="font-medium text-gray-900">{row.creative_name || 'N/D'}</p>
                           <p className="text-xs text-gray-500">{row.creative_id || 'Sin creative_id'}</p>
+
+                          {(() => {
+                            const previewKey = getPreviewKey(row);
+                            const previewState = previewByKey[previewKey] ?? { status: 'idle' as const };
+                            const hasObjectStory = Boolean(row.effective_object_story_id || row.object_story_id);
+                            const isExpanded = expandedPreviewKey === previewKey;
+
+                            return (
+                              <div className="mt-2 space-y-2">
+                                <button
+                                  type="button"
+                                  disabled={!hasObjectStory || previewState.status === 'loading'}
+                                  onClick={() => {
+                                    if (isExpanded) {
+                                      setExpandedPreviewKey(null);
+                                      return;
+                                    }
+
+                                    setExpandedPreviewKey(previewKey);
+
+                                    if (previewState.status === 'idle' || previewState.status === 'error') {
+                                      void loadPreview(row);
+                                    }
+                                  }}
+                                  className="inline-flex items-center rounded-lg border border-gray-300 bg-white px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide text-gray-700 transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
+                                >
+                                  {previewState.status === 'loading' ? 'Cargando preview...' : 'Probar oEmbed'}
+                                </button>
+
+                                {isExpanded ? (
+                                  <div className="rounded-xl border border-gray-200 bg-gray-50 p-2">
+                                    {previewState.status === 'loading' ? (
+                                      <p className="text-xs text-gray-500">Consultando oEmbed de Meta...</p>
+                                    ) : null}
+
+                                    {previewState.status === 'error' ? (
+                                      <p className="text-xs text-red-600">{previewState.error}</p>
+                                    ) : null}
+
+                                    {previewState.status === 'ready' && previewState.html ? (
+                                      <>
+                                        <p className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-gray-500">
+                                          {previewState.providerName ?? 'Meta'} · {previewState.endpoint ?? 'oembed'}
+                                        </p>
+                                        <div
+                                          className="overflow-hidden rounded-lg border border-gray-200 bg-white [&_iframe]:w-full [&_iframe]:min-h-[220px] [&_iframe]:border-0"
+                                          dangerouslySetInnerHTML={{ __html: previewState.html }}
+                                        />
+                                        {previewState.sourceUrl ? (
+                                          <a
+                                            href={previewState.sourceUrl}
+                                            target="_blank"
+                                            rel="noreferrer"
+                                            className="mt-2 inline-block text-[11px] font-medium text-red-600 hover:text-red-700"
+                                          >
+                                            Abrir publicación origen ↗
+                                          </a>
+                                        ) : null}
+                                      </>
+                                    ) : null}
+                                  </div>
+                                ) : null}
+                              </div>
+                            );
+                          })()}
                         </td>
                       </tr>
                     ))}
