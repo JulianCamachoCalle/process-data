@@ -1190,6 +1190,52 @@ export default async function metaAdsSyncHandler(req: VercelRequest, res: Vercel
       });
     }
 
+    if (mode === 'ads_audience_sql') {
+      const dateFrom = getRequestParam(req, body, 'date_from')?.trim() ?? '';
+      const dateTo = getRequestParam(req, body, 'date_to')?.trim() ?? '';
+      const adId = getRequestParam(req, body, 'ad_id')?.trim() ?? '';
+
+      const supabase = getSupabaseAdminClient();
+
+      let audienceQuery = supabase
+        .from('meta_ad_insights_breakdown_daily' as never)
+        .select('ad_business_id,date_start,date_stop,breakdown_type,breakdown_value_1,breakdown_value_2,spend,impressions,reach,clicks,ctr,cpc' as never)
+        .order('date_start' as never, { ascending: false });
+
+      if (dateFrom) {
+        audienceQuery = audienceQuery.gte('date_start' as never, dateFrom as never);
+      }
+      if (dateTo) {
+        audienceQuery = audienceQuery.lte('date_start' as never, dateTo as never);
+      }
+      if (adId) {
+        audienceQuery = audienceQuery.eq('ad_business_id' as never, adId as never);
+      }
+
+      const { data, error } = await audienceQuery.limit(5000);
+      if (error) {
+        throw new Error(`No se pudo cargar audiencia de ads desde SQL: ${error.message}`);
+      }
+
+      return res.status(200).json({
+        success: true,
+        rows: (data ?? []).map((item) => ({
+          ad_business_id: toNullableText((item as JsonRecord).ad_business_id),
+          date_start: toNullableText((item as JsonRecord).date_start),
+          date_stop: toNullableText((item as JsonRecord).date_stop),
+          breakdown_type: toNullableText((item as JsonRecord).breakdown_type),
+          breakdown_value_1: toNullableText((item as JsonRecord).breakdown_value_1),
+          breakdown_value_2: toNullableText((item as JsonRecord).breakdown_value_2) ?? '',
+          spend: toNullableNumber((item as JsonRecord).spend),
+          impressions: toNullableNumber((item as JsonRecord).impressions),
+          reach: toNullableNumber((item as JsonRecord).reach),
+          clicks: toNullableNumber((item as JsonRecord).clicks),
+          ctr: toNullableNumber((item as JsonRecord).ctr),
+          cpc: toNullableNumber((item as JsonRecord).cpc),
+        })),
+      });
+    }
+
     const resource = resolveSyncResource(req, body);
     const accountBusinessId = resource === 'ads' ? resolveAccountId(req, body) : null;
     accountBusinessIdForRun = accountBusinessId;

@@ -41,6 +41,15 @@ const chartTooltipStyle = {
   },
 } as const;
 
+type AudienceMetricKey = 'impressions' | 'reach' | 'clicks' | 'spend';
+
+const audienceMetricMeta: Record<AudienceMetricKey, { label: string; format: 'number' | 'currency' }> = {
+  impressions: { label: 'Impresiones', format: 'number' },
+  reach: { label: 'Reach', format: 'number' },
+  clicks: { label: 'Clicks', format: 'number' },
+  spend: { label: 'Gasto', format: 'currency' },
+};
+
 export function MetaAdsDashboard() {
   const [campaignId, setCampaignId] = useState('');
   const [adsetId, setAdsetId] = useState('');
@@ -63,6 +72,7 @@ export function MetaAdsDashboard() {
   const [comparisonDraftDateTo, setComparisonDraftDateTo] = useState('');
   const [campaignCompareIds, setCampaignCompareIds] = useState({ left: '', right: '' });
   const [adCompareIds, setAdCompareIds] = useState({ left: '', right: '' });
+  const [audienceMetric, setAudienceMetric] = useState<AudienceMetricKey>('impressions');
 
   const reportingQuery = useMetaAdsReporting({ accountId: '', campaignId: '', adId: '', dateFrom, dateTo });
   const comparisonQuery = useMetaAdsReporting({
@@ -451,37 +461,10 @@ export function MetaAdsDashboard() {
         onRightChange: (value: string) => setAdCompareIds((current) => resolveComparisonSelection(comparisonAdPerformance, { ...current, right: value })),
       };
 
-  const scopedAudienceRows = useMemo(() => {
-    const audienceRows = audienceQuery.data ?? [];
-    const scopedRows = reportingQuery.data?.rows ?? [];
-    const scopedAdIds = new Set(
-      scopedRows
-        .filter((row) => {
-          if (campaignId && row.campaign_business_id !== campaignId) return false;
-          if (adsetId && row.adset_business_id !== adsetId) return false;
-          if (adId && row.ad_business_id !== adId) return false;
-          return true;
-        })
-        .map((row) => row.ad_business_id),
-    );
+  const scopedAudienceRows = useMemo(() => audienceQuery.data ?? [], [audienceQuery.data]);
 
-    if (scopedAdIds.size === 0) {
-      return audienceRows;
-    }
-
-    return audienceRows.filter((row) => scopedAdIds.has(row.ad_business_id));
-  }, [audienceQuery.data, reportingQuery.data?.rows, campaignId, adsetId, adId]);
-
-  const audienceKpis = useMemo(() => {
-    const totals = scopedAudienceRows.reduce((acc, row) => {
-      acc.clicks += Number(row.clicks ?? 0);
-      acc.impressions += Number(row.impressions ?? 0);
-      acc.reach += Number(row.reach ?? 0);
-      return acc;
-    }, { clicks: 0, impressions: 0, reach: 0 });
-
-    return totals;
-  }, [scopedAudienceRows]);
+  const metricLabel = audienceMetricMeta[audienceMetric].label;
+  const metricFormat = audienceMetricMeta[audienceMetric].format;
 
   const audienceByAgeGender = useMemo(() => {
     const grouped = new Map<string, number>();
@@ -489,14 +472,21 @@ export function MetaAdsDashboard() {
     for (const row of scopedAudienceRows) {
       if (row.breakdown_type !== 'age_gender') continue;
       const key = `${row.breakdown_value_1} · ${row.breakdown_value_2 || 'unknown'}`;
-      grouped.set(key, (grouped.get(key) ?? 0) + Number(row.clicks ?? 0));
+      const value = audienceMetric === 'clicks'
+        ? Number(row.clicks ?? 0)
+        : audienceMetric === 'reach'
+          ? Number(row.reach ?? 0)
+          : audienceMetric === 'spend'
+            ? Number(row.spend ?? 0)
+            : Number(row.impressions ?? 0);
+      grouped.set(key, (grouped.get(key) ?? 0) + value);
     }
 
     return Array.from(grouped.entries())
-      .map(([label, clicks]) => ({ label, clicks }))
-      .sort((a, b) => b.clicks - a.clicks)
+      .map(([label, value]) => ({ label, value }))
+      .sort((a, b) => b.value - a.value)
       .slice(0, 12);
-  }, [scopedAudienceRows]);
+  }, [scopedAudienceRows, audienceMetric]);
 
   const audienceByCountry = useMemo(() => {
     const grouped = new Map<string, number>();
@@ -504,14 +494,21 @@ export function MetaAdsDashboard() {
     for (const row of scopedAudienceRows) {
       if (row.breakdown_type !== 'country') continue;
       const key = row.breakdown_value_1 || 'N/D';
-      grouped.set(key, (grouped.get(key) ?? 0) + Number(row.clicks ?? 0));
+      const value = audienceMetric === 'clicks'
+        ? Number(row.clicks ?? 0)
+        : audienceMetric === 'reach'
+          ? Number(row.reach ?? 0)
+          : audienceMetric === 'spend'
+            ? Number(row.spend ?? 0)
+            : Number(row.impressions ?? 0);
+      grouped.set(key, (grouped.get(key) ?? 0) + value);
     }
 
     return Array.from(grouped.entries())
-      .map(([label, clicks]) => ({ label, clicks }))
-      .sort((a, b) => b.clicks - a.clicks)
+      .map(([label, value]) => ({ label, value }))
+      .sort((a, b) => b.value - a.value)
       .slice(0, 10);
-  }, [scopedAudienceRows]);
+  }, [scopedAudienceRows, audienceMetric]);
 
   const audienceByPlatform = useMemo(() => {
     const grouped = new Map<string, number>();
@@ -519,14 +516,21 @@ export function MetaAdsDashboard() {
     for (const row of scopedAudienceRows) {
       if (row.breakdown_type !== 'publisher_platform') continue;
       const key = row.breakdown_value_1 || 'N/D';
-      grouped.set(key, (grouped.get(key) ?? 0) + Number(row.clicks ?? 0));
+      const value = audienceMetric === 'clicks'
+        ? Number(row.clicks ?? 0)
+        : audienceMetric === 'reach'
+          ? Number(row.reach ?? 0)
+          : audienceMetric === 'spend'
+            ? Number(row.spend ?? 0)
+            : Number(row.impressions ?? 0);
+      grouped.set(key, (grouped.get(key) ?? 0) + value);
     }
 
     return Array.from(grouped.entries())
-      .map(([label, clicks]) => ({ label, clicks }))
-      .sort((a, b) => b.clicks - a.clicks)
+      .map(([label, value]) => ({ label, value }))
+      .sort((a, b) => b.value - a.value)
       .slice(0, 10);
-  }, [scopedAudienceRows]);
+  }, [scopedAudienceRows, audienceMetric]);
 
   if (reportingQuery.isLoading) {
     return (
@@ -656,18 +660,31 @@ export function MetaAdsDashboard() {
       </Section>
 
       <Section title="Audiencia pagada (demografía y placements)">
-        <KpiGrid>
-          <KpiCard title="Clicks (breakdowns)" value={formatCompactMetric(audienceKpis.clicks, 'number')} helper="Clicks agregados desde age/gender, country y platform" icon={<MousePointerClick className="text-red-600" size={18} />} />
-          <KpiCard title="Impresiones (breakdowns)" value={formatCompactMetric(audienceKpis.impressions, 'number')} helper="Impresiones agregadas en desgloses" icon={<Megaphone className="text-red-600" size={18} />} />
-          <KpiCard title="Reach (breakdowns)" value={formatCompactMetric(audienceKpis.reach, 'number')} helper="Reach agregado en desgloses" icon={<Activity className="text-red-600" size={18} />} />
-          <KpiCard title="Filas audiencia" value={formatNumberEs(scopedAudienceRows.length)} helper="Registros SQL meta_ad_insights_breakdown_daily" icon={<BarChart3 className="text-red-600" size={18} />} />
-        </KpiGrid>
+        {audienceQuery.error ? (
+          <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+            No se pudo cargar audiencia desde SQL: {audienceQuery.error instanceof Error ? audienceQuery.error.message : 'Error desconocido'}
+          </div>
+        ) : null}
+
+        <div className="mt-4 rounded-xl border border-gray-200 bg-gray-50/70 px-4 py-3">
+          <label className="text-xs font-semibold uppercase tracking-wide text-gray-500">Métrica para gráficos de audiencia</label>
+          <select
+            value={audienceMetric}
+            onChange={(event) => setAudienceMetric(event.target.value as AudienceMetricKey)}
+            className="mt-2 w-full max-w-xs rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-800 outline-none transition focus:border-red-300 focus:ring-2 focus:ring-red-100"
+          >
+            <option value="impressions">Impresiones</option>
+            <option value="reach">Reach</option>
+            <option value="clicks">Clicks</option>
+            <option value="spend">Gasto</option>
+          </select>
+        </div>
 
         <div className="grid grid-cols-1 gap-4 xl:grid-cols-3 mt-4">
-          <ChartCard title="Clicks por edad y género" icon={<Target size={16} className="text-red-600" />}>
+          <ChartCard title={`${metricLabel} por edad y género`} icon={<Target size={16} className="text-red-600" />}>
             {audienceByAgeGender.length === 0 ? (
               <div className="rounded-xl border border-dashed border-gray-200 bg-gray-50 px-4 py-6 text-sm text-gray-500">
-                No hay data de age/gender todavía. Ejecutá sync de ads para breakdowns.
+                No hay data de edad/género todavía.
               </div>
             ) : (
               <ResponsiveContainer width="100%" height={280}>
@@ -675,17 +692,17 @@ export function MetaAdsDashboard() {
                   <CartesianGrid strokeDasharray="3 3" horizontal={false} />
                   <XAxis type="number" tick={{ fontSize: 12 }} />
                   <YAxis type="category" dataKey="label" width={90} tick={{ fontSize: 11 }} />
-                  <Tooltip {...chartTooltipStyle} formatter={(value) => formatCompactMetric(Number(value ?? 0), 'number')} />
-                  <Bar dataKey="clicks" fill="#dc2626" radius={[0, 8, 8, 0]} isAnimationActive={false} />
+                  <Tooltip {...chartTooltipStyle} formatter={(value) => formatCompactMetric(Number(value ?? 0), metricFormat)} />
+                  <Bar dataKey="value" fill="#dc2626" radius={[0, 8, 8, 0]} isAnimationActive={false} />
                 </BarChart>
               </ResponsiveContainer>
             )}
           </ChartCard>
 
-          <ChartCard title="Clicks por país" icon={<PieChartIcon size={16} className="text-red-600" />}>
+          <ChartCard title={`${metricLabel} por país`} icon={<PieChartIcon size={16} className="text-red-600" />}>
             {audienceByCountry.length === 0 ? (
               <div className="rounded-xl border border-dashed border-gray-200 bg-gray-50 px-4 py-6 text-sm text-gray-500">
-                No hay data de country todavía.
+                No hay data de país todavía.
               </div>
             ) : (
               <ResponsiveContainer width="100%" height={280}>
@@ -693,17 +710,17 @@ export function MetaAdsDashboard() {
                   <CartesianGrid strokeDasharray="3 3" vertical={false} />
                   <XAxis dataKey="label" tick={{ fontSize: 11 }} interval={0} angle={-20} textAnchor="end" height={60} />
                   <YAxis tick={{ fontSize: 12 }} />
-                  <Tooltip {...chartTooltipStyle} formatter={(value) => formatCompactMetric(Number(value ?? 0), 'number')} />
-                  <Bar dataKey="clicks" fill="#f97316" radius={[8, 8, 0, 0]} isAnimationActive={false} />
+                  <Tooltip {...chartTooltipStyle} formatter={(value) => formatCompactMetric(Number(value ?? 0), metricFormat)} />
+                  <Bar dataKey="value" fill="#f97316" radius={[8, 8, 0, 0]} isAnimationActive={false} />
                 </BarChart>
               </ResponsiveContainer>
             )}
           </ChartCard>
 
-          <ChartCard title="Clicks por publisher platform" icon={<Megaphone size={16} className="text-red-600" />}>
+          <ChartCard title={`${metricLabel} por publisher platform`} icon={<Megaphone size={16} className="text-red-600" />}>
             {audienceByPlatform.length === 0 ? (
               <div className="rounded-xl border border-dashed border-gray-200 bg-gray-50 px-4 py-6 text-sm text-gray-500">
-                No hay data de publisher_platform todavía.
+                No hay data de plataforma todavía.
               </div>
             ) : (
               <ResponsiveContainer width="100%" height={280}>
@@ -711,8 +728,8 @@ export function MetaAdsDashboard() {
                   <CartesianGrid strokeDasharray="3 3" vertical={false} />
                   <XAxis dataKey="label" tick={{ fontSize: 11 }} interval={0} angle={-20} textAnchor="end" height={60} />
                   <YAxis tick={{ fontSize: 12 }} />
-                  <Tooltip {...chartTooltipStyle} formatter={(value) => formatCompactMetric(Number(value ?? 0), 'number')} />
-                  <Bar dataKey="clicks" fill="#dc2626" radius={[8, 8, 0, 0]} isAnimationActive={false} />
+                  <Tooltip {...chartTooltipStyle} formatter={(value) => formatCompactMetric(Number(value ?? 0), metricFormat)} />
+                  <Bar dataKey="value" fill="#dc2626" radius={[8, 8, 0, 0]} isAnimationActive={false} />
                 </BarChart>
               </ResponsiveContainer>
             )}
