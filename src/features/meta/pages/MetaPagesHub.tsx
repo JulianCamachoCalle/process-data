@@ -280,8 +280,8 @@ export function MetaPagesHub() {
                 <YAxis tick={{ fontSize: 12 }} />
                 <Tooltip />
                 <Line type="monotone" dataKey="clicks" stroke="#dc2626" strokeWidth={2.5} dot={false} isAnimationActive={false} />
-                <Line type="monotone" dataKey="engaged" stroke="#f59e0b" strokeWidth={2.5} dot={false} isAnimationActive={false} />
-                <Line type="monotone" dataKey="impressions" stroke="#2563eb" strokeWidth={2.5} dot={false} isAnimationActive={false} />
+                <Line type="monotone" dataKey="engagement" stroke="#f59e0b" strokeWidth={2.5} dot={false} isAnimationActive={false} />
+                <Line type="monotone" dataKey="vistas" stroke="#2563eb" strokeWidth={2.5} dot={false} isAnimationActive={false} />
               </LineChart>
             </ResponsiveContainer>
           )}

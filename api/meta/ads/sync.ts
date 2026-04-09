@@ -585,6 +585,81 @@ async function fetchPostInsightMetrics(
   };
 }
 
+async function fetchPageInsightMetrics(
+  pageToken: string,
+  pageId: string,
+  since: string | null,
+  until: string | null,
+): Promise<{
+  rows: MetaPageInsightDailyRow[];
+  attempted_batches: number;
+  last_error: string | null;
+}> {
+  const metricBatches = [
+    'page_impressions,page_reach,page_engaged_users',
+    'page_impressions,page_reach',
+    'page_impressions',
+    'page_reach',
+  ];
+
+  let lastError: string | null = null;
+
+  for (const batch of metricBatches) {
+    try {
+      const insightsParams: Record<string, string> = {
+        metric: batch,
+        period: 'day',
+      };
+      if (since) insightsParams.since = since;
+      if (until) insightsParams.until = until;
+
+      const insightsPayload = await fetchMetaJson(pageToken, `${pageId}/insights`, insightsParams);
+      const insightItems = asObjectArray(insightsPayload.data);
+
+      const rows: MetaPageInsightDailyRow[] = [];
+      for (const item of insightItems) {
+        const metric = toNullableText(item.name);
+        if (!metric) continue;
+
+        const values = asObjectArray(item.values);
+        for (const point of values) {
+          const endTime = toNullableIsoTimestamp(point.end_time);
+          const dateEnd = endTime?.slice(0, 10);
+          if (!dateEnd) continue;
+
+          rows.push({
+            page_business_id: pageId,
+            page_name: null,
+            metric,
+            date_end: dateEnd,
+            value: toNumberOrZero(point.value),
+            raw_payload: {
+              metric,
+              point,
+            },
+          });
+        }
+      }
+
+      if (rows.length > 0) {
+        return {
+          rows,
+          attempted_batches: metricBatches.indexOf(batch) + 1,
+          last_error: null,
+        };
+      }
+    } catch (error) {
+      lastError = error instanceof Error ? error.message : String(error);
+    }
+  }
+
+  return {
+    rows: [],
+    attempted_batches: metricBatches.length,
+    last_error: lastError,
+  };
+}
+
 function requireMetaAccessToken() {
   const token = process.env.META_ACCESS_TOKEN;
   if (!token) {
@@ -1544,49 +1619,24 @@ export default async function metaAdsSyncHandler(req: VercelRequest, res: Vercel
           });
         }
 
-        try {
-          const insightsParams: Record<string, string> = {
-            metric: 'page_impressions,page_reach,page_engaged_users',
-            period: 'day',
-          };
-          if (since) insightsParams.since = since;
-          if (until) insightsParams.until = until;
+        const pageInsightsResult = await fetchPageInsightMetrics(pageToken, pageId, since, until);
+        insightsSummary.pages_fetched += 1;
 
-          const insightsPayload = await fetchMetaJson(pageToken, `${pageId}/insights`, insightsParams);
-
-          insightsSummary.pages_fetched += 1;
-          const insightItems = asObjectArray(insightsPayload.data);
-          for (const item of insightItems) {
-            const metric = toNullableText(item.name);
-            if (!metric) continue;
-
-            const values = asObjectArray(item.values);
-            for (const point of values) {
-              const endTime = toNullableIsoTimestamp(point.end_time);
-              const dateEnd = endTime?.slice(0, 10);
-              if (!dateEnd) continue;
-
-              insightsRows.push({
-                page_business_id: pageId,
-                page_name: page.name,
-                metric,
-                date_end: dateEnd,
-                value: toNumberOrZero(point.value),
-                raw_payload: {
-                  metric,
-                  point,
-                },
-              });
-              insightsSummary.pulled += 1;
-            }
-          }
-        } catch (error) {
+        if (pageInsightsResult.rows.length === 0 && pageInsightsResult.last_error) {
           pageErrors.push({
             page_id: pageId,
             page_name: page.name,
             stage: 'insights',
-            message: error instanceof Error ? error.message : String(error),
+            message: `No se pudieron leer métricas de página tras ${pageInsightsResult.attempted_batches} intento(s): ${pageInsightsResult.last_error}`,
           });
+        }
+
+        for (const row of pageInsightsResult.rows) {
+          insightsRows.push({
+            ...row,
+            page_name: page.name,
+          });
+          insightsSummary.pulled += 1;
         }
       }
 
