@@ -226,12 +226,27 @@ export function MetaPagesHub() {
                 <p className="text-xs text-gray-500">{post.created_time ? new Date(post.created_time).toLocaleString('es-PE') : 'Sin fecha'}</p>
                 <p className="text-sm text-gray-700 line-clamp-3">{post.message ?? 'Sin texto en publicación'}</p>
                 {post.full_picture ? <img src={post.full_picture} alt={post.id} className="w-full rounded-xl border border-gray-200" loading="lazy" /> : null}
-                <div className="grid grid-cols-5 gap-2 text-xs text-gray-600">
-                  <div>Reacciones: <strong>{formatNumberEs(post.reactions)}</strong></div>
-                  <div>Comentarios: <strong>{formatNumberEs(post.comments)}</strong></div>
-                  <div>Shares: <strong>{formatNumberEs(post.shares)}</strong></div>
-                  <div>Clicks: <strong>{formatNumberEs(post.clicks)}</strong></div>
-                  <div>Vistas: <strong>{formatNumberEs(post.views)}</strong></div>
+                <div className="grid grid-cols-2 gap-2 text-xs">
+                  <div className="rounded-lg border border-gray-200 bg-gray-50 px-2.5 py-2">
+                    <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-500">Reacciones</p>
+                    <p className="mt-1 text-sm font-bold text-gray-800">{formatNumberEs(post.reactions)}</p>
+                  </div>
+                  <div className="rounded-lg border border-gray-200 bg-gray-50 px-2.5 py-2">
+                    <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-500">Comentarios</p>
+                    <p className="mt-1 text-sm font-bold text-gray-800">{formatNumberEs(post.comments)}</p>
+                  </div>
+                  <div className="rounded-lg border border-gray-200 bg-gray-50 px-2.5 py-2">
+                    <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-500">Compartidos</p>
+                    <p className="mt-1 text-sm font-bold text-gray-800">{formatNumberEs(post.shares)}</p>
+                  </div>
+                  <div className="rounded-lg border border-gray-200 bg-red-50 px-2.5 py-2">
+                    <p className="text-[10px] font-semibold uppercase tracking-wide text-red-500">Clicks</p>
+                    <p className="mt-1 text-sm font-bold text-red-700">{formatNumberEs(post.clicks)}</p>
+                  </div>
+                  <div className="col-span-2 rounded-lg border border-blue-200 bg-blue-50 px-2.5 py-2">
+                    <p className="text-[10px] font-semibold uppercase tracking-wide text-blue-600">Vistas</p>
+                    <p className="mt-1 text-sm font-bold text-blue-700">{formatNumberEs(post.views)}</p>
+                  </div>
                 </div>
                 {post.permalink_url ? (
                   <a href={post.permalink_url} target="_blank" rel="noreferrer" className="inline-block text-xs font-semibold text-red-600 hover:text-red-700">
