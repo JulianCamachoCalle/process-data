@@ -486,7 +486,30 @@ export function MetaAdsDashboard() {
         onRightChange: (value: string) => setAdCompareIds((current) => resolveComparisonSelection(comparisonAdPerformance, { ...current, right: value })),
       };
 
-  const scopedAudienceRows = useMemo(() => audienceQuery.data ?? [], [audienceQuery.data]);
+  const scopedAudienceRows = useMemo(() => {
+    const audienceRows = audienceQuery.data ?? [];
+    const reportRows = reportingQuery.data?.rows ?? [];
+
+    // Respetar filtros activos de campaña/adset/ad sobre la audiencia.
+    const filteredReportRows = reportRows.filter((row) => {
+      if (campaignId && row.campaign_business_id !== campaignId) return false;
+      if (adsetId && row.adset_business_id !== adsetId) return false;
+      if (adId && row.ad_business_id !== adId) return false;
+      return true;
+    });
+
+    const scopedAdIds = new Set(
+      filteredReportRows
+        .map((row) => row.ad_business_id)
+        .filter((value): value is string => Boolean(value)),
+    );
+
+    if (scopedAdIds.size === 0) {
+      return adId || adsetId || campaignId ? [] : audienceRows;
+    }
+
+    return audienceRows.filter((row) => scopedAdIds.has(row.ad_business_id));
+  }, [audienceQuery.data, reportingQuery.data?.rows, campaignId, adsetId, adId]);
 
   const metricLabel = audienceMetricMeta[audienceMetric].label;
   const metricFormat = audienceMetricMeta[audienceMetric].format;
