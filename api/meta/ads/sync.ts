@@ -493,7 +493,12 @@ async function fetchPostInsightMetrics(
   last_error: string | null;
 }> {
   const metricBatches = [
-    'post_clicks,post_engaged_users,post_impressions',
+    'post_clicks,post_engaged_users,post_impressions,post_total_media_view',
+    'post_impressions',
+    'post_total_media_view',
+    'post_video_views',
+    'post_video_views_organic',
+    'post_video_views_paid',
     'post_clicks,post_engaged_users',
     'post_clicks',
     'post_engaged_users',
@@ -507,7 +512,7 @@ async function fetchPostInsightMetrics(
       });
 
       const items = asObjectArray(payload.data);
-      const normalized = items
+      const rawRows = items
         .map((item) => {
           const metric = toNullableText(item.name);
           const period = toNullableText(item.period) ?? 'lifetime';
@@ -525,6 +530,40 @@ async function fetchPostInsightMetrics(
           };
         })
         .filter((item): item is { metric: string; period: string; value: number; raw_payload: JsonRecord } => item !== null);
+
+      const normalized = (() => {
+        const viewMetrics = new Set([
+          'post_impressions',
+          'post_total_media_view',
+          'post_video_views',
+          'post_video_views_organic',
+          'post_video_views_paid',
+        ]);
+
+        const byMetric = new Map<string, { metric: string; period: string; value: number; raw_payload: JsonRecord }>();
+
+        for (const row of rawRows) {
+          const metric = viewMetrics.has(row.metric) ? 'post_impressions' : row.metric;
+          const current = byMetric.get(metric);
+
+          if (!current) {
+            byMetric.set(metric, {
+              metric,
+              period: row.period,
+              value: row.value,
+              raw_payload: row.raw_payload,
+            });
+            continue;
+          }
+
+          byMetric.set(metric, {
+            ...current,
+            value: current.value + row.value,
+          });
+        }
+
+        return Array.from(byMetric.values());
+      })();
 
       if (normalized.length > 0) {
         return {

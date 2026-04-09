@@ -44,7 +44,7 @@ const chartTooltipStyle = {
 type AudienceMetricKey = 'impressions' | 'reach' | 'clicks' | 'spend';
 
 const audienceMetricMeta: Record<AudienceMetricKey, { label: string; format: 'number' | 'currency' }> = {
-  impressions: { label: 'Impresiones', format: 'number' },
+  impressions: { label: 'Vistas', format: 'number' },
   reach: { label: 'Alcance', format: 'number' },
   clicks: { label: 'Clicks', format: 'number' },
   spend: { label: 'Gasto', format: 'currency' },
@@ -764,10 +764,10 @@ export function MetaAdsDashboard() {
       <Section title="KPI">
         <KpiGrid>
           <KpiCard title="Gasto total" value={formatCompactMetric(dashboard.totalSpend, 'currency')} helper="Inversión agregada del rango" icon={<BadgeDollarSign className="text-red-600" size={18} />} />
-          <KpiCard title="Impresiones" value={formatCompactMetric(dashboard.totalImpressions, 'number')} helper="Volumen total servido" icon={<Megaphone className="text-red-600" size={18} />} />
+          <KpiCard title="Vistas" value={formatCompactMetric(dashboard.totalImpressions, 'number')} helper="Volumen total servido" icon={<Megaphone className="text-red-600" size={18} />} />
           <KpiCard title="Reach" value={formatCompactMetric(dashboard.totalReach, 'number')} helper="Usuarios alcanzados" icon={<Activity className="text-red-600" size={18} />} />
           <KpiCard title="Clicks" value={formatCompactMetric(dashboard.totalClicks, 'number')} helper="Interacciones principales" icon={<MousePointerClick className="text-red-600" size={18} />} />
-          <KpiCard title="CTR global" value={formatCompactMetric(dashboard.overallCtr, 'percent')} helper="Clicks / impresiones" icon={<Target className="text-red-600" size={18} />} />
+          <KpiCard title="CTR global" value={formatCompactMetric(dashboard.overallCtr, 'percent')} helper="Clicks / vistas" icon={<Target className="text-red-600" size={18} />} />
           <KpiCard title="CPC global" value={formatCompactMetric(dashboard.overallCpc, 'currency')} helper="Gasto / clicks" icon={<BadgeDollarSign className="text-red-600" size={18} />} />
           <KpiCard title="Campañas con data" value={formatNumberEs(dashboard.totalCampaigns)} helper="Campañas únicas en el rango" icon={<BarChart3 className="text-red-600" size={18} />} />
           <KpiCard title="Ads con data" value={formatNumberEs(dashboard.totalAds)} helper={`${formatNumberEs(dashboard.totalAdsets)} ad sets únicos`} icon={<Megaphone className="text-red-600" size={18} />} />
@@ -788,7 +788,7 @@ export function MetaAdsDashboard() {
             onChange={(event) => setAudienceMetric(event.target.value as AudienceMetricKey)}
             className="mt-2 w-full max-w-xs rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-800 outline-none transition focus:border-red-300 focus:ring-2 focus:ring-red-100"
           >
-            <option value="impressions">Impresiones</option>
+            <option value="impressions">Vistas</option>
             <option value="reach">Alcance</option>
             <option value="clicks">Clicks</option>
             <option value="spend">Gasto</option>
@@ -981,12 +981,12 @@ export function MetaAdsDashboard() {
         </div>
 
         <div className="space-y-3">
-          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-gray-500">Impresiones</p>
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-gray-500">Vistas</p>
           <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-            <ChartCard title="Impresiones por hora (totales)" icon={<Megaphone size={16} className="text-red-600" />}>
+            <ChartCard title="Vistas por hora (totales)" icon={<Megaphone size={16} className="text-red-600" />}>
               {dashboard.hourlyRowsCount === 0 ? (
                 <div className="rounded-xl border border-dashed border-gray-200 bg-gray-50 px-4 py-6 text-sm text-gray-500">
-                  Sin data horaria para calcular impresiones por hora. Filas en scope: {dashboard.hourlyRowsCount}. Filas horarias totales: {dashboard.hourlyRowsRawCount}
+                  Sin data horaria para calcular vistas por hora. Filas en scope: {dashboard.hourlyRowsCount}. Filas horarias totales: {dashboard.hourlyRowsRawCount}
                 </div>
               ) : (
                 <ResponsiveContainer width="100%" height={300}>
@@ -995,7 +995,7 @@ export function MetaAdsDashboard() {
                     <XAxis dataKey="label" tick={{ fontSize: 12 }} interval={1} />
                     <YAxis tick={{ fontSize: 12 }} />
                     <Tooltip {...chartTooltipStyle} formatter={(value) => formatCompactMetric(Number(value ?? 0), 'number')} />
-                    <Bar dataKey="total_impressions" name="Impresiones totales" fill="#dc2626" radius={[8, 8, 0, 0]} isAnimationActive={false}>
+                    <Bar dataKey="total_impressions" name="Vistas totales" fill="#dc2626" radius={[8, 8, 0, 0]} isAnimationActive={false}>
                       {showHourlyLabels ? <LabelList dataKey="total_impressions" position="top" formatter={(value) => formatCompactMetric(Number(value ?? 0), 'number')} className="fill-gray-600 text-[10px] font-semibold" /> : null}
                     </Bar>
                   </BarChart>
@@ -1003,10 +1003,10 @@ export function MetaAdsDashboard() {
               )}
             </ChartCard>
 
-            <ChartCard title="Promedio de impresiones por hora" icon={<LineChartIcon size={16} className="text-red-600" />}>
+            <ChartCard title="Promedio de vistas por hora" icon={<LineChartIcon size={16} className="text-red-600" />}>
               {dashboard.hourlyRowsCount === 0 ? (
                 <div className="rounded-xl border border-dashed border-gray-200 bg-gray-50 px-4 py-6 text-sm text-gray-500">
-                  Sin data horaria para calcular promedio de impresiones por hora. Filas en scope: {dashboard.hourlyRowsCount}. Filas horarias totales: {dashboard.hourlyRowsRawCount}
+                  Sin data horaria para calcular promedio de vistas por hora. Filas en scope: {dashboard.hourlyRowsCount}. Filas horarias totales: {dashboard.hourlyRowsRawCount}
                 </div>
               ) : (
                 <ResponsiveContainer width="100%" height={300}>
@@ -1015,7 +1015,7 @@ export function MetaAdsDashboard() {
                     <XAxis dataKey="label" tick={{ fontSize: 12 }} interval={1} />
                     <YAxis tick={{ fontSize: 12 }} />
                     <Tooltip {...chartTooltipStyle} formatter={(value) => Number(value ?? 0).toFixed(2)} />
-                    <Line type="monotone" dataKey="avg_impressions" name="Promedio impresiones" stroke="#f97316" strokeWidth={2.4} dot={{ r: 2 }} isAnimationActive={false}>
+                    <Line type="monotone" dataKey="avg_impressions" name="Promedio de vistas" stroke="#f97316" strokeWidth={2.4} dot={{ r: 2 }} isAnimationActive={false}>
                       {showHourlyLabels ? <LabelList dataKey="avg_impressions" position="top" formatter={(value) => Number(value ?? 0).toFixed(1)} className="fill-gray-600 text-[10px] font-semibold" /> : null}
                     </Line>
                   </LineChart>
@@ -1023,28 +1023,28 @@ export function MetaAdsDashboard() {
               )}
             </ChartCard>
 
-            <ChartCard title="Impresiones por día (totales)" icon={<LineChartIcon size={16} className="text-red-600" />}>
+            <ChartCard title="Vistas por día (totales)" icon={<LineChartIcon size={16} className="text-red-600" />}>
               <ResponsiveContainer width="100%" height={300}>
                 <BarChart data={dashboard.trend}>
                   <CartesianGrid strokeDasharray="3 3" vertical={false} />
                   <XAxis dataKey="date_start" tick={{ fontSize: 12 }} />
                   <YAxis tick={{ fontSize: 12 }} allowDecimals={false} />
                   <Tooltip {...chartTooltipStyle} formatter={(value) => formatCompactMetric(Number(value ?? 0), 'number')} />
-                  <Bar dataKey="impressions" name="Impresiones" fill="#dc2626" radius={[8, 8, 0, 0]} isAnimationActive={false}>
+                  <Bar dataKey="impressions" name="Vistas" fill="#dc2626" radius={[8, 8, 0, 0]} isAnimationActive={false}>
                     {showDailyLabels ? <LabelList dataKey="impressions" position="top" formatter={(value) => formatCompactMetric(Number(value ?? 0), 'number')} className="fill-gray-600 text-[10px] font-semibold" /> : null}
                   </Bar>
                 </BarChart>
               </ResponsiveContainer>
             </ChartCard>
 
-            <ChartCard title="Promedio diario de impresiones" icon={<LineChartIcon size={16} className="text-red-600" />}>
+            <ChartCard title="Promedio diario de vistas" icon={<LineChartIcon size={16} className="text-red-600" />}>
               <ResponsiveContainer width="100%" height={300}>
                 <LineChart data={dashboard.trendAveragesByDay}>
                   <CartesianGrid strokeDasharray="3 3" vertical={false} />
                   <XAxis dataKey="date_start" tick={{ fontSize: 12 }} />
                   <YAxis tick={{ fontSize: 12 }} allowDecimals={false} />
                   <Tooltip {...chartTooltipStyle} formatter={(value) => Number(value ?? 0).toFixed(2)} />
-                  <Line type="monotone" dataKey="avg_impressions" name="Promedio impresiones" stroke="#f97316" strokeWidth={2.4} dot={{ r: 2 }} isAnimationActive={false}>
+                  <Line type="monotone" dataKey="avg_impressions" name="Promedio de vistas" stroke="#f97316" strokeWidth={2.4} dot={{ r: 2 }} isAnimationActive={false}>
                     {showAverageDailyLabels ? <LabelList dataKey="avg_impressions" position="top" formatter={(value) => Number(value ?? 0).toFixed(1)} className="fill-gray-600 text-[10px] font-semibold" /> : null}
                   </Line>
                 </LineChart>
