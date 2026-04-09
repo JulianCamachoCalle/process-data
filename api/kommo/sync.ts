@@ -1,5 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { createHash } from 'node:crypto';
+import { createHash, createHmac } from 'node:crypto';
 import {
   ensureFreshConnection,
   getActiveKommoConnection,
@@ -15,9 +15,42 @@ const SYNC_SECRET_ENV = 'KOMMO_SYNC_SECRET';
 const STANDARD_CUSTOM_FIELD_ENTITY_TYPES = ['leads', 'contacts', 'companies'] as const;
 const CUSTOM_FIELD_ENTITY_TYPES = [...STANDARD_CUSTOM_FIELD_ENTITY_TYPES, 'catalogs'] as const;
 const LINK_ENTITY_TYPES = ['leads', 'contacts', 'companies'] as const;
+const CHAT_SCOPE_ENV = 'KOMMO_CHAT_SCOPE_ID';
+const CHAT_CHANNEL_SECRET_ENV = 'KOMMO_CHAT_CHANNEL_SECRET';
+const DEFAULT_CHAT_CONVERSATIONS_LIMIT = 20;
+const DEFAULT_CHAT_PAGE_SIZE = 50;
+const DEFAULT_CHAT_MAX_PAGES = 10;
 type StandardCustomFieldEntityType = typeof STANDARD_CUSTOM_FIELD_ENTITY_TYPES[number];
 type CustomFieldEntityType = typeof CUSTOM_FIELD_ENTITY_TYPES[number];
 type LinkEntityType = typeof LINK_ENTITY_TYPES[number];
+
+type ChatSenderPayload = {
+  id?: string | null;
+  name?: string | null;
+};
+
+type ChatReceiverPayload = {
+  id?: string | null;
+  name?: string | null;
+};
+
+type ChatMessagePayload = {
+  id?: string | null;
+  type?: string | null;
+  text?: string | null;
+  media?: string | null;
+  thumbnail?: string | null;
+  file_name?: string | null;
+  file_size?: string | null;
+};
+
+type ChatHistoryItem = {
+  timestamp?: number | null;
+  msec_timestamp?: number | null;
+  sender?: ChatSenderPayload | null;
+  receiver?: ChatReceiverPayload | null;
+  message?: ChatMessagePayload | null;
+};
 
 // Todos los recursos disponibles en Kommo API v4
 // Algunos necesitan manejo especial (tags, custom_fields, links, notes) porque no siguen el patrón estándar de endpoints o necesitan parámetros adicionales.
@@ -365,6 +398,401 @@ function getTaskDedupeVersion(item: Record<string, unknown>) {
 
   const stableSeed = JSON.stringify(item);
   return createHash('sha256').update(stableSeed).digest('hex');
+}
+
+function parseBoundedInteger(raw: string | undefined, fallback: number, min: number, max: number) {
+  if (!raw) return fallback;
+
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed)) return fallback;
+
+  return Math.max(min, Math.min(max, Math.trunc(parsed)));
+}
+
+function getRfc2822UtcDate() {
+  return new Date().toUTCString().replace('GMT', '+0000');
+}
+
+function buildContentMd5(body: string) {
+  return createHash('md5').update(body, 'utf8').digest('hex').toLowerCase();
+}
+
+function buildKommoChatSignature(args: {
+  method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
+  date: string;
+  contentType: string;
+  contentMd5: string;
+  path: string;
+  channelSecret: string;
+}) {
+  const signingPayload = [
+    args.method.toUpperCase(),
+    args.date,
+    args.contentType,
+    args.contentMd5,
+    args.path,
+  ].join('\n');
+
+  return createHmac('sha1', args.channelSecret)
+    .update(signingPayload, 'utf8')
+    .digest('hex')
+    .toLowerCase();
+}
+
+function extractChatHistoryItems(payload: unknown): ChatHistoryItem[] {
+  if (Array.isArray(payload)) {
+    return payload as ChatHistoryItem[];
+  }
+
+  if (!payload || typeof payload !== 'object') {
+    return [];
+  }
+
+  const candidate = payload as Record<string, unknown>;
+  const directMessages = candidate.messages;
+  if (Array.isArray(directMessages)) {
+    return directMessages as ChatHistoryItem[];
+  }
+
+  const directItems = candidate.items;
+  if (Array.isArray(directItems)) {
+    return directItems as ChatHistoryItem[];
+  }
+
+  const embedded = candidate._embedded;
+  if (embedded && typeof embedded === 'object') {
+    const embeddedRecord = embedded as Record<string, unknown>;
+    const embeddedMessages = embeddedRecord.messages;
+    if (Array.isArray(embeddedMessages)) {
+      return embeddedMessages as ChatHistoryItem[];
+    }
+
+    const embeddedItems = embeddedRecord.items;
+    if (Array.isArray(embeddedItems)) {
+      return embeddedItems as ChatHistoryItem[];
+    }
+  }
+
+  return [];
+}
+
+function resolveChatMessageId(item: ChatHistoryItem) {
+  const messageId = String(item.message?.id ?? '').trim();
+  if (messageId) return messageId;
+
+  const msecTimestamp = Number(item.msec_timestamp ?? 0);
+  const secTimestamp = Number(item.timestamp ?? 0);
+  const senderId = String(item.sender?.id ?? '').trim();
+  const fallbackId = `${msecTimestamp || secTimestamp || Date.now()}-${senderId || 'unknown'}`;
+  return fallbackId;
+}
+
+function resolveChatMessageTimestampIso(item: ChatHistoryItem) {
+  const msecTimestamp = Number(item.msec_timestamp ?? 0);
+  if (Number.isFinite(msecTimestamp) && msecTimestamp > 0) {
+    return new Date(msecTimestamp).toISOString();
+  }
+
+  const secTimestamp = Number(item.timestamp ?? 0);
+  if (Number.isFinite(secTimestamp) && secTimestamp > 0) {
+    return new Date(secTimestamp * 1000).toISOString();
+  }
+
+  return null;
+}
+
+async function fetchChatHistoryPage(args: {
+  scopeId: string;
+  conversationId: string;
+  offset: number;
+  limit: number;
+  channelSecret: string;
+}) {
+  const path = `/v2/origin/custom/${encodeURIComponent(args.scopeId)}/chats/${encodeURIComponent(args.conversationId)}/history`;
+  const query = new URLSearchParams({
+    offset: String(args.offset),
+    limit: String(args.limit),
+  });
+
+  const url = `https://amojo.kommo.com${path}?${query.toString()}`;
+  const body = '';
+  const contentType = 'application/json';
+  const contentMd5 = buildContentMd5(body);
+  const date = getRfc2822UtcDate();
+  const signature = buildKommoChatSignature({
+    method: 'GET',
+    date,
+    contentType,
+    contentMd5,
+    path,
+    channelSecret: args.channelSecret,
+  });
+
+  const response = await fetch(url, {
+    method: 'GET',
+    headers: {
+      Date: date,
+      'Content-Type': contentType,
+      'Content-MD5': contentMd5,
+      'X-Signature': signature,
+      Accept: 'application/json',
+    },
+  });
+
+  const raw = await response.text();
+  let parsedPayload: unknown = {};
+  if (raw.trim()) {
+    try {
+      parsedPayload = JSON.parse(raw) as unknown;
+    } catch {
+      parsedPayload = { raw };
+    }
+  }
+
+  if (!response.ok) {
+    throw new Error(
+      `Kommo chat history error (${response.status}) para conversación ${args.conversationId}: ${raw || 'sin detalle'}`,
+    );
+  }
+
+  return extractChatHistoryItems(parsedPayload);
+}
+
+async function upsertChatMessages(args: {
+  supabase: ReturnType<typeof getSupabaseAdminClient>;
+  conversationId: string;
+  items: ChatHistoryItem[];
+}) {
+  if (args.items.length === 0) {
+    return 0;
+  }
+
+  const rows = args.items.map((item) => ({
+    conversation_id: args.conversationId,
+    message_id: resolveChatMessageId(item),
+    message_timestamp: resolveChatMessageTimestampIso(item),
+    sender_id: item.sender?.id ?? null,
+    sender_name: item.sender?.name ?? null,
+    receiver_id: item.receiver?.id ?? null,
+    receiver_name: item.receiver?.name ?? null,
+    message_type: item.message?.type ?? null,
+    message_text: item.message?.text ?? null,
+    media_url: item.message?.media ?? null,
+    thumbnail_url: item.message?.thumbnail ?? null,
+    file_name: item.message?.file_name ?? null,
+    file_size: item.message?.file_size ?? null,
+    raw_payload: item,
+    updated_at: new Date().toISOString(),
+  }));
+
+  const { error } = await args.supabase
+    .from('kommo_chat_messages' as never)
+    .upsert(rows as never, { onConflict: 'conversation_id,message_id' });
+
+  if (error) {
+    throw new Error(error.message || `No se pudo upsert chat messages para conversación ${args.conversationId}`);
+  }
+
+  return rows.length;
+}
+
+async function getChatConversationTargets(args: {
+  supabase: ReturnType<typeof getSupabaseAdminClient>;
+  limitConversations: number;
+  conversationId?: string;
+}) {
+  if (args.conversationId) {
+    return [args.conversationId];
+  }
+
+  const { data, error } = await args.supabase
+    .from('kommo_lead_conversations' as never)
+    .select('conversation_id')
+    .not('conversation_id', 'is', null)
+    .limit(args.limitConversations);
+
+  if (error) {
+    throw new Error(error.message || 'No se pudieron leer conversaciones para chat sync');
+  }
+
+  const ids = new Set<string>();
+  for (const row of (data ?? []) as Array<{ conversation_id: string | null }>) {
+    const value = String(row.conversation_id ?? '').trim();
+    if (value) ids.add(value);
+  }
+
+  return Array.from(ids);
+}
+
+async function getChatSyncOffset(
+  supabase: ReturnType<typeof getSupabaseAdminClient>,
+  conversationId: string,
+) {
+  const { data, error } = await supabase
+    .from('kommo_chat_sync_state' as never)
+    .select('last_offset')
+    .eq('conversation_id', conversationId)
+    .limit(1);
+
+  if (error) {
+    throw new Error(error.message || `No se pudo leer sync state de ${conversationId}`);
+  }
+
+  const row = ((data ?? []) as Array<{ last_offset: number | null }>)[0];
+  return Math.max(0, Number(row?.last_offset ?? 0) || 0);
+}
+
+async function upsertChatSyncState(args: {
+  supabase: ReturnType<typeof getSupabaseAdminClient>;
+  conversationId: string;
+  offset: number;
+  status: 'pending' | 'synced' | 'failed';
+  lastError: string | null;
+}) {
+  const { error } = await args.supabase
+    .from('kommo_chat_sync_state' as never)
+    .upsert(
+      {
+        conversation_id: args.conversationId,
+        last_offset: args.offset,
+        last_synced_at: args.status === 'failed' ? null : new Date().toISOString(),
+        sync_status: args.status,
+        last_error: args.lastError,
+        updated_at: new Date().toISOString(),
+      } as never,
+      { onConflict: 'conversation_id' },
+    );
+
+  if (error) {
+    throw new Error(error.message || `No se pudo actualizar sync state para conversación ${args.conversationId}`);
+  }
+}
+
+async function runChatHistorySyncMode(args: {
+  req: VercelRequest;
+  supabase: ReturnType<typeof getSupabaseAdminClient>;
+}) {
+  const scopeId = process.env[CHAT_SCOPE_ENV];
+  const channelSecret = process.env[CHAT_CHANNEL_SECRET_ENV];
+  if (!scopeId || !channelSecret) {
+    throw new Error(`Faltan variables ${CHAT_SCOPE_ENV} y/o ${CHAT_CHANNEL_SECRET_ENV}`);
+  }
+
+  const limitConversations = parseBoundedInteger(
+    asSingleQueryParam(args.req.query.limit_conversations),
+    DEFAULT_CHAT_CONVERSATIONS_LIMIT,
+    1,
+    200,
+  );
+  const pageSize = parseBoundedInteger(
+    asSingleQueryParam(args.req.query.page_size),
+    DEFAULT_CHAT_PAGE_SIZE,
+    1,
+    50,
+  );
+  const maxPages = parseBoundedInteger(
+    asSingleQueryParam(args.req.query.max_pages),
+    DEFAULT_CHAT_MAX_PAGES,
+    1,
+    200,
+  );
+  const conversationId = asSingleQueryParam(args.req.query.conversation_id)?.trim() || undefined;
+
+  const targets = await getChatConversationTargets({
+    supabase: args.supabase,
+    limitConversations,
+    conversationId,
+  });
+
+  if (targets.length === 0) {
+    return {
+      success: true,
+      skipped: true,
+      reason: 'No hay conversation_id objetivo para sincronizar',
+      processedConversations: 0,
+      insertedMessages: 0,
+      failures: [] as Array<{ conversationId: string; error: string }>,
+      totalTargets: 0,
+      limitConversations,
+      pageSize,
+      maxPages,
+    };
+  }
+
+  let processedConversations = 0;
+  let insertedMessages = 0;
+  const failures: Array<{ conversationId: string; error: string }> = [];
+
+  for (const targetConversationId of targets) {
+    let offset = 0;
+
+    try {
+      offset = await getChatSyncOffset(args.supabase, targetConversationId);
+      let pagesProcessed = 0;
+
+      while (pagesProcessed < maxPages) {
+        const items = await fetchChatHistoryPage({
+          scopeId,
+          conversationId: targetConversationId,
+          offset,
+          limit: pageSize,
+          channelSecret,
+        });
+
+        if (items.length === 0) {
+          break;
+        }
+
+        insertedMessages += await upsertChatMessages({
+          supabase: args.supabase,
+          conversationId: targetConversationId,
+          items,
+        });
+
+        offset += items.length;
+        pagesProcessed += 1;
+
+        if (items.length < pageSize) {
+          break;
+        }
+      }
+
+      await upsertChatSyncState({
+        supabase: args.supabase,
+        conversationId: targetConversationId,
+        offset,
+        status: 'synced',
+        lastError: null,
+      });
+
+      processedConversations += 1;
+    } catch (conversationError: unknown) {
+      const message = conversationError instanceof Error ? conversationError.message : 'Error desconocido';
+      failures.push({ conversationId: targetConversationId, error: message });
+
+      await upsertChatSyncState({
+        supabase: args.supabase,
+        conversationId: targetConversationId,
+        offset,
+        status: 'failed',
+        lastError: message,
+      }).catch(() => {
+        // no-op
+      });
+    }
+  }
+
+  return {
+    success: failures.length === 0,
+    skipped: false,
+    processedConversations,
+    insertedMessages,
+    failures,
+    totalTargets: targets.length,
+    limitConversations,
+    pageSize,
+    maxPages,
+  };
 }
 
 // Dado un array de eventos a insertar, los inserta en la tabla kommo_webhook_events y evita los errores por duplicados. Si hay un error, divide el batch y reintenta para aislar filas problemáticas.
@@ -875,6 +1303,17 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
 
     const freshConnection = await ensureFreshConnection(connection);
     const supabase = getSupabaseAdminClient();
+    const mode = asSingleQueryParam(req.query.mode)?.trim();
+
+    if (mode === 'chat_history') {
+      const chatSync = await runChatHistorySyncMode({ req, supabase });
+
+      return res.status(200).json({
+        ...chatSync,
+        mode: 'chat_history',
+        account: freshConnection.account_subdomain,
+      });
+    }
 
     // Si se especifica un recurso en query params, solo sincronizamos ese recurso. Si no, sincronizamos todos los recursos.
     const resourceParam = asSingleQueryParam(req.query.resource);
