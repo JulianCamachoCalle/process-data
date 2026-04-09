@@ -91,7 +91,7 @@ type HourlySyncDebug = {
   error: string | null;
 };
 
-type MetaSyncResource = 'ads' | 'instagram';
+type MetaSyncResource = 'ads' | 'instagram' | 'pages';
 
 type MetaOembedEndpoint = 'oembed_page' | 'oembed_post' | 'oembed_video' | 'instagram_oembed';
 
@@ -258,11 +258,29 @@ function resolveDatePreset(req: VercelRequest, body: JsonRecord) {
 function resolveSyncResource(req: VercelRequest, body: JsonRecord): MetaSyncResource {
   const value = (getRequestParam(req, body, 'resource') ?? 'ads').trim().toLowerCase();
 
-  if (value === 'ads' || value === 'instagram') {
+  if (value === 'ads' || value === 'instagram' || value === 'pages') {
     return value;
   }
 
-  throw new Error('resource inválido. Permitidos: ads | instagram');
+  throw new Error('resource inválido. Permitidos: ads | instagram | pages');
+}
+
+function toIsoDateOnly(value: Date) {
+  return value.toISOString().slice(0, 10);
+}
+
+function resolvePagesDateRange(req: VercelRequest, body: JsonRecord) {
+  const sinceParam = getRequestParam(req, body, 'since')?.trim() ?? '';
+  const untilParam = getRequestParam(req, body, 'until')?.trim() ?? '';
+
+  const now = new Date();
+  const fallbackUntil = toIsoDateOnly(now);
+  const fallbackSince = toIsoDateOnly(new Date(now.getTime() - 29 * 24 * 60 * 60 * 1000));
+
+  const since = /^\d{4}-\d{2}-\d{2}$/.test(sinceParam) ? sinceParam : fallbackSince;
+  const until = /^\d{4}-\d{2}-\d{2}$/.test(untilParam) ? untilParam : fallbackUntil;
+
+  return { since, until };
 }
 
 function resolveInstagramUserId(req: VercelRequest, body: JsonRecord) {
@@ -394,6 +412,13 @@ async function fetchCreativePreviewFallback(token: string, creativeId: string): 
       creative_name: null,
     };
   }
+}
+
+function asObjectArray(value: unknown): JsonRecord[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item) => ensureObject(item))
+    .filter((item) => Object.keys(item).length > 0);
 }
 
 function requireMetaAccessToken() {
@@ -982,6 +1007,222 @@ export default async function metaAdsSyncHandler(req: VercelRequest, res: Vercel
       });
 
       return res.status(200).json(responsePayload);
+    }
+
+    if (resource === 'pages') {
+      const { since, until } = resolvePagesDateRange(req, body);
+
+      const pagesResult = await fetchMetaCollection({
+        token,
+        path: 'me/accounts',
+        params: {
+          fields: 'id,name,category,fan_count,followers_count,link,access_token,picture{url}',
+          limit: String(Math.min(limit, 50)),
+        },
+        maxPages,
+        startedAt,
+        maxRuntimeMs,
+      });
+
+      const pages = pagesResult.rows.map((page) => {
+        const picture = ensureObject(page.picture);
+        const pictureData = ensureObject(picture.data);
+
+        return {
+          id: toNullableText(page.id),
+          name: toNullableText(page.name),
+          category: toNullableText(page.category),
+          fan_count: Math.trunc(toNumberOrZero(page.fan_count)),
+          followers_count: Math.trunc(toNumberOrZero(page.followers_count)),
+          link: toNullableText(page.link),
+          picture_url: toNullableText(pictureData.url),
+          has_page_token: Boolean(toNullableText(page.access_token)),
+        };
+      }).filter((page) => Boolean(page.id));
+
+      const postsRows: Array<{
+        id: string;
+        page_id: string;
+        page_name: string | null;
+        message: string | null;
+        created_time: string | null;
+        permalink_url: string | null;
+        full_picture: string | null;
+        reactions: number;
+        comments: number;
+        shares: number;
+      }> = [];
+
+      const insightsRows: Array<{
+        page_id: string;
+        page_name: string | null;
+        metric: string;
+        end_time: string | null;
+        value: number;
+      }> = [];
+
+      const pageErrors: Array<{
+        page_id: string;
+        page_name: string | null;
+        stage: 'posts' | 'insights';
+        message: string;
+      }> = [];
+
+      const postsSummary: SyncResourceSummary = { pages_fetched: 0, pulled: 0, upserted: 0, has_more: false };
+      const insightsSummary: SyncResourceSummary = { pages_fetched: 0, pulled: 0, upserted: 0, has_more: false };
+
+      for (const page of pages) {
+        if (!hasRuntimeBudget(startedAt, maxRuntimeMs)) {
+          break;
+        }
+
+        const pageId = page.id;
+        if (!pageId) {
+          continue;
+        }
+
+        const pageToken = toNullableText((pagesResult.rows.find((item) => toNullableText(item.id) === pageId) ?? {}).access_token);
+        if (!pageToken) {
+          pageErrors.push({
+            page_id: pageId,
+            page_name: page.name,
+            stage: 'posts',
+            message: 'La página no devolvió access_token en /me/accounts.',
+          });
+          continue;
+        }
+
+        try {
+          const pagePosts = await fetchMetaCollection({
+            token: pageToken,
+            path: `${pageId}/posts`,
+            params: {
+              fields: 'id,message,created_time,permalink_url,full_picture,shares,reactions.summary(true).limit(0),comments.summary(true).limit(0)',
+              limit: '25',
+              since,
+              until,
+            },
+            maxPages: Math.min(maxPages, 3),
+            startedAt,
+            maxRuntimeMs,
+          });
+
+          postsSummary.pages_fetched += pagePosts.pages_fetched;
+          postsSummary.pulled += pagePosts.rows.length;
+          postsSummary.has_more = postsSummary.has_more || pagePosts.has_more;
+
+          for (const post of pagePosts.rows) {
+            const reactionsSummary = ensureObject(ensureObject(post.reactions).summary);
+            const commentsSummary = ensureObject(ensureObject(post.comments).summary);
+            const shares = ensureObject(post.shares);
+
+            const postId = toNullableText(post.id);
+            if (!postId) continue;
+
+            postsRows.push({
+              id: postId,
+              page_id: pageId,
+              page_name: page.name,
+              message: toNullableText(post.message),
+              created_time: toNullableIsoTimestamp(post.created_time),
+              permalink_url: toNullableText(post.permalink_url),
+              full_picture: toNullableText(post.full_picture),
+              reactions: Math.trunc(toNumberOrZero(reactionsSummary.total_count)),
+              comments: Math.trunc(toNumberOrZero(commentsSummary.total_count)),
+              shares: Math.trunc(toNumberOrZero(shares.count)),
+            });
+          }
+        } catch (error) {
+          pageErrors.push({
+            page_id: pageId,
+            page_name: page.name,
+            stage: 'posts',
+            message: error instanceof Error ? error.message : String(error),
+          });
+        }
+
+        try {
+          const insightsPayload = await fetchMetaJson(pageToken, `${pageId}/insights`, {
+            metric: 'page_impressions,page_reach,page_post_engagements,page_fans',
+            period: 'day',
+            since,
+            until,
+          });
+
+          insightsSummary.pages_fetched += 1;
+          const insightItems = asObjectArray(insightsPayload.data);
+          for (const item of insightItems) {
+            const metric = toNullableText(item.name);
+            if (!metric) continue;
+
+            const values = asObjectArray(item.values);
+            for (const point of values) {
+              insightsRows.push({
+                page_id: pageId,
+                page_name: page.name,
+                metric,
+                end_time: toNullableIsoTimestamp(point.end_time),
+                value: toNumberOrZero(point.value),
+              });
+              insightsSummary.pulled += 1;
+            }
+          }
+        } catch (error) {
+          pageErrors.push({
+            page_id: pageId,
+            page_name: page.name,
+            stage: 'insights',
+            message: error instanceof Error ? error.message : String(error),
+          });
+        }
+      }
+
+      const durationMs = Date.now() - startedAt;
+      const resourcesPayload: JsonRecord = {
+        pages: {
+          pages_fetched: pagesResult.pages_fetched,
+          pulled: pages.length,
+          upserted: 0,
+          has_more: pagesResult.has_more,
+        },
+        posts: postsSummary,
+        insights: insightsSummary,
+      };
+
+      const totals = {
+        pulled: pages.length + postsRows.length + insightsRows.length,
+        upserted: 0,
+      };
+
+      await finalizeSyncRun(syncRunId, {
+        finished_at: new Date().toISOString(),
+        duration_ms: durationMs,
+        success: true,
+        early_stop: pagesResult.stopped_early ? { resource: 'insights', reason: 'max_runtime_ms' } : null,
+        totals,
+        resources: resourcesPayload,
+        error_message: null,
+      });
+
+      return res.status(200).json({
+        success: true,
+        resource,
+        duration_ms: durationMs,
+        since,
+        until,
+        pages,
+        posts: postsRows.sort((a, b) => (b.created_time ?? '').localeCompare(a.created_time ?? '')).slice(0, 300),
+        insights: insightsRows,
+        errors: pageErrors,
+        permissions_hint: [
+          'pages_show_list',
+          'pages_read_engagement',
+          'read_insights',
+          'pages_read_user_content',
+        ],
+        totals,
+        resources: resourcesPayload,
+      });
     }
 
     if (!accountBusinessId) {

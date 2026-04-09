@@ -28,6 +28,11 @@ type OembedPreviewState = {
   error?: string;
 };
 
+// FEATURE TOGGLE (deferred):
+// Dejamos la implementación de preview oEmbed/creative lista en código,
+// pero desactivada por ahora hasta retomar permisos/review de Meta.
+const OEMBED_PREVIEW_ENABLED = false;
+
 function getPreviewKey(row: MetaAdsReportingRow) {
   return `${row.ad_business_id}:${row.effective_object_story_id ?? row.object_story_id ?? 'none'}`;
 }
@@ -313,7 +318,7 @@ export function MetaAdsDataPage() {
                           <p className="font-medium text-gray-900">{row.creative_name || 'N/D'}</p>
                           <p className="text-xs text-gray-500">{row.creative_id || 'Sin creative_id'}</p>
 
-                          {(() => {
+                          {OEMBED_PREVIEW_ENABLED ? (() => {
                             const previewKey = getPreviewKey(row);
                             const previewState = previewByKey[previewKey] ?? { status: 'idle' as const };
                             const hasObjectStory = Boolean(row.effective_object_story_id || row.object_story_id);
@@ -394,7 +399,7 @@ export function MetaAdsDataPage() {
                                 ) : null}
                               </div>
                             );
-                          })()}
+                          })() : null}
                         </td>
                       </tr>
                     ))}
