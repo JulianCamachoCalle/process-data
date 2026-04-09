@@ -203,7 +203,6 @@ export function MetaPagesHub() {
                         {page.picture_url ? <img src={page.picture_url} alt={page.name ?? page.id} className="h-8 w-8 rounded-full border border-gray-200" /> : null}
                         <div>
                           <p className="font-medium text-gray-900">{page.name ?? page.id}</p>
-                          <p className="text-xs text-gray-500">{page.id}</p>
                         </div>
                       </div>
                     </td>
@@ -213,7 +212,7 @@ export function MetaPagesHub() {
                     <td className="px-4 py-3">
                       {page.link ? (
                         <a href={page.link} target="_blank" rel="noreferrer" className="text-xs font-semibold text-red-600 hover:text-red-700">
-                          Abrir página ↗
+                          Abrir
                         </a>
                       ) : <span className="text-xs text-gray-400">Sin link</span>}
                     </td>
@@ -226,7 +225,7 @@ export function MetaPagesHub() {
       </Section>
 
       <Section title="2) Publicaciones (top engagement)">
-        <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
           {topPosts.length === 0 ? (
             <div className="rounded-xl border border-dashed border-gray-200 bg-gray-50 px-4 py-6 text-sm text-gray-500">
               No se pudieron leer posts para el rango actual.
@@ -237,7 +236,7 @@ export function MetaPagesHub() {
                 <p className="text-xs text-gray-500">{post.created_time ? new Date(post.created_time).toLocaleString('es-PE') : 'Sin fecha'}</p>
                 <p className="text-sm text-gray-700 line-clamp-3">{post.message ?? 'Sin texto en publicación'}</p>
                 {post.full_picture ? <img src={post.full_picture} alt={post.id} className="w-full rounded-xl border border-gray-200" loading="lazy" /> : null}
-                <div className="grid grid-cols-4 gap-2 text-xs text-gray-600">
+                <div className="grid grid-cols-4 gap-2 text-md text-gray-600">
                   <div>Reacciones: <strong>{formatNumberEs(post.reactions)}</strong></div>
                   <div>Comentarios: <strong>{formatNumberEs(post.comments)}</strong></div>
                   <div>Shares: <strong>{formatNumberEs(post.shares)}</strong></div>
@@ -245,7 +244,7 @@ export function MetaPagesHub() {
                 </div>
                 {post.permalink_url ? (
                   <a href={post.permalink_url} target="_blank" rel="noreferrer" className="inline-block text-xs font-semibold text-red-600 hover:text-red-700">
-                    Abrir publicación ↗
+                    Abrir
                   </a>
                 ) : null}
               </div>

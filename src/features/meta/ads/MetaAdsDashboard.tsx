@@ -827,7 +827,7 @@ export function MetaAdsDashboard() {
             )}
           </ChartCard>
 
-          <ChartCard title={`${metricLabel} por Plataforma`} icon={<Megaphone size={16} className="text-red-600" />}>
+          <ChartCard title={`${metricLabel} por plataforma`} icon={<Megaphone size={16} className="text-red-600" />}>
             {audienceByPlatform.length === 0 ? (
               <div className="rounded-xl border border-dashed border-gray-200 bg-gray-50 px-4 py-6 text-sm text-gray-500">
                 No hay data de plataforma todavía.
@@ -863,7 +863,7 @@ export function MetaAdsDashboard() {
             )}
           </ChartCard>
 
-          <ChartCard title={`${metricLabel} por device platform`} icon={<Megaphone size={16} className="text-red-600" />}>
+          <ChartCard title={`${metricLabel} por dispositivo`} icon={<Megaphone size={16} className="text-red-600" />}>
             {audienceByDevicePlatform.length === 0 ? (
               <div className="rounded-xl border border-dashed border-gray-200 bg-gray-50 px-4 py-6 text-sm text-gray-500">
                 No hay data de device platform todavía.
