@@ -508,8 +508,8 @@ export function MetaAdsDashboard() {
     }
 
     return Array.from(grouped.entries())
-      .map(([label, value]) => ({ label, value }))
-      .sort((a, b) => b.value - a.value)
+      .map(([label, total]) => ({ label, total }))
+      .sort((a, b) => b.total - a.total)
       .slice(0, 12);
   }, [scopedAudienceRows, audienceMetric]);
 
@@ -751,7 +751,7 @@ export function MetaAdsDashboard() {
         </KpiGrid>
       </Section>
 
-      <Section title="Audiencia pagada (demografía y placements)">
+      <Section title="Audiencia (Demografia y Posicionamiento)">
         {audienceQuery.error ? (
           <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
             No se pudo cargar audiencia desde SQL: {audienceQuery.error instanceof Error ? audienceQuery.error.message : 'Error desconocido'}
