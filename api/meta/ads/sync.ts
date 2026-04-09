@@ -91,7 +91,9 @@ type HourlySyncDebug = {
   error: string | null;
 };
 
-type MetaSyncResource = 'ads' | 'instagram';
+type MetaSyncResource = 'ads' | 'instagram' | 'pages';
+
+type MetaOembedEndpoint = 'oembed_page' | 'oembed_post' | 'oembed_video' | 'instagram_oembed';
 
 type MetaAccountRow = {
   business_id: string;
@@ -165,6 +167,71 @@ type MetaInsightHourlyRow = {
   clicks: number;
   ctr: number | null;
   cpc: number | null;
+  raw_payload: JsonRecord;
+};
+
+type MetaAdInsightBreakdownType = 'age_gender' | 'country' | 'region' | 'publisher_platform' | 'device_platform';
+
+type MetaAdInsightBreakdownRow = {
+  ad_business_id: string;
+  date_start: string;
+  date_stop: string;
+  breakdown_type: MetaAdInsightBreakdownType;
+  breakdown_value_1: string;
+  breakdown_value_2: string;
+  spend: number;
+  impressions: number;
+  reach: number;
+  clicks: number;
+  ctr: number | null;
+  cpc: number | null;
+  raw_payload: JsonRecord;
+};
+
+type MetaPageRow = {
+  business_id: string;
+  name: string | null;
+  category: string | null;
+  fan_count: number;
+  followers_count: number;
+  link: string | null;
+  picture_url: string | null;
+  has_page_token: boolean;
+  last_synced_at: string;
+  raw_payload: JsonRecord;
+};
+
+type MetaPagePostRow = {
+  business_id: string;
+  page_business_id: string;
+  page_name: string | null;
+  message: string | null;
+  created_time: string | null;
+  permalink_url: string | null;
+  full_picture: string | null;
+  reactions: number;
+  comments: number;
+  shares: number;
+  raw_payload: JsonRecord;
+};
+
+type MetaPageInsightDailyRow = {
+  page_business_id: string;
+  page_name: string | null;
+  metric: string;
+  date_end: string;
+  value: number;
+  raw_payload: JsonRecord;
+};
+
+type MetaPagePostInsightSnapshotRow = {
+  post_business_id: string;
+  page_business_id: string;
+  page_name: string | null;
+  metric: string;
+  period: string;
+  snapshot_date: string;
+  value: number;
   raw_payload: JsonRecord;
 };
 
@@ -256,11 +323,21 @@ function resolveDatePreset(req: VercelRequest, body: JsonRecord) {
 function resolveSyncResource(req: VercelRequest, body: JsonRecord): MetaSyncResource {
   const value = (getRequestParam(req, body, 'resource') ?? 'ads').trim().toLowerCase();
 
-  if (value === 'ads' || value === 'instagram') {
+  if (value === 'ads' || value === 'instagram' || value === 'pages') {
     return value;
   }
 
-  throw new Error('resource inválido. Permitidos: ads | instagram');
+  throw new Error('resource inválido. Permitidos: ads | instagram | pages');
+}
+
+function resolvePagesDateRange(req: VercelRequest, body: JsonRecord) {
+  const sinceParam = getRequestParam(req, body, 'since')?.trim() ?? '';
+  const untilParam = getRequestParam(req, body, 'until')?.trim() ?? '';
+
+  const since = /^\d{4}-\d{2}-\d{2}$/.test(sinceParam) ? sinceParam : null;
+  const until = /^\d{4}-\d{2}-\d{2}$/.test(untilParam) ? untilParam : null;
+
+  return { since, until };
 }
 
 function resolveInstagramUserId(req: VercelRequest, body: JsonRecord) {
@@ -271,6 +348,316 @@ function resolveInstagramUserId(req: VercelRequest, body: JsonRecord) {
   if (envValue) return envValue;
 
   throw new Error('instagram_user_id es obligatorio. También podés configurar META_INSTAGRAM_USER_ID.');
+}
+
+function resolveOembedMode(req: VercelRequest, body: JsonRecord) {
+  return (getRequestParam(req, body, 'mode') ?? '').trim().toLowerCase();
+}
+
+function buildOembedCandidateUrls(rawValue: string) {
+  const normalized = rawValue.trim();
+  if (!normalized) return [];
+
+  if (normalized.startsWith('http://') || normalized.startsWith('https://')) {
+    return [normalized.replace(/^http:\/\//i, 'https://')];
+  }
+
+  const candidates: string[] = [];
+  const [pageId, postId] = normalized.split('_');
+
+  if (pageId && postId) {
+    candidates.push(`https://www.facebook.com/${pageId}/posts/${postId}`);
+    candidates.push(`https://www.facebook.com/permalink.php?story_fbid=${postId}&id=${pageId}`);
+  }
+
+  candidates.push(`https://www.facebook.com/${normalized}`);
+
+  return [...new Set(candidates.map((item) => item.trim()).filter(Boolean))];
+}
+
+async function resolveObjectStoryPermalink(token: string, objectStoryId: string) {
+  try {
+    const payload = await fetchMetaJson(token, objectStoryId, { fields: 'permalink_url' });
+    return toNullableText(payload.permalink_url);
+  } catch {
+    return null;
+  }
+}
+
+async function fetchOembedPreview(
+  token: string,
+  candidateUrls: string[],
+): Promise<{
+  endpoint: MetaOembedEndpoint;
+  source_url: string;
+  html: string;
+  provider_name: string | null;
+  type: string | null;
+  width: number | null;
+  height: number | null;
+} | null> {
+  const endpoints: MetaOembedEndpoint[] = ['oembed_post', 'oembed_video', 'instagram_oembed', 'oembed_page'];
+
+  for (const sourceUrl of candidateUrls) {
+    for (const endpoint of endpoints) {
+      try {
+        const payload = await fetchMetaJson(token, endpoint, {
+          url: sourceUrl,
+          maxwidth: '560',
+          useiframe: 'true',
+          omitscript: 'true',
+        });
+
+        const html = toNullableText(payload.html);
+        if (!html) {
+          continue;
+        }
+
+        return {
+          endpoint,
+          source_url: sourceUrl,
+          html,
+          provider_name: toNullableText(payload.provider_name),
+          type: toNullableText(payload.type),
+          width: toNullableNumber(payload.width),
+          height: toNullableNumber(payload.height),
+        };
+      } catch {
+        // Intentional no-op: probamos el siguiente endpoint/url.
+      }
+    }
+  }
+
+  return null;
+}
+
+async function fetchCreativePreviewFallback(token: string, creativeId: string): Promise<{
+  image_url: string | null;
+  source_url: string | null;
+  creative_name: string | null;
+}> {
+  try {
+    const payload = await fetchMetaJson(token, creativeId, {
+      fields: 'id,name,image_url,thumbnail_url,object_url,object_story_spec,effective_object_story_id,object_story_id',
+    });
+
+    const objectStorySpec = ensureObject(payload.object_story_spec);
+    const linkData = ensureObject(objectStorySpec.link_data);
+    const videoData = ensureObject(objectStorySpec.video_data);
+
+    const imageUrl = [
+      toNullableText(payload.image_url),
+      toNullableText(payload.thumbnail_url),
+      toNullableText(linkData.picture),
+      toNullableText(videoData.image_url),
+    ].find(Boolean) ?? null;
+
+    const sourceUrl = [
+      toNullableText(payload.object_url),
+      toNullableText(linkData.link),
+    ].find(Boolean) ?? null;
+
+    return {
+      image_url: imageUrl,
+      source_url: sourceUrl,
+      creative_name: toNullableText(payload.name),
+    };
+  } catch {
+    return {
+      image_url: null,
+      source_url: null,
+      creative_name: null,
+    };
+  }
+}
+
+function asObjectArray(value: unknown): JsonRecord[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item) => ensureObject(item))
+    .filter((item) => Object.keys(item).length > 0);
+}
+
+function sanitizePagePayload(payload: JsonRecord) {
+  const clone: JsonRecord = { ...payload };
+  delete clone.access_token;
+  return clone;
+}
+
+async function fetchPostInsightMetrics(
+  pageToken: string,
+  postId: string,
+): Promise<{
+  rows: Array<{ metric: string; period: string; value: number; raw_payload: JsonRecord }>;
+  attempted_batches: number;
+  last_error: string | null;
+}> {
+  const metricBatches = [
+    'post_clicks,post_engaged_users,post_impressions,post_total_media_view',
+    'post_impressions',
+    'post_total_media_view',
+    'post_video_views',
+    'post_video_views_organic',
+    'post_video_views_paid',
+    'post_clicks,post_engaged_users',
+    'post_clicks',
+    'post_engaged_users',
+  ];
+
+  let lastError: string | null = null;
+  for (const batch of metricBatches) {
+    try {
+      const payload = await fetchMetaJson(pageToken, `${postId}/insights`, {
+        metric: batch,
+      });
+
+      const items = asObjectArray(payload.data);
+      const rawRows = items
+        .map((item) => {
+          const metric = toNullableText(item.name);
+          const period = toNullableText(item.period) ?? 'lifetime';
+          const values = asObjectArray(item.values);
+          const latestValue = values[values.length - 1];
+          const value = toNumberOrZero(ensureObject(latestValue).value);
+
+          if (!metric) return null;
+
+          return {
+            metric,
+            period,
+            value,
+            raw_payload: item,
+          };
+        })
+        .filter((item): item is { metric: string; period: string; value: number; raw_payload: JsonRecord } => item !== null);
+
+      const normalized = (() => {
+        const viewMetrics = new Set([
+          'post_impressions',
+          'post_total_media_view',
+          'post_video_views',
+          'post_video_views_organic',
+          'post_video_views_paid',
+        ]);
+
+        const byMetric = new Map<string, { metric: string; period: string; value: number; raw_payload: JsonRecord }>();
+
+        for (const row of rawRows) {
+          const metric = viewMetrics.has(row.metric) ? 'post_impressions' : row.metric;
+          const current = byMetric.get(metric);
+
+          if (!current) {
+            byMetric.set(metric, {
+              metric,
+              period: row.period,
+              value: row.value,
+              raw_payload: row.raw_payload,
+            });
+            continue;
+          }
+
+          byMetric.set(metric, {
+            ...current,
+            value: current.value + row.value,
+          });
+        }
+
+        return Array.from(byMetric.values());
+      })();
+
+      if (normalized.length > 0) {
+        return {
+          rows: normalized,
+          attempted_batches: metricBatches.indexOf(batch) + 1,
+          last_error: null,
+        };
+      }
+    } catch (error) {
+      lastError = error instanceof Error ? error.message : String(error);
+      // Seguimos intentando con el siguiente batch de métricas.
+    }
+  }
+
+  return {
+    rows: [],
+    attempted_batches: metricBatches.length,
+    last_error: lastError,
+  };
+}
+
+async function fetchPageInsightMetrics(
+  pageToken: string,
+  pageId: string,
+  since: string | null,
+  until: string | null,
+): Promise<{
+  rows: MetaPageInsightDailyRow[];
+  attempted_batches: number;
+  last_error: string | null;
+}> {
+  const metricBatches = [
+    'page_impressions,page_reach,page_engaged_users',
+    'page_impressions,page_reach',
+    'page_impressions',
+    'page_reach',
+  ];
+
+  let lastError: string | null = null;
+
+  for (const batch of metricBatches) {
+    try {
+      const insightsParams: Record<string, string> = {
+        metric: batch,
+        period: 'day',
+      };
+      if (since) insightsParams.since = since;
+      if (until) insightsParams.until = until;
+
+      const insightsPayload = await fetchMetaJson(pageToken, `${pageId}/insights`, insightsParams);
+      const insightItems = asObjectArray(insightsPayload.data);
+
+      const rows: MetaPageInsightDailyRow[] = [];
+      for (const item of insightItems) {
+        const metric = toNullableText(item.name);
+        if (!metric) continue;
+
+        const values = asObjectArray(item.values);
+        for (const point of values) {
+          const endTime = toNullableIsoTimestamp(point.end_time);
+          const dateEnd = endTime?.slice(0, 10);
+          if (!dateEnd) continue;
+
+          rows.push({
+            page_business_id: pageId,
+            page_name: null,
+            metric,
+            date_end: dateEnd,
+            value: toNumberOrZero(point.value),
+            raw_payload: {
+              metric,
+              point,
+            },
+          });
+        }
+      }
+
+      if (rows.length > 0) {
+        return {
+          rows,
+          attempted_batches: metricBatches.indexOf(batch) + 1,
+          last_error: null,
+        };
+      }
+    } catch (error) {
+      lastError = error instanceof Error ? error.message : String(error);
+    }
+  }
+
+  return {
+    rows: [],
+    attempted_batches: metricBatches.length,
+    last_error: lastError,
+  };
 }
 
 function requireMetaAccessToken() {
@@ -351,7 +738,10 @@ async function parseMetaResponse(response: Response, context: string): Promise<J
     const errorPayload = ensureObject(payload);
     const metaError = ensureObject(errorPayload.error);
     const message = toNullableText(metaError.message) ?? raw.trim() ?? 'Error desconocido';
-    throw new Error(`Meta ${context} error (${response.status}): ${message}`);
+    const code = toNullableText(metaError.code);
+    const subcode = toNullableText(metaError.error_subcode);
+    const codeLabel = [code, subcode ? `subcode=${subcode}` : null].filter(Boolean).join(', ');
+    throw new Error(`Meta ${context} error (${response.status}${codeLabel ? ` | ${codeLabel}` : ''}): ${message}`);
   }
 
   return ensureObject(payload);
@@ -639,6 +1029,55 @@ function mapInsightRow(payload: JsonRecord): MetaInsightRow | null {
   };
 }
 
+function mapInsightBreakdownRow(
+  payload: JsonRecord,
+  breakdownType: MetaAdInsightBreakdownType,
+): MetaAdInsightBreakdownRow | null {
+  const adBusinessId = toNullableText(payload.ad_id);
+  const dateStart = toNullableText(payload.date_start);
+  const dateStop = toNullableText(payload.date_stop);
+
+  if (!adBusinessId || !dateStart || !dateStop) {
+    return null;
+  }
+
+  let breakdownValue1: string | null = null;
+  let breakdownValue2: string | null = null;
+
+  if (breakdownType === 'age_gender') {
+    breakdownValue1 = toNullableText(payload.age);
+    breakdownValue2 = toNullableText(payload.gender);
+  } else if (breakdownType === 'country') {
+    breakdownValue1 = toNullableText(payload.country);
+  } else if (breakdownType === 'region') {
+    breakdownValue1 = toNullableText(payload.region);
+  } else if (breakdownType === 'publisher_platform') {
+    breakdownValue1 = toNullableText(payload.publisher_platform);
+  } else if (breakdownType === 'device_platform') {
+    breakdownValue1 = toNullableText(payload.device_platform);
+  }
+
+  if (!breakdownValue1) {
+    return null;
+  }
+
+  return {
+    ad_business_id: adBusinessId,
+    date_start: dateStart,
+    date_stop: dateStop,
+    breakdown_type: breakdownType,
+    breakdown_value_1: breakdownValue1,
+    breakdown_value_2: breakdownValue2 ?? '',
+    spend: toNumberOrZero(payload.spend),
+    impressions: Math.trunc(toNumberOrZero(payload.impressions)),
+    reach: Math.trunc(toNumberOrZero(payload.reach)),
+    clicks: Math.trunc(toNumberOrZero(payload.clicks)),
+    ctr: toNullableNumber(payload.ctr),
+    cpc: toNullableNumber(payload.cpc),
+    raw_payload: payload,
+  };
+}
+
 function mapInsightHourlyRow(payload: JsonRecord, fallbackBusinessId: string): MetaInsightHourlyRow | null {
   const adBusinessId = toNullableText(payload.ad_id) ?? fallbackBusinessId;
   const dateStart = toNullableText(payload.date_start);
@@ -682,6 +1121,239 @@ export default async function metaAdsSyncHandler(req: VercelRequest, res: Vercel
     }
 
     const body = parseBodyObject(req);
+    const mode = resolveOembedMode(req, body);
+
+    if (mode === 'oembed_preview') {
+      const token = requireMetaAccessToken();
+      const creativeId = getRequestParam(req, body, 'creative_id')?.trim() ?? '';
+      const objectStoryId =
+        getRequestParam(req, body, 'effective_object_story_id')?.trim()
+        || getRequestParam(req, body, 'object_story_id')?.trim()
+        || '';
+      const directUrl = getRequestParam(req, body, 'url')?.trim() ?? '';
+
+      if (!objectStoryId && !directUrl) {
+        return res.status(400).json({
+          error: 'Debés enviar object_story_id (o effective_object_story_id) o url para probar oEmbed.',
+        });
+      }
+
+      const candidateUrls: string[] = [];
+      if (directUrl) {
+        candidateUrls.push(...buildOembedCandidateUrls(directUrl));
+      }
+
+      if (objectStoryId) {
+        const permalink = await resolveObjectStoryPermalink(token, objectStoryId);
+        if (permalink) {
+          candidateUrls.push(...buildOembedCandidateUrls(permalink));
+        }
+        candidateUrls.push(...buildOembedCandidateUrls(objectStoryId));
+      }
+
+      const dedupedCandidateUrls = [...new Set(candidateUrls.filter(Boolean))];
+      if (dedupedCandidateUrls.length === 0) {
+        return res.status(400).json({
+          error: 'No se pudo construir una URL candidata para oEmbed con los parámetros enviados.',
+        });
+      }
+
+      const preview = await fetchOembedPreview(token, dedupedCandidateUrls);
+      if (!preview) {
+        if (creativeId) {
+          const fallback = await fetchCreativePreviewFallback(token, creativeId);
+          if (fallback.image_url) {
+            return res.status(200).json({
+              success: true,
+              mode,
+              preview_type: 'creative_image',
+              object_story_id: objectStoryId || null,
+              creative_id: creativeId,
+              creative_name: fallback.creative_name,
+              image_url: fallback.image_url,
+              source_url: fallback.source_url,
+              warning: 'oEmbed no estuvo disponible para este contenido; se devolvió preview desde creative.',
+            });
+          }
+        }
+
+        return res.status(404).json({
+          error: 'No se pudo resolver oEmbed para este ad/publicación. Puede no ser contenido público o no estar disponible para embed.',
+          candidates: dedupedCandidateUrls,
+          creative_id: creativeId || null,
+        });
+      }
+
+      return res.status(200).json({
+        success: true,
+        mode,
+        preview_type: 'oembed_html',
+        object_story_id: objectStoryId || null,
+        matched_endpoint: preview.endpoint,
+        source_url: preview.source_url,
+        provider_name: preview.provider_name,
+        type: preview.type,
+        width: preview.width,
+        height: preview.height,
+        html: preview.html,
+      });
+    }
+
+    if (mode === 'pages_sql') {
+      const { since, until } = resolvePagesDateRange(req, body);
+      const supabase = getSupabaseAdminClient();
+
+      const pagesQuery = supabase
+        .from('meta_pages' as never)
+        .select('business_id,name,category,fan_count,followers_count,link,picture_url,has_page_token' as never)
+        .order('followers_count' as never, { ascending: false })
+        .order('fan_count' as never, { ascending: false });
+
+      const postsDateStart = since ? `${since}T00:00:00.000Z` : null;
+      const postsDateEnd = until ? `${until}T23:59:59.999Z` : null;
+
+      let postsQuery = supabase
+        .from('meta_page_posts' as never)
+        .select('business_id,page_business_id,page_name,message,created_time,permalink_url,full_picture,reactions,comments,shares' as never)
+        .order('created_time' as never, { ascending: false })
+        .limit(500);
+
+      if (postsDateStart) postsQuery = postsQuery.gte('created_time' as never, postsDateStart as never);
+      if (postsDateEnd) postsQuery = postsQuery.lte('created_time' as never, postsDateEnd as never);
+
+      let insightsQuery = supabase
+        .from('meta_page_insights_daily' as never)
+        .select('page_business_id,page_name,metric,date_end,value' as never)
+        .order('date_end' as never, { ascending: true });
+
+      if (since) insightsQuery = insightsQuery.gte('date_end' as never, since as never);
+      if (until) insightsQuery = insightsQuery.lte('date_end' as never, until as never);
+
+      let postInsightsSnapshotsQuery = supabase
+        .from('meta_page_post_insights_snapshots' as never)
+        .select('post_business_id,page_business_id,page_name,metric,period,snapshot_date,value' as never)
+        .order('snapshot_date' as never, { ascending: true });
+
+      if (since) postInsightsSnapshotsQuery = postInsightsSnapshotsQuery.gte('snapshot_date' as never, since as never);
+      if (until) postInsightsSnapshotsQuery = postInsightsSnapshotsQuery.lte('snapshot_date' as never, until as never);
+
+      const [pagesResult, postsResult, insightsResult, postInsightsSnapshotsResult] = await Promise.all([
+        pagesQuery,
+        postsQuery,
+        insightsQuery,
+        postInsightsSnapshotsQuery,
+      ]);
+
+      if (pagesResult.error) {
+        throw new Error(`No se pudo cargar páginas desde SQL: ${pagesResult.error.message}`);
+      }
+      if (postsResult.error) {
+        throw new Error(`No se pudo cargar posts desde SQL: ${postsResult.error.message}`);
+      }
+      if (insightsResult.error) {
+        throw new Error(`No se pudo cargar page insights desde SQL: ${insightsResult.error.message}`);
+      }
+      if (postInsightsSnapshotsResult.error) {
+        throw new Error(`No se pudo cargar post insights snapshots desde SQL: ${postInsightsSnapshotsResult.error.message}`);
+      }
+
+      return res.status(200).json({
+        success: true,
+        resource: 'pages',
+        duration_ms: 0,
+        since: since ?? '',
+        until: until ?? '',
+        pages: (pagesResult.data ?? []).map((item) => ({
+          id: toNullableText((item as JsonRecord).business_id),
+          name: toNullableText((item as JsonRecord).name),
+          category: toNullableText((item as JsonRecord).category),
+          fan_count: Math.trunc(toNumberOrZero((item as JsonRecord).fan_count)),
+          followers_count: Math.trunc(toNumberOrZero((item as JsonRecord).followers_count)),
+          link: toNullableText((item as JsonRecord).link),
+          picture_url: toNullableText((item as JsonRecord).picture_url),
+          has_page_token: Boolean((item as JsonRecord).has_page_token),
+        })),
+        posts: (postsResult.data ?? []).map((item) => ({
+          id: toNullableText((item as JsonRecord).business_id),
+          page_id: toNullableText((item as JsonRecord).page_business_id),
+          page_name: toNullableText((item as JsonRecord).page_name),
+          message: toNullableText((item as JsonRecord).message),
+          created_time: toNullableIsoTimestamp((item as JsonRecord).created_time),
+          permalink_url: toNullableText((item as JsonRecord).permalink_url),
+          full_picture: toNullableText((item as JsonRecord).full_picture),
+          reactions: Math.trunc(toNumberOrZero((item as JsonRecord).reactions)),
+          comments: Math.trunc(toNumberOrZero((item as JsonRecord).comments)),
+          shares: Math.trunc(toNumberOrZero((item as JsonRecord).shares)),
+        })),
+        insights: (insightsResult.data ?? []).map((item) => ({
+          page_id: toNullableText((item as JsonRecord).page_business_id),
+          page_name: toNullableText((item as JsonRecord).page_name),
+          metric: toNullableText((item as JsonRecord).metric),
+          end_time: toNullableText((item as JsonRecord).date_end)
+            ? `${toNullableText((item as JsonRecord).date_end)}T00:00:00.000Z`
+            : null,
+          value: toNumberOrZero((item as JsonRecord).value),
+        })),
+        post_insights_snapshots: (postInsightsSnapshotsResult.data ?? []).map((item) => ({
+          post_id: toNullableText((item as JsonRecord).post_business_id),
+          page_id: toNullableText((item as JsonRecord).page_business_id),
+          page_name: toNullableText((item as JsonRecord).page_name),
+          metric: toNullableText((item as JsonRecord).metric),
+          period: toNullableText((item as JsonRecord).period),
+          snapshot_date: toNullableText((item as JsonRecord).snapshot_date),
+          value: toNumberOrZero((item as JsonRecord).value),
+        })),
+        errors: [],
+        permissions_hint: ['sql_mode_only'],
+      });
+    }
+
+    if (mode === 'ads_audience_sql') {
+      const dateFrom = getRequestParam(req, body, 'date_from')?.trim() ?? '';
+      const dateTo = getRequestParam(req, body, 'date_to')?.trim() ?? '';
+      const adId = getRequestParam(req, body, 'ad_id')?.trim() ?? '';
+
+      const supabase = getSupabaseAdminClient();
+
+      let audienceQuery = supabase
+        .from('meta_ad_insights_breakdown_daily' as never)
+        .select('ad_business_id,date_start,date_stop,breakdown_type,breakdown_value_1,breakdown_value_2,spend,impressions,reach,clicks,ctr,cpc' as never)
+        .order('date_start' as never, { ascending: false });
+
+      if (dateFrom) {
+        audienceQuery = audienceQuery.gte('date_start' as never, dateFrom as never);
+      }
+      if (dateTo) {
+        audienceQuery = audienceQuery.lte('date_start' as never, dateTo as never);
+      }
+      if (adId) {
+        audienceQuery = audienceQuery.eq('ad_business_id' as never, adId as never);
+      }
+
+      const { data, error } = await audienceQuery.limit(5000);
+      if (error) {
+        throw new Error(`No se pudo cargar audiencia de ads desde SQL: ${error.message}`);
+      }
+
+      return res.status(200).json({
+        success: true,
+        rows: (data ?? []).map((item) => ({
+          ad_business_id: toNullableText((item as JsonRecord).ad_business_id),
+          date_start: toNullableText((item as JsonRecord).date_start),
+          date_stop: toNullableText((item as JsonRecord).date_stop),
+          breakdown_type: toNullableText((item as JsonRecord).breakdown_type),
+          breakdown_value_1: toNullableText((item as JsonRecord).breakdown_value_1),
+          breakdown_value_2: toNullableText((item as JsonRecord).breakdown_value_2) ?? '',
+          spend: toNullableNumber((item as JsonRecord).spend),
+          impressions: toNullableNumber((item as JsonRecord).impressions),
+          reach: toNullableNumber((item as JsonRecord).reach),
+          clicks: toNullableNumber((item as JsonRecord).clicks),
+          ctr: toNullableNumber((item as JsonRecord).ctr),
+          cpc: toNullableNumber((item as JsonRecord).cpc),
+        })),
+      });
+    }
+
     const resource = resolveSyncResource(req, body);
     const accountBusinessId = resource === 'ads' ? resolveAccountId(req, body) : null;
     accountBusinessIdForRun = accountBusinessId;
@@ -689,6 +1361,9 @@ export default async function metaAdsSyncHandler(req: VercelRequest, res: Vercel
     const timeIncrement = getRequestParam(req, body, 'time_increment')?.trim() || '1';
     const limit = parsePositiveInt(getRequestParam(req, body, 'limit'), DEFAULT_LIMIT, 500);
     const maxPages = parsePositiveInt(getRequestParam(req, body, 'max_pages'), DEFAULT_MAX_PAGES);
+    const postLimit = parsePositiveInt(getRequestParam(req, body, 'post_limit'), limit, 500);
+    const postMaxPages = parsePositiveInt(getRequestParam(req, body, 'post_max_pages'), maxPages);
+    const hourlyAdLimit = parsePositiveInt(getRequestParam(req, body, 'hourly_ad_limit'), 100, 500);
     const maxRuntimeMs = parsePositiveInt(
       getRequestParam(req, body, 'max_runtime_ms'),
       DEFAULT_MAX_RUNTIME_MS,
@@ -710,6 +1385,9 @@ export default async function metaAdsSyncHandler(req: VercelRequest, res: Vercel
         time_increment: timeIncrement,
         limit,
         max_pages: maxPages,
+        post_limit: postLimit,
+        post_max_pages: postMaxPages,
+        hourly_ad_limit: hourlyAdLimit,
         max_runtime_ms: maxRuntimeMs,
       },
     });
@@ -781,6 +1459,305 @@ export default async function metaAdsSyncHandler(req: VercelRequest, res: Vercel
       });
 
       return res.status(200).json(responsePayload);
+    }
+
+    if (resource === 'pages') {
+      const { since, until } = resolvePagesDateRange(req, body);
+
+      const pagesResult = await fetchMetaCollection({
+        token,
+        path: 'me/accounts',
+        params: {
+          fields: 'id,name,category,fan_count,followers_count,link,access_token,picture{url}',
+          limit: String(Math.min(limit, 50)),
+        },
+        maxPages,
+        startedAt,
+        maxRuntimeMs,
+      });
+
+      const pageTokenById = new Map<string, string>();
+      const pages: MetaPageRow[] = pagesResult.rows.map((page) => {
+        const picture = ensureObject(page.picture);
+        const pictureData = ensureObject(picture.data);
+        const pageId = toNullableText(page.id);
+        const pageToken = toNullableText(page.access_token);
+        if (pageId && pageToken) {
+          pageTokenById.set(pageId, pageToken);
+        }
+
+        return {
+          business_id: pageId ?? '',
+          name: toNullableText(page.name),
+          category: toNullableText(page.category),
+          fan_count: Math.trunc(toNumberOrZero(page.fan_count)),
+          followers_count: Math.trunc(toNumberOrZero(page.followers_count)),
+          link: toNullableText(page.link),
+          picture_url: toNullableText(pictureData.url),
+          has_page_token: Boolean(pageToken),
+          last_synced_at: new Date().toISOString(),
+          raw_payload: sanitizePagePayload(page),
+        };
+      }).filter((page) => Boolean(page.business_id));
+
+      const postsRows: MetaPagePostRow[] = [];
+
+      const insightsRows: MetaPageInsightDailyRow[] = [];
+      const postInsightSnapshotRows: MetaPagePostInsightSnapshotRow[] = [];
+
+      const pageErrors: Array<{
+        page_id: string;
+        page_name: string | null;
+        stage: 'posts' | 'insights' | 'post_insights';
+        message: string;
+      }> = [];
+
+      const postsSummary: SyncResourceSummary = { pages_fetched: 0, pulled: 0, upserted: 0, has_more: false };
+      const insightsSummary: SyncResourceSummary = { pages_fetched: 0, pulled: 0, upserted: 0, has_more: false };
+      const postInsightsSummary: SyncResourceSummary = { pages_fetched: 0, pulled: 0, upserted: 0, has_more: false };
+
+      let pagesLoopStoppedEarly = false;
+      for (const page of pages) {
+        if (!hasRuntimeBudget(startedAt, maxRuntimeMs)) {
+          pagesLoopStoppedEarly = true;
+          break;
+        }
+
+        const pageId = page.business_id;
+        if (!pageId) {
+          continue;
+        }
+
+        const pageToken = pageTokenById.get(pageId) ?? null;
+        if (!pageToken) {
+          pageErrors.push({
+            page_id: pageId,
+            page_name: page.name,
+            stage: 'posts',
+            message: 'La página no devolvió access_token en /me/accounts.',
+          });
+          continue;
+        }
+
+        try {
+          const postParams: Record<string, string> = {
+            fields: 'id,message,created_time,permalink_url,full_picture,shares,reactions.summary(true).limit(0),comments.summary(true).limit(0)',
+            limit: String(postLimit),
+          };
+          if (since) postParams.since = since;
+          if (until) postParams.until = until;
+
+          const pagePosts = await fetchMetaCollection({
+            token: pageToken,
+            path: `${pageId}/posts`,
+            params: postParams,
+            maxPages: postMaxPages,
+            startedAt,
+            maxRuntimeMs,
+          });
+
+          postsSummary.pages_fetched += pagePosts.pages_fetched;
+          postsSummary.pulled += pagePosts.rows.length;
+          postsSummary.has_more = postsSummary.has_more || pagePosts.has_more;
+
+          for (const post of pagePosts.rows) {
+            const reactionsSummary = ensureObject(ensureObject(post.reactions).summary);
+            const commentsSummary = ensureObject(ensureObject(post.comments).summary);
+            const shares = ensureObject(post.shares);
+
+            const postId = toNullableText(post.id);
+            if (!postId) continue;
+
+            postsRows.push({
+              business_id: postId,
+              page_business_id: pageId,
+              page_name: page.name,
+              message: toNullableText(post.message),
+              created_time: toNullableIsoTimestamp(post.created_time),
+              permalink_url: toNullableText(post.permalink_url),
+              full_picture: toNullableText(post.full_picture),
+              reactions: Math.trunc(toNumberOrZero(reactionsSummary.total_count)),
+              comments: Math.trunc(toNumberOrZero(commentsSummary.total_count)),
+              shares: Math.trunc(toNumberOrZero(shares.count)),
+              raw_payload: post,
+            });
+          }
+
+          const snapshotDate = new Date().toISOString().slice(0, 10);
+          for (const post of postsRows.filter((item) => item.page_business_id === pageId)) {
+            if (!hasRuntimeBudget(startedAt, maxRuntimeMs)) {
+              postInsightsSummary.has_more = true;
+              break;
+            }
+
+            const metricsResult = await fetchPostInsightMetrics(pageToken, post.business_id);
+            postInsightsSummary.pages_fetched += 1;
+            postInsightsSummary.pulled += metricsResult.rows.length;
+
+            if (metricsResult.rows.length === 0 && metricsResult.last_error) {
+              pageErrors.push({
+                page_id: pageId,
+                page_name: page.name,
+                stage: 'post_insights',
+                message: `No se pudieron leer métricas de post ${post.business_id} tras ${metricsResult.attempted_batches} intento(s): ${metricsResult.last_error}`,
+              });
+            }
+
+            for (const metricRow of metricsResult.rows) {
+              postInsightSnapshotRows.push({
+                post_business_id: post.business_id,
+                page_business_id: pageId,
+                page_name: page.name,
+                metric: metricRow.metric,
+                period: metricRow.period,
+                snapshot_date: snapshotDate,
+                value: metricRow.value,
+                raw_payload: metricRow.raw_payload,
+              });
+            }
+          }
+        } catch (error) {
+          pageErrors.push({
+            page_id: pageId,
+            page_name: page.name,
+            stage: 'posts',
+            message: error instanceof Error ? error.message : String(error),
+          });
+        }
+
+        const pageInsightsResult = await fetchPageInsightMetrics(pageToken, pageId, since, until);
+        insightsSummary.pages_fetched += 1;
+
+        if (pageInsightsResult.rows.length === 0 && pageInsightsResult.last_error) {
+          pageErrors.push({
+            page_id: pageId,
+            page_name: page.name,
+            stage: 'insights',
+            message: `No se pudieron leer métricas de página tras ${pageInsightsResult.attempted_batches} intento(s): ${pageInsightsResult.last_error}`,
+          });
+        }
+
+        for (const row of pageInsightsResult.rows) {
+          insightsRows.push({
+            ...row,
+            page_name: page.name,
+          });
+          insightsSummary.pulled += 1;
+        }
+      }
+
+      const durationMs = Date.now() - startedAt;
+      const upsertedPages = await upsertRows(
+        'meta_pages',
+        pages as JsonRecord[],
+        'business_id',
+      );
+      const upsertedPosts = await upsertRows(
+        'meta_page_posts',
+        postsRows as JsonRecord[],
+        'business_id',
+      );
+      const upsertedInsights = await upsertRows(
+        'meta_page_insights_daily',
+        insightsRows as JsonRecord[],
+        'page_business_id,metric,date_end',
+      );
+      const upsertedPostInsights = await upsertRows(
+        'meta_page_post_insights_snapshots',
+        postInsightSnapshotRows as JsonRecord[],
+        'post_business_id,metric,snapshot_date',
+      );
+
+      postsSummary.upserted = upsertedPosts;
+      insightsSummary.upserted = upsertedInsights;
+      postInsightsSummary.upserted = upsertedPostInsights;
+
+      const resourcesPayload: JsonRecord = {
+        pages: {
+          pages_fetched: pagesResult.pages_fetched,
+          pulled: pages.length,
+          upserted: upsertedPages,
+          has_more: pagesResult.has_more || pagesLoopStoppedEarly,
+        },
+        posts: postsSummary,
+        insights: insightsSummary,
+        post_insights: postInsightsSummary,
+      };
+
+      const totals = {
+        pulled: pages.length + postsRows.length + insightsRows.length + postInsightSnapshotRows.length,
+        upserted: upsertedPages + upsertedPosts + upsertedInsights + upsertedPostInsights,
+      };
+
+      await finalizeSyncRun(syncRunId, {
+        finished_at: new Date().toISOString(),
+        duration_ms: durationMs,
+        success: true,
+        early_stop: (pagesResult.stopped_early || pagesLoopStoppedEarly) ? { resource: 'insights', reason: 'max_runtime_ms' } : null,
+        totals,
+        resources: resourcesPayload,
+        error_message: null,
+      });
+
+      return res.status(200).json({
+        success: true,
+        resource,
+        duration_ms: durationMs,
+        since: since ?? '',
+        until: until ?? '',
+        pages: pages.map((item) => ({
+          id: item.business_id,
+          name: item.name,
+          category: item.category,
+          fan_count: item.fan_count,
+          followers_count: item.followers_count,
+          link: item.link,
+          picture_url: item.picture_url,
+          has_page_token: item.has_page_token,
+        })),
+        posts: postsRows
+          .sort((a, b) => (b.created_time ?? '').localeCompare(a.created_time ?? ''))
+          .slice(0, 300)
+          .map((item) => ({
+            id: item.business_id,
+            page_id: item.page_business_id,
+            page_name: item.page_name,
+            message: item.message,
+            created_time: item.created_time,
+            permalink_url: item.permalink_url,
+            full_picture: item.full_picture,
+            reactions: item.reactions,
+            comments: item.comments,
+            shares: item.shares,
+          })),
+        insights: insightsRows.map((item) => ({
+          page_id: item.page_business_id,
+          page_name: item.page_name,
+          metric: item.metric,
+          end_time: `${item.date_end}T00:00:00.000Z`,
+          value: item.value,
+        })),
+        post_insights_snapshots: postInsightSnapshotRows.map((item) => ({
+          post_id: item.post_business_id,
+          page_id: item.page_business_id,
+          page_name: item.page_name,
+          metric: item.metric,
+          period: item.period,
+          snapshot_date: item.snapshot_date,
+          value: item.value,
+        })),
+        errors: pageErrors,
+        permissions_hint: [
+          'pages_show_list (listar páginas desde /me/accounts)',
+          'pages_read_engagement (leer contenido de página)',
+          'pages_read_user_content (según contenido/visibilidad)',
+          'read_insights (métricas de página)',
+          'business_management (puede ser requerido con business system user)',
+          'Page access token requerido para campos con información de usuarios',
+        ],
+        totals,
+        resources: resourcesPayload,
+      });
     }
 
     if (!accountBusinessId) {
@@ -889,6 +1866,69 @@ export default async function metaAdsSyncHandler(req: VercelRequest, res: Vercel
       earlyStop = insightsResult.earlyStop;
     }
 
+    const audienceBreakdownSummary: Record<string, SyncResourceSummary> = {
+      age_gender: { pages_fetched: 0, pulled: 0, upserted: 0, has_more: false },
+      country: { pages_fetched: 0, pulled: 0, upserted: 0, has_more: false },
+      region: { pages_fetched: 0, pulled: 0, upserted: 0, has_more: false },
+      publisher_platform: { pages_fetched: 0, pulled: 0, upserted: 0, has_more: false },
+      device_platform: { pages_fetched: 0, pulled: 0, upserted: 0, has_more: false },
+    };
+
+    if (!earlyStop) {
+      const syncBreakdown = async (
+        breakdownType: MetaAdInsightBreakdownType,
+        breakdowns: string,
+      ) => syncPagedResource<JsonRecord, MetaAdInsightBreakdownRow>({
+        token,
+        label: 'insights',
+        path: `${accountBusinessId}/insights`,
+        params: {
+          level: 'ad',
+          fields: 'ad_id,date_start,date_stop,spend,impressions,reach,clicks,ctr,cpc',
+          breakdowns,
+          date_preset: datePreset,
+          time_increment: timeIncrement,
+          limit: String(limit),
+        },
+        maxPages,
+        startedAt,
+        maxRuntimeMs,
+        mapItem: (item) => mapInsightBreakdownRow(item, breakdownType),
+        table: 'meta_ad_insights_breakdown_daily',
+        onConflict: 'ad_business_id,date_start,date_stop,breakdown_type,breakdown_value_1,breakdown_value_2',
+      });
+
+      const ageGenderResult = await syncBreakdown('age_gender', 'age,gender');
+      audienceBreakdownSummary.age_gender = ageGenderResult.summary;
+      if (!earlyStop) {
+        earlyStop = ageGenderResult.earlyStop;
+      }
+
+      if (!earlyStop) {
+        const countryResult = await syncBreakdown('country', 'country');
+        audienceBreakdownSummary.country = countryResult.summary;
+        earlyStop = countryResult.earlyStop;
+      }
+
+      if (!earlyStop) {
+        const regionResult = await syncBreakdown('region', 'region');
+        audienceBreakdownSummary.region = regionResult.summary;
+        earlyStop = regionResult.earlyStop;
+      }
+
+      if (!earlyStop) {
+        const platformResult = await syncBreakdown('publisher_platform', 'publisher_platform');
+        audienceBreakdownSummary.publisher_platform = platformResult.summary;
+        earlyStop = platformResult.earlyStop;
+      }
+
+      if (!earlyStop) {
+        const devicePlatformResult = await syncBreakdown('device_platform', 'device_platform');
+        audienceBreakdownSummary.device_platform = devicePlatformResult.summary;
+        earlyStop = devicePlatformResult.earlyStop;
+      }
+    }
+
     let hourlyDebug: HourlySyncDebug = {
       pages_fetched: 0,
       pulled: 0,
@@ -929,7 +1969,7 @@ export default async function metaAdsSyncHandler(req: VercelRequest, res: Vercel
         };
 
         if (hourlyDebug.pulled === 0 && hasRuntimeBudget(startedAt, maxRuntimeMs)) {
-          const adIds = await getAdIdsForAccount(accountBusinessId, 30);
+          const adIds = await getAdIdsForAccount(accountBusinessId, hourlyAdLimit);
 
           for (const adId of adIds) {
             if (!hasRuntimeBudget(startedAt, maxRuntimeMs)) {
@@ -947,7 +1987,7 @@ export default async function metaAdsSyncHandler(req: VercelRequest, res: Vercel
                 time_increment: '1',
                 limit: String(limit),
               },
-              maxPages: 2,
+              maxPages,
               startedAt,
               maxRuntimeMs,
               mapItem: (item) => mapInsightHourlyRow(item, adId),
@@ -995,6 +2035,7 @@ export default async function metaAdsSyncHandler(req: VercelRequest, res: Vercel
 
     const resourcesPayload: JsonRecord = {
       ...baseSummary,
+      insights_breakdown: audienceBreakdownSummary,
       insights_hourly: hourlyDebug,
     };
 
