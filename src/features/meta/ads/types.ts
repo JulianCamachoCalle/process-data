@@ -65,7 +65,7 @@ export type MetaAdAudienceBreakdownRow = {
   ad_business_id: string;
   date_start: string;
   date_stop: string;
-  breakdown_type: 'age_gender' | 'country' | 'publisher_platform';
+  breakdown_type: 'age_gender' | 'country' | 'region' | 'publisher_platform' | 'device_platform';
   breakdown_value_1: string;
   breakdown_value_2: string;
   spend: number | null;

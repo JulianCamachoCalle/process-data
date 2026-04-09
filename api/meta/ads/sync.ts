@@ -170,7 +170,7 @@ type MetaInsightHourlyRow = {
   raw_payload: JsonRecord;
 };
 
-type MetaAdInsightBreakdownType = 'age_gender' | 'country' | 'publisher_platform';
+type MetaAdInsightBreakdownType = 'age_gender' | 'country' | 'region' | 'publisher_platform' | 'device_platform';
 
 type MetaAdInsightBreakdownRow = {
   ad_business_id: string;
@@ -935,8 +935,12 @@ function mapInsightBreakdownRow(
     breakdownValue2 = toNullableText(payload.gender);
   } else if (breakdownType === 'country') {
     breakdownValue1 = toNullableText(payload.country);
+  } else if (breakdownType === 'region') {
+    breakdownValue1 = toNullableText(payload.region);
   } else if (breakdownType === 'publisher_platform') {
     breakdownValue1 = toNullableText(payload.publisher_platform);
+  } else if (breakdownType === 'device_platform') {
+    breakdownValue1 = toNullableText(payload.device_platform);
   }
 
   if (!breakdownValue1) {
@@ -1770,7 +1774,9 @@ export default async function metaAdsSyncHandler(req: VercelRequest, res: Vercel
     const audienceBreakdownSummary: Record<string, SyncResourceSummary> = {
       age_gender: { pages_fetched: 0, pulled: 0, upserted: 0, has_more: false },
       country: { pages_fetched: 0, pulled: 0, upserted: 0, has_more: false },
+      region: { pages_fetched: 0, pulled: 0, upserted: 0, has_more: false },
       publisher_platform: { pages_fetched: 0, pulled: 0, upserted: 0, has_more: false },
+      device_platform: { pages_fetched: 0, pulled: 0, upserted: 0, has_more: false },
     };
 
     if (!earlyStop) {
@@ -1810,9 +1816,21 @@ export default async function metaAdsSyncHandler(req: VercelRequest, res: Vercel
       }
 
       if (!earlyStop) {
+        const regionResult = await syncBreakdown('region', 'region');
+        audienceBreakdownSummary.region = regionResult.summary;
+        earlyStop = regionResult.earlyStop;
+      }
+
+      if (!earlyStop) {
         const platformResult = await syncBreakdown('publisher_platform', 'publisher_platform');
         audienceBreakdownSummary.publisher_platform = platformResult.summary;
         earlyStop = platformResult.earlyStop;
+      }
+
+      if (!earlyStop) {
+        const devicePlatformResult = await syncBreakdown('device_platform', 'device_platform');
+        audienceBreakdownSummary.device_platform = devicePlatformResult.summary;
+        earlyStop = devicePlatformResult.earlyStop;
       }
     }
 
