@@ -12,6 +12,12 @@ type InsightPoint = {
   engagement: number;
 };
 
+type PostClicksSnapshotPoint = {
+  date: string;
+  clicks: number;
+  engaged: number;
+};
+
 export function MetaPagesHub() {
   const [since, setSince] = useState('');
   const [until, setUntil] = useState('');
@@ -26,6 +32,10 @@ export function MetaPagesHub() {
 
   const pages = useMemo(() => pagesQuery.data?.pages ?? [], [pagesQuery.data?.pages]);
   const posts = useMemo(() => pagesQuery.data?.posts ?? [], [pagesQuery.data?.posts]);
+  const postInsightSnapshots = useMemo(
+    () => pagesQuery.data?.post_insights_snapshots ?? [],
+    [pagesQuery.data?.post_insights_snapshots],
+  );
   const errors = pagesQuery.data?.errors ?? [];
 
   const insightTrend = useMemo(() => {
@@ -45,7 +55,7 @@ export function MetaPagesHub() {
 
       if (row.metric === 'page_impressions') current.impressions += row.value;
       if (row.metric === 'page_reach') current.reach += row.value;
-      if (row.metric === 'page_post_engagements') current.engagement += row.value;
+      if (row.metric === 'page_engaged_users') current.engagement += row.value;
 
       grouped.set(date, current);
     }
@@ -60,26 +70,58 @@ export function MetaPagesHub() {
   }, [pages]);
 
   const topPosts = useMemo(() => {
+    const latestClicksByPost = new Map<string, number>();
+
+    for (const snapshot of postInsightSnapshots) {
+      if (snapshot.metric !== 'post_clicks') continue;
+      const current = latestClicksByPost.get(snapshot.post_id) ?? 0;
+      if (snapshot.value > current) {
+        latestClicksByPost.set(snapshot.post_id, snapshot.value);
+      }
+    }
+
     return [...posts]
       .map((post) => ({
         ...post,
         engagement: post.reactions + post.comments + post.shares,
+        clicks: latestClicksByPost.get(post.id) ?? 0,
       }))
       .sort((a, b) => b.engagement - a.engagement)
       .slice(0, 12);
-  }, [posts]);
+  }, [posts, postInsightSnapshots]);
+
+  const postClicksTrend = useMemo(() => {
+    const grouped = new Map<string, PostClicksSnapshotPoint>();
+
+    for (const snapshot of postInsightSnapshots) {
+      const date = snapshot.snapshot_date;
+      if (!date) continue;
+
+      const current = grouped.get(date) ?? { date, clicks: 0, engaged: 0 };
+      if (snapshot.metric === 'post_clicks') current.clicks += snapshot.value;
+      if (snapshot.metric === 'post_engaged_users') current.engaged += snapshot.value;
+      grouped.set(date, current);
+    }
+
+    return Array.from(grouped.values()).sort((a, b) => a.date.localeCompare(b.date));
+  }, [postInsightSnapshots]);
 
   const totals = useMemo(() => {
     const followers = pages.reduce((acc, page) => acc + (page.followers_count || page.fan_count || 0), 0);
     const postEngagement = posts.reduce((acc, post) => acc + post.reactions + post.comments + post.shares, 0);
+    const latestSnapshotDate = postInsightSnapshots.reduce((acc, item) => item.snapshot_date > acc ? item.snapshot_date : acc, '');
+    const totalPostClicks = postInsightSnapshots
+      .filter((item) => item.metric === 'post_clicks' && item.snapshot_date === latestSnapshotDate)
+      .reduce((acc, item) => acc + item.value, 0);
 
     return {
       totalPages: pages.length,
       totalFollowers: followers,
       totalPosts: posts.length,
       avgEngagementPerPost: posts.length > 0 ? postEngagement / posts.length : 0,
+      totalPostClicks,
     };
-  }, [pages, posts]);
+  }, [pages, posts, postInsightSnapshots]);
 
   const handleSyncNow = async () => {
     try {
@@ -169,6 +211,7 @@ export function MetaPagesHub() {
           <KpiCard title="Seguidores" value={formatNumberEs(totals.totalFollowers)} helper="followers_count + fallback fan_count" icon={<Eye className="text-red-600" size={18} />} />
           <KpiCard title="Posts leídos" value={formatNumberEs(totals.totalPosts)} helper="Publicaciones del rango" icon={<FileText className="text-red-600" size={18} />} />
           <KpiCard title="Engagement/post" value={formatNumberEs(Math.round(totals.avgEngagementPerPost))} helper="Reacciones + comentarios + shares" icon={<BarChart3 className="text-red-600" size={18} />} />
+          <KpiCard title="Clicks orgánicos" value={formatNumberEs(Math.round(totals.totalPostClicks))} helper="Último snapshot de post_insights" icon={<Activity className="text-red-600" size={18} />} />
         </KpiGrid>
       </Section>
 
@@ -227,10 +270,11 @@ export function MetaPagesHub() {
                 <p className="text-xs text-gray-500">{post.created_time ? new Date(post.created_time).toLocaleString('es-PE') : 'Sin fecha'}</p>
                 <p className="text-sm text-gray-700 line-clamp-3">{post.message ?? 'Sin texto en publicación'}</p>
                 {post.full_picture ? <img src={post.full_picture} alt={post.id} className="w-full rounded-xl border border-gray-200" loading="lazy" /> : null}
-                <div className="grid grid-cols-3 gap-2 text-xs text-gray-600">
+                <div className="grid grid-cols-4 gap-2 text-xs text-gray-600">
                   <div>Reacciones: <strong>{formatNumberEs(post.reactions)}</strong></div>
                   <div>Comentarios: <strong>{formatNumberEs(post.comments)}</strong></div>
                   <div>Shares: <strong>{formatNumberEs(post.shares)}</strong></div>
+                  <div>Clicks: <strong>{formatNumberEs(post.clicks)}</strong></div>
                 </div>
                 {post.permalink_url ? (
                   <a href={post.permalink_url} target="_blank" rel="noreferrer" className="inline-block text-xs font-semibold text-red-600 hover:text-red-700">
@@ -278,6 +322,25 @@ export function MetaPagesHub() {
             )}
           </ChartCard>
         </div>
+      </Section>
+
+      <Section title="4) Organic Post Clicks (snapshot temporal)">
+        <ChartCard title="Clicks y usuarios enganchados por día" icon={<BarChart3 size={16} className="text-red-600" />}>
+          {postClicksTrend.length === 0 ? (
+            <div className="rounded-xl border border-dashed border-gray-200 bg-gray-50 px-4 py-6 text-sm text-gray-500">Sin snapshots de post insights todavía. Ejecutá sincronización para capturarlos.</div>
+          ) : (
+            <ResponsiveContainer width="100%" height={320}>
+              <LineChart data={postClicksTrend}>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                <XAxis dataKey="date" tick={{ fontSize: 12 }} />
+                <YAxis tick={{ fontSize: 12 }} />
+                <Tooltip />
+                <Line type="monotone" dataKey="clicks" stroke="#dc2626" strokeWidth={2.5} dot={false} isAnimationActive={false} />
+                <Line type="monotone" dataKey="engaged" stroke="#f59e0b" strokeWidth={2.5} dot={false} isAnimationActive={false} />
+              </LineChart>
+            </ResponsiveContainer>
+          )}
+        </ChartCard>
       </Section>
 
       {errors.length > 0 ? (

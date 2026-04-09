@@ -42,13 +42,21 @@ export function useMetaPagesData(filters: MetaPagesFilters) {
         .select('page_business_id,page_name,metric,date_end,value')
         .order('date_end', { ascending: true });
 
+      let postInsightsSnapshotsQuery = supabase
+        .from('meta_page_post_insights_snapshots')
+        .select('post_business_id,page_business_id,page_name,metric,period,snapshot_date,value')
+        .order('snapshot_date', { ascending: true });
+
       if (filters.since) insightsQuery = insightsQuery.gte('date_end', filters.since);
       if (filters.until) insightsQuery = insightsQuery.lte('date_end', filters.until);
+      if (filters.since) postInsightsSnapshotsQuery = postInsightsSnapshotsQuery.gte('snapshot_date', filters.since);
+      if (filters.until) postInsightsSnapshotsQuery = postInsightsSnapshotsQuery.lte('snapshot_date', filters.until);
 
-      const [pagesResult, postsResult, insightsResult] = await Promise.all([
+      const [pagesResult, postsResult, insightsResult, postInsightsSnapshotsResult] = await Promise.all([
         pagesQuery,
         postsQuery,
         insightsQuery,
+        postInsightsSnapshotsQuery,
       ]);
 
       if (pagesResult.error) {
@@ -61,6 +69,10 @@ export function useMetaPagesData(filters: MetaPagesFilters) {
 
       if (insightsResult.error) {
         throw new Error(`No se pudo cargar insights en SQL: ${insightsResult.error.message}`);
+      }
+
+      if (postInsightsSnapshotsResult.error) {
+        throw new Error(`No se pudo cargar snapshots de post insights en SQL: ${postInsightsSnapshotsResult.error.message}`);
       }
 
       return {
@@ -96,6 +108,15 @@ export function useMetaPagesData(filters: MetaPagesFilters) {
           page_name: item.page_name,
           metric: item.metric,
           end_time: item.date_end ? `${item.date_end}T00:00:00.000Z` : null,
+          value: Number(item.value ?? 0),
+        })),
+        post_insights_snapshots: (postInsightsSnapshotsResult.data ?? []).map((item) => ({
+          post_id: item.post_business_id,
+          page_id: item.page_business_id,
+          page_name: item.page_name,
+          metric: item.metric,
+          period: item.period,
+          snapshot_date: item.snapshot_date,
           value: Number(item.value ?? 0),
         })),
         errors: [],

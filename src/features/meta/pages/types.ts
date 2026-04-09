@@ -30,10 +30,20 @@ export type MetaPageInsightRow = {
   value: number;
 };
 
+export type MetaPagePostInsightSnapshotRow = {
+  post_id: string;
+  page_id: string;
+  page_name: string | null;
+  metric: string;
+  period: string;
+  snapshot_date: string;
+  value: number;
+};
+
 export type MetaPagesErrorRow = {
   page_id: string;
   page_name: string | null;
-  stage: 'posts' | 'insights';
+  stage: 'posts' | 'insights' | 'post_insights';
   message: string;
 };
 
@@ -46,6 +56,7 @@ export type MetaPagesPayload = {
   pages: MetaPageRow[];
   posts: MetaPagePostRow[];
   insights: MetaPageInsightRow[];
+  post_insights_snapshots: MetaPagePostInsightSnapshotRow[];
   errors: MetaPagesErrorRow[];
   permissions_hint: string[];
 };

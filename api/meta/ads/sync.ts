@@ -206,6 +206,17 @@ type MetaPageInsightDailyRow = {
   raw_payload: JsonRecord;
 };
 
+type MetaPagePostInsightSnapshotRow = {
+  post_business_id: string;
+  page_business_id: string;
+  page_name: string | null;
+  metric: string;
+  period: string;
+  snapshot_date: string;
+  value: number;
+  raw_payload: JsonRecord;
+};
+
 function asSingleParam(value: unknown): string | undefined {
   if (Array.isArray(value)) {
     const first = value[0];
@@ -453,6 +464,68 @@ function sanitizePagePayload(payload: JsonRecord) {
   const clone: JsonRecord = { ...payload };
   delete clone.access_token;
   return clone;
+}
+
+async function fetchPostInsightMetrics(
+  pageToken: string,
+  postId: string,
+): Promise<{
+  rows: Array<{ metric: string; period: string; value: number; raw_payload: JsonRecord }>;
+  attempted_batches: number;
+  last_error: string | null;
+}> {
+  const metricBatches = [
+    'post_clicks,post_engaged_users,post_impressions',
+    'post_clicks,post_engaged_users',
+    'post_clicks',
+    'post_engaged_users',
+  ];
+
+  let lastError: string | null = null;
+  for (const batch of metricBatches) {
+    try {
+      const payload = await fetchMetaJson(pageToken, `${postId}/insights`, {
+        metric: batch,
+      });
+
+      const items = asObjectArray(payload.data);
+      const normalized = items
+        .map((item) => {
+          const metric = toNullableText(item.name);
+          const period = toNullableText(item.period) ?? 'lifetime';
+          const values = asObjectArray(item.values);
+          const latestValue = values[values.length - 1];
+          const value = toNumberOrZero(ensureObject(latestValue).value);
+
+          if (!metric) return null;
+
+          return {
+            metric,
+            period,
+            value,
+            raw_payload: item,
+          };
+        })
+        .filter((item): item is { metric: string; period: string; value: number; raw_payload: JsonRecord } => item !== null);
+
+      if (normalized.length > 0) {
+        return {
+          rows: normalized,
+          attempted_batches: metricBatches.indexOf(batch) + 1,
+          last_error: null,
+        };
+      }
+    } catch (error) {
+      lastError = error instanceof Error ? error.message : String(error);
+      // Seguimos intentando con el siguiente batch de métricas.
+    }
+  }
+
+  return {
+    rows: [],
+    attempted_batches: metricBatches.length,
+    last_error: lastError,
+  };
 }
 
 function requireMetaAccessToken() {
@@ -1088,16 +1161,18 @@ export default async function metaAdsSyncHandler(req: VercelRequest, res: Vercel
       const postsRows: MetaPagePostRow[] = [];
 
       const insightsRows: MetaPageInsightDailyRow[] = [];
+      const postInsightSnapshotRows: MetaPagePostInsightSnapshotRow[] = [];
 
       const pageErrors: Array<{
         page_id: string;
         page_name: string | null;
-        stage: 'posts' | 'insights';
+        stage: 'posts' | 'insights' | 'post_insights';
         message: string;
       }> = [];
 
       const postsSummary: SyncResourceSummary = { pages_fetched: 0, pulled: 0, upserted: 0, has_more: false };
       const insightsSummary: SyncResourceSummary = { pages_fetched: 0, pulled: 0, upserted: 0, has_more: false };
+      const postInsightsSummary: SyncResourceSummary = { pages_fetched: 0, pulled: 0, upserted: 0, has_more: false };
 
       let pagesLoopStoppedEarly = false;
       for (const page of pages) {
@@ -1164,6 +1239,40 @@ export default async function metaAdsSyncHandler(req: VercelRequest, res: Vercel
               shares: Math.trunc(toNumberOrZero(shares.count)),
               raw_payload: post,
             });
+          }
+
+          const snapshotDate = new Date().toISOString().slice(0, 10);
+          for (const post of postsRows.filter((item) => item.page_business_id === pageId)) {
+            if (!hasRuntimeBudget(startedAt, maxRuntimeMs)) {
+              postInsightsSummary.has_more = true;
+              break;
+            }
+
+            const metricsResult = await fetchPostInsightMetrics(pageToken, post.business_id);
+            postInsightsSummary.pages_fetched += 1;
+            postInsightsSummary.pulled += metricsResult.rows.length;
+
+            if (metricsResult.rows.length === 0 && metricsResult.last_error) {
+              pageErrors.push({
+                page_id: pageId,
+                page_name: page.name,
+                stage: 'post_insights',
+                message: `No se pudieron leer métricas de post ${post.business_id} tras ${metricsResult.attempted_batches} intento(s): ${metricsResult.last_error}`,
+              });
+            }
+
+            for (const metricRow of metricsResult.rows) {
+              postInsightSnapshotRows.push({
+                post_business_id: post.business_id,
+                page_business_id: pageId,
+                page_name: page.name,
+                metric: metricRow.metric,
+                period: metricRow.period,
+                snapshot_date: snapshotDate,
+                value: metricRow.value,
+                raw_payload: metricRow.raw_payload,
+              });
+            }
           }
         } catch (error) {
           pageErrors.push({
@@ -1236,9 +1345,15 @@ export default async function metaAdsSyncHandler(req: VercelRequest, res: Vercel
         insightsRows as JsonRecord[],
         'page_business_id,metric,date_end',
       );
+      const upsertedPostInsights = await upsertRows(
+        'meta_page_post_insights_snapshots',
+        postInsightSnapshotRows as JsonRecord[],
+        'post_business_id,metric,snapshot_date',
+      );
 
       postsSummary.upserted = upsertedPosts;
       insightsSummary.upserted = upsertedInsights;
+      postInsightsSummary.upserted = upsertedPostInsights;
 
       const resourcesPayload: JsonRecord = {
         pages: {
@@ -1249,11 +1364,12 @@ export default async function metaAdsSyncHandler(req: VercelRequest, res: Vercel
         },
         posts: postsSummary,
         insights: insightsSummary,
+        post_insights: postInsightsSummary,
       };
 
       const totals = {
-        pulled: pages.length + postsRows.length + insightsRows.length,
-        upserted: upsertedPages + upsertedPosts + upsertedInsights,
+        pulled: pages.length + postsRows.length + insightsRows.length + postInsightSnapshotRows.length,
+        upserted: upsertedPages + upsertedPosts + upsertedInsights + upsertedPostInsights,
       };
 
       await finalizeSyncRun(syncRunId, {
@@ -1302,6 +1418,15 @@ export default async function metaAdsSyncHandler(req: VercelRequest, res: Vercel
           page_name: item.page_name,
           metric: item.metric,
           end_time: `${item.date_end}T00:00:00.000Z`,
+          value: item.value,
+        })),
+        post_insights_snapshots: postInsightSnapshotRows.map((item) => ({
+          post_id: item.post_business_id,
+          page_id: item.page_business_id,
+          page_name: item.page_name,
+          metric: item.metric,
+          period: item.period,
+          snapshot_date: item.snapshot_date,
           value: item.value,
         })),
         errors: pageErrors,
