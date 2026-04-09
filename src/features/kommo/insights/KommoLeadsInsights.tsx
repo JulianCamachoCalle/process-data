@@ -23,6 +23,8 @@ import {
   XAxis,
   YAxis,
 } from 'recharts';
+import { DateRangePicker } from '../../../components/DateRangePicker';
+import { isDateRangeValid } from '../../../lib/dateRange';
 
 type PipelineInsight = {
   pipeline_id: number | null;
@@ -127,6 +129,21 @@ const CHART_TOOLTIP_STYLE = {
   border: '1px solid #e2e8f0',
   boxShadow: '0 20px 36px -28px rgba(15, 23, 42, 0.35)',
   backgroundColor: '#ffffff',
+};
+
+type ExportChartId =
+  | 'pipeline-comparison'
+  | 'created-pipelines'
+  | 'incoming-hours'
+  | 'status-distribution'
+  | 'won-sellers';
+
+type ExportChartSnapshot = {
+  id: ExportChartId;
+  title: string;
+  description: string;
+  imageDataUrl: string | null;
+  fallbackHtml: string;
 };
 
 function formatNumber(value: number) {
@@ -310,12 +327,12 @@ function buildExportDocument({
   data,
   generatedAt,
   appliedRangeLabel,
-  statusesByNameForPie,
+  chartSnapshots,
 }: {
   data: LeadsInsightsPayload;
   generatedAt: string;
   appliedRangeLabel: string;
-  statusesByNameForPie: StatusByNameInsight[];
+  chartSnapshots: ExportChartSnapshot[];
 }) {
   const summaryCards = [
     ['Leads creados', formatNumber(data.created.summary.total_leads)],
@@ -330,21 +347,19 @@ function buildExportDocument({
     </article>
   `).join('');
 
-  const pipelinesSvg = renderHorizontalBarChartSvg(
-    data.created.pipeline_volume.slice(0, 8).map((pipeline, index) => ({
-      label: pipeline.pipeline_name,
-      value: pipeline.total_leads,
-      color: COLORS[index % COLORS.length],
-    })),
-  );
+  const chartsGrid = chartSnapshots.map((snapshot) => {
+    const visual = snapshot.imageDataUrl
+      ? `<img src="${snapshot.imageDataUrl}" alt="${escapeHtml(snapshot.title)}" class="chart-image" />`
+      : snapshot.fallbackHtml;
 
-  const wonSellersSvg = renderHorizontalBarChartSvg(
-    data.won.sellers.slice(0, 8).map((seller, index) => ({
-      label: seller.seller_name,
-      value: seller.total_won,
-      color: COLORS[index % COLORS.length],
-    })),
-  );
+    return `
+      <article class="chart-card">
+        <h3>${escapeHtml(snapshot.title)}</h3>
+        <p>${escapeHtml(snapshot.description)}</p>
+        <div class="chart-visual">${visual}</div>
+      </article>
+    `;
+  }).join('');
 
   return `
     <!doctype html>
@@ -356,44 +371,71 @@ function buildExportDocument({
         <style>
           :root { color-scheme: light; }
           * { box-sizing: border-box; }
-          body { margin: 0; font-family: Inter, Arial, sans-serif; color: #0f172a; background: #f8fafc; }
-          .page { max-width: 1120px; margin: 0 auto; padding: 32px 28px 40px; }
-          .hero, .panel, .chart-panel { background: #ffffff; border: 1px solid #e2e8f0; border-radius: 20px; }
-          .hero, .panel { padding: 24px; }
-          .hero h1 { margin: 0; font-size: 28px; }
-          .hero p { margin: 8px 0 0; color: #475569; }
-          .section-title { margin: 0 0 16px; font-size: 16px; font-weight: 700; }
-          .kpi-grid, .panel-grid, .chart-grid { display: grid; gap: 16px; }
-          .kpi-grid { grid-template-columns: repeat(5, minmax(0, 1fr)); margin-top: 16px; }
-          .panel-grid, .chart-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); margin-top: 16px; }
-          .kpi-card { border: 1px solid #e2e8f0; border-radius: 16px; padding: 18px; background: #fff; }
-          .kpi-label { margin: 0; font-size: 12px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: #64748b; }
-          .kpi-value { margin: 8px 0 0; font-size: 24px; font-weight: 800; }
+          body { margin: 0; font-family: Inter, Arial, sans-serif; color: #0f172a; background: #ffffff; }
+          .page { width: 794px; margin: 0 auto; padding: 24px; display: grid; gap: 16px; }
+          .cover { background: linear-gradient(145deg, #0f172a 0%, #1e293b 60%, #334155 100%); color: #e2e8f0; border-radius: 20px; padding: 24px; }
+          .cover h1 { margin: 0; font-size: 28px; letter-spacing: 0.02em; }
+          .cover p { margin: 8px 0 0; font-size: 13px; color: #cbd5e1; }
+          .cover-kpis { margin-top: 16px; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; }
+          .cover-kpi { background: rgba(255, 255, 255, 0.08); border: 1px solid rgba(148, 163, 184, 0.35); border-radius: 12px; padding: 10px; }
+          .cover-kpi-label { margin: 0; font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; color: #cbd5e1; }
+          .cover-kpi-value { margin: 6px 0 0; font-size: 18px; font-weight: 800; color: #ffffff; }
+          .block { background: #ffffff; border: 1px solid #e2e8f0; border-radius: 18px; padding: 18px; }
+          .block h2 { margin: 0; font-size: 16px; }
+          .block-subtitle { margin: 6px 0 0; color: #64748b; font-size: 12px; }
+          .panel-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 14px; }
+          .panel { border: 1px solid #e2e8f0; border-radius: 12px; padding: 12px; background: #f8fafc; }
+          .panel h3 { margin: 0 0 8px; font-size: 13px; }
           .list { margin: 0; padding-left: 18px; }
-          .list li { margin: 0 0 10px; }
-          .chart-panel { padding: 20px; break-inside: avoid; }
+          .list li { margin: 0 0 8px; font-size: 12px; color: #334155; }
+          .charts-grid { display: grid; grid-template-columns: 1fr; gap: 12px; margin-top: 14px; }
+          .chart-card { border: 1px solid #e2e8f0; border-radius: 14px; padding: 12px; background: #ffffff; }
+          .chart-card h3 { margin: 0; font-size: 13px; }
+          .chart-card p { margin: 6px 0 10px; color: #64748b; font-size: 12px; }
+          .chart-visual { border: 1px solid #e2e8f0; border-radius: 10px; padding: 8px; background: #fff; }
+          .chart-image { width: 100%; height: auto; display: block; border-radius: 8px; }
+          .kpi-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; margin-top: 14px; }
+          .kpi-card { border: 1px solid #e2e8f0; border-radius: 12px; padding: 12px; background: #fff; }
+          .kpi-label { margin: 0; font-size: 10px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: #64748b; }
+          .kpi-value { margin: 8px 0 0; font-size: 20px; font-weight: 800; }
           .export-chart-svg { width: 100%; height: auto; display: block; }
-          .export-empty { margin: 0; color: #64748b; }
-          table { width: 100%; border-collapse: collapse; font-size: 13px; }
-          th, td { border: 1px solid #e2e8f0; padding: 10px 12px; text-align: left; vertical-align: top; }
-          th { background: #f8fafc; color: #334155; }
-          .stack { display: grid; gap: 16px; margin-top: 16px; }
-          @page { size: A4 landscape; margin: 12mm; }
+          .export-empty { margin: 0; color: #64748b; font-size: 12px; }
+          table { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 12px; }
+          th, td { border: 1px solid #e2e8f0; padding: 8px 10px; text-align: left; vertical-align: top; }
+          th { background: #f8fafc; color: #334155; font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; }
+          @page { size: A4 portrait; margin: 10mm; }
         </style>
       </head>
       <body>
         <main class="page">
-          <section class="hero">
-            <h1>Leads Insights — Reporte PDF</h1>
+          <section class="cover" data-pdf-block="true">
+            <h1>Leads Insights — Reporte Premium</h1>
             <p>Rango aplicado: ${escapeHtml(appliedRangeLabel)}</p>
             <p>Generado: ${escapeHtml(generatedAt)}</p>
             <p>Zona horaria de entrada: ${escapeHtml(data.timezone ?? 'America/Lima')}</p>
-            <div class="kpi-grid">${summaryCards}</div>
+            <div class="cover-kpis">
+              ${[
+                ['Leads creados', formatNumber(data.created.summary.total_leads)],
+                ['Incoming', formatNumber(data.created.summary.total_incoming)],
+                ['Open', formatNumber(data.created.summary.total_open)],
+                ['Ganados', formatNumber(data.won.summary.total_won)],
+                ['Ticket prom.', formatCurrency(data.created.summary.avg_price)],
+              ].map(([label, value]) => `
+                <article class="cover-kpi">
+                  <p class="cover-kpi-label">${escapeHtml(label)}</p>
+                  <p class="cover-kpi-value">${escapeHtml(value)}</p>
+                </article>
+              `).join('')}
+            </div>
           </section>
 
-          <section class="panel-grid">
+          <section class="block" data-pdf-block="true">
+            <h2>Resumen ejecutivo</h2>
+            <p class="block-subtitle">KPIs y highlights de Leads Insights para el rango seleccionado.</p>
+            <div class="kpi-grid">${summaryCards}</div>
+            <div class="panel-grid">
             <section class="panel">
-              <h2 class="section-title">Semántica del tablero</h2>
+              <h3>Semántica del tablero</h3>
               <ul class="list">
                 <li><strong>Actividad creada en el periodo</strong>: usa <code>kommo_leads.created_at</code> y <code>kommo_unsorted_leads.created_at</code>.</li>
                 <li><strong>Estado actual del cohort creado</strong>: open, closed y lost describen cómo está hoy ese grupo de leads.</li>
@@ -402,7 +444,7 @@ function buildExportDocument({
               </ul>
             </section>
             <section class="panel">
-              <h2 class="section-title">Highlights</h2>
+              <h3>Highlights</h3>
               ${renderTable(
                 ['Métrica', 'Valor'],
                 [
@@ -414,33 +456,17 @@ function buildExportDocument({
                 ],
               )}
             </section>
+            </div>
           </section>
 
-          <section class="chart-grid">
-            <section class="chart-panel">
-              <h2 class="section-title">Leads creados por pipeline actual</h2>
-              ${pipelinesSvg}
-            </section>
-            <section class="chart-panel">
-              <h2 class="section-title">Ganados históricos por vendedor snapshot</h2>
-              ${wonSellersSvg}
-            </section>
-            <section class="chart-panel">
-              <h2 class="section-title">Horas con más leads entrantes</h2>
-              ${renderLineChartSvg(data.created.hourly_incoming)}
-            </section>
-            <section class="chart-panel">
-              <h2 class="section-title">Leads creados según estado actual</h2>
-              ${renderTable(
-                ['Estado', 'Leads'],
-                statusesByNameForPie.map((status) => [status.status_name, formatNumber(status.total_leads)]),
-              )}
-            </section>
+          <section class="block" data-pdf-block="true">
+            <h2>Gráficos de Leads Insights</h2>
+            <p class="block-subtitle">Captura directa de visualizaciones de Leads Insights al momento de exportar.</p>
+            <div class="charts-grid">${chartsGrid}</div>
           </section>
 
-          <section class="stack">
-            <section class="panel">
-              <h2 class="section-title">Cohort creado por pipeline + estado actual</h2>
+          <section class="block" data-pdf-block="true">
+              <h2>Cohort creado por pipeline + estado actual</h2>
               ${renderTable(
                 ['Pipeline', 'Creados', 'Abiertos', 'Cerrados', 'Perdidos', 'Ticket promedio'],
                 data.created.pipeline_current_state.map((pipeline) => [
@@ -452,9 +478,9 @@ function buildExportDocument({
                   formatCurrency(pipeline.avg_price),
                 ]),
               )}
-            </section>
-            <section class="panel">
-              <h2 class="section-title">Ganados históricos</h2>
+          </section>
+          <section class="block" data-pdf-block="true">
+              <h2>Ganados históricos</h2>
               ${renderTable(
                 ['Entidad', 'Ganados'],
                 [
@@ -462,7 +488,6 @@ function buildExportDocument({
                   ...data.won.pipelines.slice(0, 8).map((pipeline) => [`Pipeline: ${pipeline.pipeline_name}`, formatNumber(pipeline.total_won)]),
                 ],
               )}
-            </section>
           </section>
         </main>
       </body>
@@ -514,12 +539,55 @@ function buildEmptyPayload(startDate: string | null, endDate: string | null, err
   };
 }
 
+function buildPdfFileName(startDate: string | null, endDate: string | null) {
+  const startSegment = startDate ?? 'sin-inicio';
+  const endSegment = endDate ?? 'sin-fin';
+  const generatedSegment = new Date().toISOString().slice(0, 10);
+  return `leads-insights-premium_${startSegment}_a_${endSegment}_${generatedSegment}.pdf`;
+}
+
+function nextFrame() {
+  return new Promise<void>((resolve) => {
+    window.requestAnimationFrame(() => resolve());
+  });
+}
+
+async function waitForImages(container: HTMLElement) {
+  const images = Array.from(container.querySelectorAll('img'));
+
+  await Promise.all(images.map(async (image) => {
+    if (image.complete) return;
+
+    await new Promise<void>((resolve) => {
+      image.addEventListener('load', () => resolve(), { once: true });
+      image.addEventListener('error', () => resolve(), { once: true });
+    });
+  }));
+}
+
+function captureSlice(canvas: HTMLCanvasElement, startY: number, sliceHeight: number) {
+  const pageCanvas = document.createElement('canvas');
+  pageCanvas.width = canvas.width;
+  pageCanvas.height = sliceHeight;
+
+  const context = pageCanvas.getContext('2d');
+  if (!context) {
+    throw new Error('No se pudo preparar un recorte de página para el PDF.');
+  }
+
+  context.drawImage(canvas, 0, startY, canvas.width, sliceHeight, 0, 0, canvas.width, sliceHeight);
+  return pageCanvas;
+}
+
 export function KommoLeadsInsights() {
   const [draftStartDate, setDraftStartDate] = useState<string | null>(null);
   const [draftEndDate, setDraftEndDate] = useState<string | null>(null);
   const [appliedStartDate, setAppliedStartDate] = useState<string | null>(null);
   const [appliedEndDate, setAppliedEndDate] = useState<string | null>(null);
   const [isExportingPdf, setIsExportingPdf] = useState(false);
+  const [pdfExportError, setPdfExportError] = useState<string | null>(null);
+  const [pdfExportSuccess, setPdfExportSuccess] = useState<string | null>(null);
+  const hasValidDraftDateRange = isDateRangeValid(draftStartDate, draftEndDate);
 
   const insightsQuery = useQuery({
     queryKey: ['kommo-leads-insights', appliedStartDate, appliedEndDate],
@@ -641,42 +709,263 @@ export function KommoLeadsInsights() {
       timeStyle: 'short',
     }).format(new Date());
 
+    setPdfExportError(null);
+    setPdfExportSuccess(null);
     setIsExportingPdf(true);
 
-    try {
-      const exportWindow = window.open('', '_blank', 'noopener,noreferrer');
-      if (!exportWindow) {
-        throw new Error('El navegador bloqueó la ventana de exportación.');
-      }
+    const exportRoot = document.createElement('div');
+    exportRoot.style.position = 'fixed';
+    exportRoot.style.left = '-10000px';
+    exportRoot.style.top = '0';
+    exportRoot.style.zIndex = '-1';
+    exportRoot.style.pointerEvents = 'none';
+    exportRoot.style.width = '794px';
+    exportRoot.style.background = '#ffffff';
+    exportRoot.setAttribute('aria-hidden', 'true');
 
-      exportWindow.document.open();
-      exportWindow.document.write(buildExportDocument({
+    try {
+      const [{ default: html2canvas }, { jsPDF }] = await Promise.all([
+        import('html2canvas'),
+        import('jspdf'),
+      ]);
+
+      const chartDefinitions: Omit<ExportChartSnapshot, 'imageDataUrl'>[] = [
+        {
+          id: 'pipeline-comparison',
+          title: 'Comparativa directa de pipelines',
+          description: 'Comparación visual de totales, entrantes, ganados, perdidos y cerrados.',
+          fallbackHtml: renderTable(
+            ['Pipeline', 'Totales', 'Perdidos', 'Cerrados', 'Ganados'],
+            currentData.created.pipeline_current_state
+              .slice(0, 5)
+              .map((pipeline) => [
+                pipeline.pipeline_name,
+                formatNumber(pipeline.total_leads),
+                formatNumber(pipeline.lost_leads),
+                formatNumber(pipeline.closed_leads),
+                formatNumber(currentData.won.pipelines.find((won) => normalizePipelineKey(won.pipeline_name) === normalizePipelineKey(pipeline.pipeline_name))?.total_won ?? 0),
+              ]),
+          ),
+        },
+        {
+          id: 'created-pipelines',
+          title: 'Leads creados por pipeline',
+          description: 'Top pipelines del cohort creado en el rango aplicado.',
+          fallbackHtml: renderHorizontalBarChartSvg(
+            createdPipelineChartData.map((pipeline, index) => ({
+              label: pipeline.fullLabel,
+              value: pipeline.total_leads,
+              color: COLORS[index % COLORS.length],
+            })),
+          ),
+        },
+        {
+          id: 'incoming-hours',
+          title: 'Horas con más leads entrantes',
+          description: `Promedio diario de incoming por hora (${incomingDaysDivider} día(s)).`,
+          fallbackHtml: renderLineChartSvg(currentData.created.hourly_incoming),
+        },
+        {
+          id: 'status-distribution',
+          title: 'Leads creados según estado actual',
+          description: 'Distribución por estado actual dentro del cohort creado.',
+          fallbackHtml: renderTable(
+            ['Estado', 'Leads'],
+            statusesByNameForPie.map((status) => [status.status_name, formatNumber(status.total_leads)]),
+          ),
+        },
+        {
+          id: 'won-sellers',
+          title: 'Ganados históricos por personal',
+          description: 'Ranking descendente de ganados por responsable.',
+          fallbackHtml: renderHorizontalBarChartSvg(
+            wonSellerChartData.map((seller, index) => ({
+              label: seller.fullLabel,
+              value: seller.total_won,
+              color: COLORS[index % COLORS.length],
+            })),
+          ),
+        },
+      ];
+
+      const chartSnapshots = await Promise.all(chartDefinitions.map(async (definition) => {
+        const chartNode = document.querySelector<HTMLElement>(`[data-export-chart-id="${definition.id}"]`);
+        if (!chartNode) {
+          return {
+            ...definition,
+            imageDataUrl: null,
+          };
+        }
+
+        const chartCanvas = await html2canvas(chartNode, {
+          backgroundColor: '#ffffff',
+          scale: Math.min((window.devicePixelRatio || 1) * 1.2, 2),
+          useCORS: true,
+          logging: false,
+        });
+
+        const imageDataUrl = chartCanvas.width > 0 && chartCanvas.height > 0
+          ? chartCanvas.toDataURL('image/png')
+          : null;
+
+        return {
+          ...definition,
+          imageDataUrl,
+        };
+      }));
+
+      const exportHtml = buildExportDocument({
         data: currentData,
         generatedAt,
         appliedRangeLabel: `${currentData.filters.start_date ?? 'sin inicio'} — ${currentData.filters.end_date ?? 'sin fin'}`,
-        statusesByNameForPie,
-      }));
-      exportWindow.document.close();
+        chartSnapshots,
+      });
 
-      const finalizePrint = () => {
-        exportWindow.focus();
-        window.setTimeout(() => {
-          exportWindow.print();
-          setIsExportingPdf(false);
-        }, 150);
-      };
+      const parsed = new DOMParser().parseFromString(exportHtml, 'text/html');
+      const inlineStyle = parsed.querySelector('style')?.textContent;
+      const bodyMarkup = parsed.body.innerHTML;
 
-      if (exportWindow.document.readyState === 'complete') {
-        finalizePrint();
-      } else {
-        exportWindow.addEventListener('load', finalizePrint, { once: true });
+      if (!bodyMarkup.trim()) {
+        throw new Error('No se pudo construir el contenido del reporte para exportación.');
       }
+
+      exportRoot.innerHTML = `${inlineStyle ? `<style>${inlineStyle}</style>` : ''}${bodyMarkup}`;
+      document.body.appendChild(exportRoot);
+
+      await nextFrame();
+      if ('fonts' in document) {
+        await document.fonts.ready;
+      }
+      await waitForImages(exportRoot);
+
+      const blocks = Array.from(exportRoot.querySelectorAll<HTMLElement>('[data-pdf-block="true"]'));
+      if (blocks.length === 0) {
+        throw new Error('No se encontraron bloques para renderizar el PDF.');
+      }
+
+      const pdf = new jsPDF({
+        orientation: 'portrait',
+        unit: 'mm',
+        format: 'a4',
+        compress: true,
+      });
+
+      pdf.setProperties({
+        title: 'Leads Insights Premium Report',
+        subject: 'Leads Insights',
+        author: 'process-data',
+        creator: 'Leads Insights Exporter',
+        keywords: 'leads, insights, kommo, premium, pdf',
+      });
+
+      const marginMm = 10;
+      const gapMm = 4;
+      const pageWidthMm = pdf.internal.pageSize.getWidth();
+      const pageHeightMm = pdf.internal.pageSize.getHeight();
+      const contentWidthMm = pageWidthMm - marginMm * 2;
+      const contentHeightMm = pageHeightMm - marginMm * 2;
+
+      let cursorYmm = marginMm;
+      let hasContent = false;
+
+      for (let blockIndex = 0; blockIndex < blocks.length; blockIndex += 1) {
+        const block = blocks[blockIndex];
+        const blockCanvas = await html2canvas(block, {
+          backgroundColor: '#ffffff',
+          scale: Math.min(window.devicePixelRatio || 1, 2),
+          useCORS: true,
+          logging: false,
+        });
+
+        if (blockCanvas.width === 0 || blockCanvas.height === 0) {
+          continue;
+        }
+
+        const pxPerMm = blockCanvas.width / contentWidthMm;
+        const blockHeightMm = blockCanvas.height / pxPerMm;
+
+        if (blockHeightMm <= contentHeightMm) {
+          if (cursorYmm + blockHeightMm > pageHeightMm - marginMm) {
+            pdf.addPage();
+            cursorYmm = marginMm;
+          }
+
+          pdf.addImage(
+            blockCanvas.toDataURL('image/png'),
+            'PNG',
+            marginMm,
+            cursorYmm,
+            contentWidthMm,
+            blockHeightMm,
+            undefined,
+            'FAST',
+          );
+
+          cursorYmm += blockHeightMm + gapMm;
+          hasContent = true;
+          continue;
+        }
+
+        if (cursorYmm > marginMm + 0.1) {
+          pdf.addPage();
+        }
+
+        const maxSliceHeightPx = Math.max(1, Math.floor(contentHeightMm * pxPerMm));
+        let startY = 0;
+        let lastSliceHeightMm = 0;
+
+        while (startY < blockCanvas.height) {
+          if (startY > 0) {
+            pdf.addPage();
+          }
+
+          const sliceHeightPx = Math.min(maxSliceHeightPx, blockCanvas.height - startY);
+          const pageCanvas = captureSlice(blockCanvas, startY, sliceHeightPx);
+          const sliceHeightMm = sliceHeightPx / pxPerMm;
+
+          pdf.addImage(
+            pageCanvas.toDataURL('image/png'),
+            'PNG',
+            marginMm,
+            marginMm,
+            contentWidthMm,
+            sliceHeightMm,
+            undefined,
+            'FAST',
+          );
+
+          startY += sliceHeightPx;
+          lastSliceHeightMm = sliceHeightMm;
+          hasContent = true;
+        }
+
+        cursorYmm = marginMm + lastSliceHeightMm + gapMm;
+      }
+
+      if (!hasContent) {
+        throw new Error('El reporte generado no contiene contenido válido para PDF.');
+      }
+
+      const fileName = buildPdfFileName(currentData.filters.start_date, currentData.filters.end_date);
+      pdf.save(fileName);
+      setPdfExportSuccess(`PDF descargado: ${fileName}`);
     } catch (error) {
       console.error('No se pudo exportar Leads Insights a PDF', error);
-      window.alert('No se pudo exportar el PDF. Probá nuevamente.');
+      setPdfExportError('No se pudo exportar el PDF. Probá nuevamente.');
+    } finally {
+      if (exportRoot.parentNode) {
+        exportRoot.parentNode.removeChild(exportRoot);
+      }
       setIsExportingPdf(false);
     }
-  }, [insightsQuery.data, isExportingPdf, statusesByNameForPie]);
+  }, [
+    createdPipelineChartData,
+    incomingDaysDivider,
+    insightsQuery.data,
+    isExportingPdf,
+    statusesByNameForPie,
+    wonSellerChartData,
+  ]);
 
   if (insightsQuery.isLoading) {
     return (
@@ -726,6 +1015,12 @@ export function KommoLeadsInsights() {
             Ver Explorer
           </Link>
         </div>
+        <div className="w-full print:hidden">
+          {pdfExportError ? <p className="text-xs font-semibold uppercase tracking-[0.12em] text-red-600">{pdfExportError}</p> : null}
+          {!pdfExportError && pdfExportSuccess ? (
+            <p className="text-xs font-semibold uppercase tracking-[0.12em] text-emerald-600">{pdfExportSuccess}</p>
+          ) : null}
+        </div>
       </header>
 
       <section className="space-y-5 rounded-[28px] border border-gray-200 bg-white p-5 shadow-[0_20px_36px_-30px_rgba(15,23,42,0.8)]">
@@ -746,25 +1041,26 @@ export function KommoLeadsInsights() {
           <QuickRangeButton label="Todo" onClick={() => applyQuickRange('all')} />
         </div>
 
-        <div className="grid grid-cols-1 gap-3 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] xl:items-end">
-          <label className="rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3 text-xs font-semibold uppercase tracking-wide text-gray-600">
-            <span>Desde</span>
-            <input
-              type="date"
-              className="mt-2 w-full rounded-xl border border-gray-200 bg-white px-3 py-2.5 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-red-200"
-              value={draftStartDate ?? ''}
-              onChange={(event) => setDraftStartDate(event.target.value || null)}
-            />
-          </label>
-          <label className="rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3 text-xs font-semibold uppercase tracking-wide text-gray-600">
-            <span>Hasta</span>
-            <input
-              type="date"
-              className="mt-2 w-full rounded-xl border border-gray-200 bg-white px-3 py-2.5 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-red-200"
-              value={draftEndDate ?? ''}
-              onChange={(event) => setDraftEndDate(event.target.value || null)}
-            />
-          </label>
+        <div className="grid grid-cols-1 gap-3 xl:grid-cols-[minmax(0,2fr)_auto] xl:items-end">
+          <DateRangePicker
+            startDate={draftStartDate}
+            endDate={draftEndDate}
+            onStartDateChange={(value) => setDraftStartDate(value || null)}
+            onEndDateChange={(value) => setDraftEndDate(value || null)}
+            onPresetApply={({ startDate, endDate }) => {
+              setDraftStartDate(startDate);
+              setDraftEndDate(endDate);
+              setAppliedStartDate(startDate);
+              setAppliedEndDate(endDate);
+            }}
+            startLabel="Desde"
+            endLabel="Hasta"
+            layoutClassName="grid grid-cols-1 gap-3 sm:grid-cols-2"
+            fieldClassName="rounded-2xl border border-gray-200 bg-white px-4 py-3 text-xs font-semibold uppercase tracking-wide text-gray-600 shadow-none"
+            labelClassName="text-xs font-semibold uppercase tracking-wide text-gray-600"
+            inputWrapperClassName="mt-2 rounded-xl border border-gray-200 bg-white px-0 py-0"
+            inputClassName="px-3 py-2.5 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-red-200"
+          />
 
           <div className="flex items-end justify-start gap-2 xl:justify-end">
             <button
@@ -777,7 +1073,8 @@ export function KommoLeadsInsights() {
             <button
               type="button"
               onClick={applyFilters}
-              className="inline-flex items-center rounded-2xl bg-red-600 px-4 py-2.5 text-xs font-semibold uppercase tracking-[0.16em] text-white shadow-[0_18px_32px_-18px_rgba(220,38,38,0.9)] transition hover:bg-red-700"
+              disabled={!hasValidDraftDateRange}
+              className="inline-flex items-center rounded-2xl bg-red-600 px-4 py-2.5 text-xs font-semibold uppercase tracking-[0.16em] text-white shadow-[0_18px_32px_-18px_rgba(220,38,38,0.9)] transition hover:bg-red-700 disabled:cursor-not-allowed disabled:bg-red-300 disabled:shadow-none"
             >
               Aplicar filtros
             </button>
@@ -881,7 +1178,12 @@ function InsightsReportSections({
   return (
     <>
       <section>
-        <ChartCard title="Comparativa directa de pipelines" description="Seleccioná hasta 3 pipelines para comparar totales, entrantes, ganados, perdidos y cerrados." icon={<BarChart3 size={16} className="text-red-600" />}>
+        <ChartCard
+          title="Comparativa directa de pipelines"
+          description="Seleccioná hasta 3 pipelines para comparar totales, entrantes, ganados, perdidos y cerrados."
+          icon={<BarChart3 size={16} className="text-red-600" />}
+          exportChartId="pipeline-comparison"
+        >
           <div className="mb-4 grid grid-cols-1 gap-3 md:grid-cols-3">
             <PipelineComparisonSelect
               label="Pipeline A"
@@ -929,7 +1231,12 @@ function InsightsReportSections({
       </section>
 
       <section className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-        <ChartCard title="Leads Creados por Personal" description="Top pipelines del cohort creado en el rango." icon={<Layers size={16} className="text-red-600" />}>
+        <ChartCard
+          title="Leads Creados por Personal"
+          description="Top pipelines del cohort creado en el rango."
+          icon={<Layers size={16} className="text-red-600" />}
+          exportChartId="created-pipelines"
+        >
           <ResponsiveContainer width="100%" height={300}>
             <BarChart data={createdPipelineChartData} layout="vertical" margin={{ top: 8, right: 12, bottom: 8, left: 8 }}>
               <CartesianGrid stroke={CHART_GRID} strokeDasharray="3 3" horizontal={false} />
@@ -946,7 +1253,12 @@ function InsightsReportSections({
           </ResponsiveContainer>
         </ChartCard>
 
-        <ChartCard title="Horas con más leads entrantes" description={`Promedio diario por hora (incoming) en ${incomingDaysDivider} día(s) del rango.`} icon={<Clock3 size={16} className="text-red-600" />}>
+        <ChartCard
+          title="Horas con más leads entrantes"
+          description={`Promedio diario por hora (incoming) en ${incomingDaysDivider} día(s) del rango.`}
+          icon={<Clock3 size={16} className="text-red-600" />}
+          exportChartId="incoming-hours"
+        >
           <ResponsiveContainer width="100%" height={300}>
             <AreaChart data={hourlyIncomingAverageData} margin={{ top: 12, right: 12, bottom: 0, left: 0 }}>
               <defs>
@@ -978,7 +1290,12 @@ function InsightsReportSections({
       </section>
 
       <section>
-        <ChartCard title="Leads creados según estado actual" description="Distribución por estado actual dentro del cohort creado." icon={<PieChartIcon size={16} className="text-red-600" />}>
+        <ChartCard
+          title="Leads creados según estado actual"
+          description="Distribución por estado actual dentro del cohort creado."
+          icon={<PieChartIcon size={16} className="text-red-600" />}
+          exportChartId="status-distribution"
+        >
           <ResponsiveContainer width="100%" height={360}>
             <BarChart data={statusesByNameForPie.map((status) => ({ ...status, status_label: formatStatusLegendLabel(status.status_name) }))} layout="vertical" margin={{ top: 8, right: 12, bottom: 8, left: 8 }}>
               <CartesianGrid stroke={CHART_GRID} strokeDasharray="3 3" horizontal={false} />
@@ -997,7 +1314,12 @@ function InsightsReportSections({
       </section>
 
       <section>
-        <ChartCard title="Ganados históricos por personal" description="Ranking descendente de ganados por responsable." icon={<Users size={16} className="text-red-600" />}>
+        <ChartCard
+          title="Ganados históricos por personal"
+          description="Ranking descendente de ganados por responsable."
+          icon={<Users size={16} className="text-red-600" />}
+          exportChartId="won-sellers"
+        >
           <ResponsiveContainer width="100%" height={320}>
             <BarChart data={wonSellerChartData} layout="vertical" margin={{ top: 8, right: 12, bottom: 8, left: 8 }}>
               <CartesianGrid stroke={CHART_GRID} strokeDasharray="3 3" horizontal={false} />
@@ -1090,7 +1412,7 @@ function PipelineComparisonSelect({
   const peers = new Set(selectedPeers.filter(Boolean));
 
   return (
-    <label className="rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3 text-xs font-semibold uppercase tracking-wide text-gray-600">
+    <label className="rounded-2xl border border-gray-200 bg-white px-4 py-3 text-xs font-semibold uppercase tracking-wide text-gray-600">
       <span>{label}</span>
       <select
         value={value}
@@ -1108,9 +1430,24 @@ function PipelineComparisonSelect({
   );
 }
 
-function ChartCard({ title, description, icon, children }: { title: string; description?: string; icon: ReactNode; children: ReactNode }) {
+function ChartCard({
+  title,
+  description,
+  icon,
+  children,
+  exportChartId,
+}: {
+  title: string;
+  description?: string;
+  icon: ReactNode;
+  children: ReactNode;
+  exportChartId?: ExportChartId;
+}) {
   return (
-    <div className="rounded-[28px] border border-gray-200 bg-white p-5 shadow-[0_20px_36px_-30px_rgba(15,23,42,0.8)]">
+    <div
+      className="rounded-[28px] border border-gray-200 bg-white p-5 shadow-[0_20px_36px_-30px_rgba(15,23,42,0.8)]"
+      data-export-chart-id={exportChartId}
+    >
       <div className="mb-4">
         <h3 className="inline-flex items-center gap-2 text-sm font-semibold text-gray-800">
           {icon}

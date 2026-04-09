@@ -1,6 +1,8 @@
 import { useState, type FormEvent } from 'react';
 import { ExternalLink, Send, Table2 } from 'lucide-react';
 import Swal from 'sweetalert2';
+import { DateRangePicker } from '../../components/DateRangePicker';
+import { isDateRangeValid } from '../../lib/dateRange';
 
 type ExportResource = 'ENVIOS' | 'LEADS GANADOS' | 'RECOJOS';
 
@@ -33,6 +35,7 @@ export function GoogleSheetsExportPage() {
   const [spreadsheetId, setSpreadsheetId] = useState('');
   const [sheetName, setSheetName] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const hasValidDateRange = isDateRangeValid(dateFrom, dateTo);
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -127,27 +130,22 @@ export function GoogleSheetsExportPage() {
             />
           </label>
 
-          <label className="space-y-2 text-sm font-semibold text-gray-700">
-            Desde
-            <input
-              type="date"
-              value={dateFrom}
-              onChange={(event) => setDateFrom(event.target.value)}
-              className="w-full rounded-xl border border-gray-300 bg-white px-3 py-2.5 text-sm"
-              required
-            />
-          </label>
-
-          <label className="space-y-2 text-sm font-semibold text-gray-700">
-            Hasta
-            <input
-              type="date"
-              value={dateTo}
-              onChange={(event) => setDateTo(event.target.value)}
-              className="w-full rounded-xl border border-gray-300 bg-white px-3 py-2.5 text-sm"
-              required
-            />
-          </label>
+          <DateRangePicker
+            startDate={dateFrom}
+            endDate={dateTo}
+            onStartDateChange={setDateFrom}
+            onEndDateChange={setDateTo}
+            startLabel="Desde"
+            endLabel="Hasta"
+            required
+            className="md:col-span-2"
+            layoutClassName="grid-cols-1 gap-4 md:grid-cols-2"
+            fieldClassName="space-y-2 rounded-none border-0 bg-transparent px-0 py-0 text-sm font-semibold text-gray-700 shadow-none"
+            labelClassName="text-sm font-semibold text-gray-700 normal-case tracking-normal"
+            inputWrapperClassName="mt-0 rounded-xl border border-gray-300 bg-white px-3 py-2.5"
+            inputClassName="text-sm"
+            helperClassName="tracking-normal"
+          />
 
           <label className="space-y-2 text-sm font-semibold text-gray-700 md:col-span-2">
             Spreadsheet ID destino
@@ -166,7 +164,7 @@ export function GoogleSheetsExportPage() {
             </div>
             <button
               type="submit"
-              disabled={isSubmitting}
+              disabled={isSubmitting || !hasValidDateRange}
               className="inline-flex items-center gap-2 rounded-xl bg-red-600 px-4 py-2.5 text-xs font-semibold uppercase tracking-[0.16em] text-white transition hover:bg-red-700 disabled:opacity-60"
             >
               <Send size={14} />

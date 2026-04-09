@@ -1,6 +1,8 @@
 import { useMemo, useState } from 'react';
 import { Activity, BadgeDollarSign, BarChart3, LineChart as LineChartIcon, Megaphone, MousePointerClick, PieChart as PieChartIcon, Target, Trophy } from 'lucide-react';
 import { Bar, BarChart, CartesianGrid, LabelList, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
+import { DateRangePicker } from '../../../components/DateRangePicker';
+import { isDateRangeValid } from '../../../lib/dateRange';
 import { formatNumberEs } from '../../../lib/tableHelpers';
 import { ChartCard, KpiCard, KpiGrid, MetaAdsFiltersPanel, MetaAdsPageHero, Section } from './metaAdsShared';
 import {
@@ -397,6 +399,7 @@ export function MetaAdsDashboard() {
     || comparisonAdId !== comparisonDraftAdId
     || comparisonDateFrom !== comparisonDraftDateFrom
     || comparisonDateTo !== comparisonDraftDateTo;
+  const hasValidComparisonDateRange = isDateRangeValid(comparisonDraftDateFrom, comparisonDraftDateTo);
 
   const comparisonFilteredRows = useMemo(() => {
     return comparisonRows.filter((row) => {
@@ -681,9 +684,15 @@ export function MetaAdsDashboard() {
         draftDateTo={draftDateTo}
         onDraftDateFromChange={setDraftDateFrom}
         onDraftDateToChange={setDraftDateTo}
+        onPresetApply={({ startDate, endDate }) => {
+          setDraftDateFrom(startDate);
+          setDraftDateTo(endDate);
+          setDateFrom(startDate);
+          setDateTo(endDate);
+        }}
         extra={(
           <>
-            <label className="rounded-2xl border border-gray-200 bg-gray-50/70 px-4 py-3 text-sm text-gray-600 shadow-inner shadow-white/50">
+            <label className="rounded-2xl bg-white px-0 py-0 text-sm text-gray-600">
               <span className="text-xs font-semibold uppercase tracking-wide text-gray-500">Campaña</span>
               <select
                 value={draftCampaignId}
@@ -703,7 +712,7 @@ export function MetaAdsDashboard() {
               </select>
             </label>
 
-            <label className="rounded-2xl border border-gray-200 bg-gray-50/70 px-4 py-3 text-sm text-gray-600 shadow-inner shadow-white/50">
+            <label className="rounded-2xl bg-white px-0 py-0 text-sm text-gray-600">
               <span className="text-xs font-semibold uppercase tracking-wide text-gray-500">Conjunto de ads</span>
               <select
                 value={draftAdsetId}
@@ -722,7 +731,7 @@ export function MetaAdsDashboard() {
               </select>
             </label>
 
-            <label className="rounded-2xl border border-gray-200 bg-gray-50/70 px-4 py-3 text-sm text-gray-600 shadow-inner shadow-white/50">
+            <label className="rounded-2xl bg-white px-0 py-0 text-sm text-gray-600">
               <span className="text-xs font-semibold uppercase tracking-wide text-gray-500">Ad</span>
               <select
                 value={draftAdId}
@@ -781,7 +790,7 @@ export function MetaAdsDashboard() {
           </div>
         ) : null}
 
-        <div className="mt-4 rounded-xl border border-gray-200 bg-gray-50/70 px-4 py-3">
+        <div className="mt-4 rounded-xl border border-gray-200 bg-white px-4 py-3">
           <label className="text-xs font-semibold uppercase tracking-wide text-gray-500">Métrica para gráficos de audiencia</label>
           <select
             value={audienceMetric}
@@ -1173,8 +1182,23 @@ export function MetaAdsDashboard() {
         <div className="rounded-[24px] border border-gray-200 bg-white p-4 shadow-[0_16px_34px_-28px_rgba(15,23,42,0.8)] space-y-4">
           <p className="text-xs font-semibold uppercase tracking-[0.18em] text-gray-500">Filtros de comparativa (independientes)</p>
 
-          <div className="grid grid-cols-1 gap-4 xl:grid-cols-[repeat(4,minmax(0,1fr))_auto]">
-            <label className="rounded-2xl border border-gray-200 bg-gray-50/70 px-4 py-3 text-sm text-gray-600 shadow-inner shadow-white/50">
+          <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,18rem)_repeat(2,minmax(0,1fr))_auto] xl:items-end">
+            <DateRangePicker
+              startDate={comparisonDraftDateFrom}
+              endDate={comparisonDraftDateTo}
+              onStartDateChange={setComparisonDraftDateFrom}
+              onEndDateChange={setComparisonDraftDateTo}
+              onPresetApply={({ startDate, endDate }) => {
+                setComparisonDraftDateFrom(startDate);
+                setComparisonDraftDateTo(endDate);
+                setComparisonDateFrom(startDate);
+                setComparisonDateTo(endDate);
+              }}
+              className="xl:col-span-1"
+              layoutClassName="grid-cols-1 gap-4 md:grid-cols-2"
+            />
+
+            <label className="rounded-2xl bg-white px-0 py-0 text-sm text-gray-600">
               <span className="text-xs font-semibold uppercase tracking-wide text-gray-500">Campaña</span>
               <select
                 value={comparisonDraftCampaignId}
@@ -1193,7 +1217,7 @@ export function MetaAdsDashboard() {
               </select>
             </label>
 
-            <label className="rounded-2xl border border-gray-200 bg-gray-50/70 px-4 py-3 text-sm text-gray-600 shadow-inner shadow-white/50">
+            <label className="rounded-2xl bg-white px-0 py-0 text-sm text-gray-600">
               <span className="text-xs font-semibold uppercase tracking-wide text-gray-500">Ad</span>
               <select
                 value={comparisonDraftAdId}
@@ -1207,26 +1231,6 @@ export function MetaAdsDashboard() {
                   </option>
                 ))}
               </select>
-            </label>
-
-            <label className="rounded-2xl border border-gray-200 bg-gray-50/70 px-4 py-3 text-sm text-gray-600 shadow-inner shadow-white/50">
-              <span className="text-xs font-semibold uppercase tracking-wide text-gray-500">Fecha inicio</span>
-              <input
-                type="date"
-                value={comparisonDraftDateFrom}
-                onChange={(event) => setComparisonDraftDateFrom(event.target.value)}
-                className="mt-2 w-full rounded-xl border border-gray-300 bg-white px-3 py-2.5 text-sm text-gray-800 outline-none transition focus:border-red-300 focus:ring-2 focus:ring-red-100"
-              />
-            </label>
-
-            <label className="rounded-2xl border border-gray-200 bg-gray-50/70 px-4 py-3 text-sm text-gray-600 shadow-inner shadow-white/50">
-              <span className="text-xs font-semibold uppercase tracking-wide text-gray-500">Fecha fin</span>
-              <input
-                type="date"
-                value={comparisonDraftDateTo}
-                onChange={(event) => setComparisonDraftDateTo(event.target.value)}
-                className="mt-2 w-full rounded-xl border border-gray-300 bg-white px-3 py-2.5 text-sm text-gray-800 outline-none transition focus:border-red-300 focus:ring-2 focus:ring-red-100"
-              />
             </label>
 
             <div className="flex items-end justify-start gap-2 xl:justify-end">
@@ -1254,7 +1258,7 @@ export function MetaAdsDashboard() {
                   setComparisonDateFrom(comparisonDraftDateFrom);
                   setComparisonDateTo(comparisonDraftDateTo);
                 }}
-                disabled={!isComparisonFiltersDirty}
+                disabled={!isComparisonFiltersDirty || !hasValidComparisonDateRange}
                 className="inline-flex items-center justify-center rounded-xl bg-red-600 px-4 py-2 text-sm font-semibold text-white shadow-[0_18px_32px_-18px_rgba(220,38,38,0.95)] transition hover:bg-red-700 disabled:cursor-not-allowed disabled:bg-red-300 disabled:shadow-none"
               >
                 Aplicar filtros
@@ -1494,7 +1498,7 @@ function ComparisonSelect({
   onChange: (value: string) => void;
 }) {
   return (
-    <label className="rounded-2xl border border-gray-200 bg-white px-4 py-3 text-sm text-gray-600 shadow-[inset_0_1px_0_rgba(255,255,255,0.85)]">
+    <label className="rounded-2xl bg-white px-0 py-0 text-sm text-gray-600">
       <span className="text-xs font-semibold uppercase tracking-[0.18em] text-gray-500">{label}</span>
       <select
         value={value}

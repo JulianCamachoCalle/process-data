@@ -59,6 +59,7 @@ function matchesSearch(row: MetaAdsReportingRow, query: string) {
 }
 
 export function MetaAdsDataPage() {
+  const PAGE_SIZE = 10;
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
   const [draftDateFrom, setDraftDateFrom] = useState('');
@@ -67,7 +68,6 @@ export function MetaAdsDataPage() {
   const [objective, setObjective] = useState('');
   const [draftSearchTerm, setDraftSearchTerm] = useState('');
   const [draftObjective, setDraftObjective] = useState('');
-  const [pageSize, setPageSize] = useState(25);
   const [currentPage, setCurrentPage] = useState(1);
   const [expandedPreviewKey, setExpandedPreviewKey] = useState<string | null>(null);
   const [previewByKey, setPreviewByKey] = useState<Record<string, OembedPreviewState>>({});
@@ -87,12 +87,12 @@ export function MetaAdsDataPage() {
     || searchTerm !== draftSearchTerm
     || objective !== draftObjective;
 
-  const totalPages = Math.max(1, Math.ceil(filteredRows.length / pageSize));
+  const totalPages = Math.max(1, Math.ceil(filteredRows.length / PAGE_SIZE));
   const safeCurrentPage = Math.min(currentPage, totalPages);
   const paginatedRows = useMemo(() => {
-    const start = (safeCurrentPage - 1) * pageSize;
-    return filteredRows.slice(start, start + pageSize);
-  }, [filteredRows, pageSize, safeCurrentPage]);
+    const start = (safeCurrentPage - 1) * PAGE_SIZE;
+    return filteredRows.slice(start, start + PAGE_SIZE);
+  }, [filteredRows, safeCurrentPage]);
 
   const loadPreview = useCallback(async (row: MetaAdsReportingRow) => {
     const previewKey = getPreviewKey(row);
@@ -217,28 +217,27 @@ export function MetaAdsDataPage() {
           setCurrentPage(1);
         }}
         isApplyDisabled={!isFiltersDirty}
+        extraContainerClassName="grid grid-cols-1 gap-3"
         extra={(
-          <div className="grid grid-cols-1 gap-4">
-            <label className="rounded-2xl border border-gray-200 bg-white px-4 py-3 text-sm text-gray-600 shadow-[0_12px_24px_-20px_rgba(15,23,42,0.9)]">
-              <span className="text-xs font-semibold uppercase tracking-wide text-gray-500">Buscar entidades</span>
-              <div className="mt-2 inline-flex w-full items-center gap-2 rounded-xl border border-gray-200 bg-gray-50 px-3 py-2.5">
-                <Search size={15} className="text-gray-400" />
-                <input
-                  value={draftSearchTerm}
-                  onChange={(event) => setDraftSearchTerm(event.target.value)}
-                  placeholder="Campaña, ad set, ad, creative o ID"
-                  className="w-full bg-transparent text-sm text-gray-800 outline-none"
-                />
-              </div>
-            </label>
-          </div>
+          <label className="block w-full rounded-2xl bg-white px-0 py-0 text-sm text-gray-600">
+            <span className="text-xs font-semibold uppercase tracking-wide text-gray-500">Buscar entidades</span>
+            <div className="mt-2 inline-flex w-full items-center gap-2 rounded-xl border border-gray-200 bg-white px-3 py-2.5">
+              <Search size={15} className="text-gray-400" />
+              <input
+                value={draftSearchTerm}
+                onChange={(event) => setDraftSearchTerm(event.target.value)}
+                placeholder="Campaña, ad set, ad, creative o ID"
+                className="w-full bg-transparent text-sm text-gray-800 outline-none"
+              />
+            </div>
+          </label>
         )}
       />
 
       <Section title="Resumen de la tabla">
         <KpiGrid>
           <KpiCard title="Filas filtradas" value={formatNumberEs(filteredRows.length)} helper="Resultado después de filtros locales" />
-          <KpiCard title="Página actual" value={`${safeCurrentPage}/${totalPages}`} helper={`${formatNumberEs(pageSize)} filas por página`} />
+          <KpiCard title="Página actual" value={`${safeCurrentPage}/${totalPages}`} helper={`${formatNumberEs(PAGE_SIZE)} filas por página`} />
           <KpiCard title="Campañas visibles" value={formatNumberEs(new Set(filteredRows.map((row) => row.campaign_business_id).filter(Boolean)).size)} helper="Campañas únicas filtradas" />
           <KpiCard title="Ads visibles" value={formatNumberEs(new Set(filteredRows.map((row) => row.ad_business_id).filter(Boolean)).size)} helper="Ads únicos filtrados" />
         </KpiGrid>
@@ -410,18 +409,7 @@ export function MetaAdsDataPage() {
               <div className="px-4 py-3 border-t border-gray-200 bg-white flex items-center justify-between gap-4 flex-wrap">
                 <div className="inline-flex items-center gap-2 text-sm text-gray-600">
                   <span>Filas por página:</span>
-                  <select
-                    value={pageSize}
-                    onChange={(event) => {
-                      setPageSize(Number(event.target.value));
-                      setCurrentPage(1);
-                    }}
-                    className="px-2 py-1 rounded-lg border border-gray-300 bg-white text-sm"
-                  >
-                    <option value={10}>10</option>
-                    <option value={25}>25</option>
-                    <option value={50}>50</option>
-                  </select>
+                  <span className="inline-flex items-center rounded-lg border border-gray-300 bg-gray-50 px-2 py-1 text-sm font-semibold text-gray-700">10</span>
                 </div>
 
                 <div className="inline-flex items-center gap-2">
