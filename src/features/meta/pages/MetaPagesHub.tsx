@@ -1,16 +1,9 @@
 import { useMemo, useState } from 'react';
-import { Activity, BarChart3, BookImage, Eye, FileText, Megaphone } from 'lucide-react';
-import { Bar, BarChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
+import { Activity, BarChart3, BookImage, Eye, FileText } from 'lucide-react';
+import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { formatNumberEs } from '../../../lib/tableHelpers';
 import { ChartCard, KpiCard, KpiGrid, MetaAdsFiltersPanel, MetaAdsPageHero, Section } from '../ads/metaAdsShared';
 import { useMetaPagesData } from './useMetaPagesData';
-
-type InsightPoint = {
-  date: string;
-  impressions: number;
-  reach: number;
-  engagement: number;
-};
 
 type PostClicksSnapshotPoint = {
   date: string;
@@ -37,31 +30,6 @@ export function MetaPagesHub() {
   );
   const errors = pagesQuery.data?.errors ?? [];
 
-  const insightTrend = useMemo(() => {
-    const rows = pagesQuery.data?.insights ?? [];
-    const grouped = new Map<string, InsightPoint>();
-
-    for (const row of rows) {
-      const date = (row.end_time ?? '').slice(0, 10);
-      if (!date) continue;
-
-      const current = grouped.get(date) ?? {
-        date,
-        impressions: 0,
-        reach: 0,
-        engagement: 0,
-      };
-
-      if (row.metric === 'page_impressions') current.impressions += row.value;
-      if (row.metric === 'page_reach') current.reach += row.value;
-      if (row.metric === 'page_engaged_users') current.engagement += row.value;
-
-      grouped.set(date, current);
-    }
-
-    return Array.from(grouped.values()).sort((a, b) => a.date.localeCompare(b.date));
-  }, [pagesQuery.data?.insights]);
-
   const topPages = useMemo(() => {
     return [...pages]
       .sort((a, b) => (b.followers_count || b.fan_count) - (a.followers_count || a.fan_count))
@@ -69,22 +37,13 @@ export function MetaPagesHub() {
   }, [pages]);
 
   const topPosts = useMemo(() => {
-    const latestClicksByPost = new Map<string, number>();
-    const latestViewsByPost = new Map<string, number>();
+    const latestByPostMetric = new Map<string, number>();
 
     for (const snapshot of postInsightSnapshots) {
-      if (snapshot.metric === 'post_clicks') {
-        const current = latestClicksByPost.get(snapshot.post_id) ?? 0;
-        if (snapshot.value > current) {
-          latestClicksByPost.set(snapshot.post_id, snapshot.value);
-        }
-      }
-
-      if (snapshot.metric === 'post_impressions') {
-        const current = latestViewsByPost.get(snapshot.post_id) ?? 0;
-        if (snapshot.value > current) {
-          latestViewsByPost.set(snapshot.post_id, snapshot.value);
-        }
+      const key = `${snapshot.post_id}:${snapshot.metric}`;
+      const current = latestByPostMetric.get(key) ?? 0;
+      if (snapshot.value > current) {
+        latestByPostMetric.set(key, snapshot.value);
       }
     }
 
@@ -92,29 +51,49 @@ export function MetaPagesHub() {
       .map((post) => ({
         ...post,
         engagement: post.reactions + post.comments + post.shares,
-        clicks: latestClicksByPost.get(post.id) ?? 0,
-        views: latestViewsByPost.get(post.id) ?? 0,
+        clicks: latestByPostMetric.get(`${post.id}:post_clicks`) ?? 0,
+        views: latestByPostMetric.get(`${post.id}:post_impressions`) ?? 0,
+        engagedUsers: latestByPostMetric.get(`${post.id}:post_engaged_users`) ?? 0,
       }))
       .sort((a, b) => b.engagement - a.engagement)
       .slice(0, 12);
   }, [posts, postInsightSnapshots]);
 
   const postClicksTrend = useMemo(() => {
-    const grouped = new Map<string, PostClicksSnapshotPoint>();
+    const groupedBySnapshot = new Map<string, PostClicksSnapshotPoint>();
 
     for (const snapshot of postInsightSnapshots) {
       const date = snapshot.snapshot_date;
       if (!date) continue;
 
-      const current = grouped.get(date) ?? { date, clicks: 0, engaged: 0, impressions: 0 };
+      const current = groupedBySnapshot.get(date) ?? { date, clicks: 0, engaged: 0, impressions: 0 };
       if (snapshot.metric === 'post_clicks') current.clicks += snapshot.value;
       if (snapshot.metric === 'post_engaged_users') current.engaged += snapshot.value;
       if (snapshot.metric === 'post_impressions') current.impressions += snapshot.value;
-      grouped.set(date, current);
+      groupedBySnapshot.set(date, current);
     }
 
-    return Array.from(grouped.values()).sort((a, b) => a.date.localeCompare(b.date));
-  }, [postInsightSnapshots]);
+    const snapshotSeries = Array.from(groupedBySnapshot.values()).sort((a, b) => a.date.localeCompare(b.date));
+    if (snapshotSeries.length >= 2) {
+      return snapshotSeries;
+    }
+
+    // Fallback: si hay un solo snapshot (o ninguno), usar fecha de publicación del post
+    // para evitar que toda la tendencia colapse en un mismo día.
+    const groupedByPostDate = new Map<string, PostClicksSnapshotPoint>();
+    for (const post of topPosts) {
+      const date = (post.created_time ?? '').slice(0, 10);
+      if (!date) continue;
+
+      const current = groupedByPostDate.get(date) ?? { date, clicks: 0, engaged: 0, impressions: 0 };
+      current.clicks += post.clicks;
+      current.engaged += post.engagedUsers;
+      current.impressions += post.views;
+      groupedByPostDate.set(date, current);
+    }
+
+    return Array.from(groupedByPostDate.values()).sort((a, b) => a.date.localeCompare(b.date));
+  }, [postInsightSnapshots, topPosts]);
 
   const latestPostClicksSnapshot = useMemo(() => {
     if (postClicksTrend.length === 0) return null;
@@ -122,7 +101,7 @@ export function MetaPagesHub() {
   }, [postClicksTrend]);
 
   const totals = useMemo(() => {
-    const followers = pages.reduce((acc, page) => acc + (page.followers_count || page.fan_count || 0), 0);
+    const followers = pages.reduce((acc, page) => acc + (page.followers_count || 0), 0);
     const postEngagement = posts.reduce((acc, post) => acc + post.reactions + post.comments + post.shares, 0);
     const latestSnapshotDate = postInsightSnapshots.reduce((acc, item) => item.snapshot_date > acc ? item.snapshot_date : acc, '');
     const totalPostClicks = postInsightSnapshots
@@ -187,11 +166,10 @@ export function MetaPagesHub() {
 
       <Section title="KPI (Pages)">
         <KpiGrid>
-          <KpiCard title="Páginas" value={formatNumberEs(totals.totalPages)} helper="Páginas con acceso" icon={<Megaphone className="text-red-600" size={18} />} />
-          <KpiCard title="Seguidores" value={formatNumberEs(totals.totalFollowers)} helper="followers_count + fallback fan_count" icon={<Eye className="text-red-600" size={18} />} />
-          <KpiCard title="Posts leídos" value={formatNumberEs(totals.totalPosts)} helper="Publicaciones del rango" icon={<FileText className="text-red-600" size={18} />} />
-          <KpiCard title="Engagement/post" value={formatNumberEs(Math.round(totals.avgEngagementPerPost))} helper="Reacciones + comentarios + shares" icon={<BarChart3 className="text-red-600" size={18} />} />
-          <KpiCard title="Clicks orgánicos" value={formatNumberEs(Math.round(totals.totalPostClicks))} helper="Último snapshot de post_insights" icon={<Activity className="text-red-600" size={18} />} />
+          <KpiCard title="Seguidores" value={formatNumberEs(totals.totalFollowers)} helper="Total de seguidores" icon={<Eye className="text-red-600" size={18} />} />
+          <KpiCard title="Posts Totales" value={formatNumberEs(totals.totalPosts)} helper="Publicaciones totales" icon={<FileText className="text-red-600" size={18} />} />
+          <KpiCard title="Engagement/post" value={formatNumberEs(Math.round(totals.avgEngagementPerPost))} helper="Reacciones + comentarios + compartidos" icon={<BarChart3 className="text-red-600" size={18} />} />
+          <KpiCard title="Clicks orgánicos" value={formatNumberEs(Math.round(totals.totalPostClicks))} helper="Total de clicks orgánicos" icon={<Activity className="text-red-600" size={18} />} />
         </KpiGrid>
       </Section>
 
@@ -204,7 +182,6 @@ export function MetaPagesHub() {
                   <th className="px-4 py-3">Página</th>
                   <th className="px-4 py-3">Categoría</th>
                   <th className="px-4 py-3 text-right">Followers</th>
-                  <th className="px-4 py-3 text-right">Fans</th>
                   <th className="px-4 py-3">Enlace</th>
                 </tr>
               </thead>
@@ -267,48 +244,7 @@ export function MetaPagesHub() {
         </div>
       </Section>
 
-      <Section title="3) Pages Insights Dashboard">
-        <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-          <ChartCard title="Impresiones y Reach por día" icon={<BarChart3 size={16} className="text-red-600" />}>
-            {insightTrend.length === 0 ? (
-              <div className="rounded-xl border border-dashed border-gray-200 bg-gray-50 px-4 py-6 text-sm text-gray-500">
-                Sin datos de insights en SQL para el rango. Ejecutá el sync de Pages por URL y volvé a cargar.
-              </div>
-            ) : (
-              <ResponsiveContainer width="100%" height={320}>
-                <BarChart data={insightTrend}>
-                  <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                  <XAxis dataKey="date" tick={{ fontSize: 12 }} />
-                  <YAxis tick={{ fontSize: 12 }} />
-                  <Tooltip />
-                  <Bar dataKey="impressions" fill="#dc2626" radius={[8, 8, 0, 0]} isAnimationActive={false} />
-                  <Bar dataKey="reach" fill="#f59e0b" radius={[8, 8, 0, 0]} isAnimationActive={false} />
-                </BarChart>
-              </ResponsiveContainer>
-            )}
-          </ChartCard>
-
-          <ChartCard title="Engagement por día" icon={<Activity size={16} className="text-red-600" />}>
-            {insightTrend.length === 0 ? (
-              <div className="rounded-xl border border-dashed border-gray-200 bg-gray-50 px-4 py-6 text-sm text-gray-500">
-                Sin datos de engagement diario desde Page Insights para el rango.
-              </div>
-            ) : (
-              <ResponsiveContainer width="100%" height={320}>
-                <LineChart data={insightTrend}>
-                  <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                  <XAxis dataKey="date" tick={{ fontSize: 12 }} />
-                  <YAxis tick={{ fontSize: 12 }} />
-                  <Tooltip />
-                  <Line type="monotone" dataKey="engagement" stroke="#dc2626" strokeWidth={2.5} dot={false} isAnimationActive={false} />
-                </LineChart>
-              </ResponsiveContainer>
-            )}
-          </ChartCard>
-        </div>
-      </Section>
-
-      <Section title="4) Organic Post Clicks (snapshot temporal)">
+      <Section title="4) Clicks y Engagement">
         <ChartCard title="Clicks y usuarios enganchados por día" icon={<BarChart3 size={16} className="text-red-600" />}>
           {postClicksTrend.length === 0 ? (
             <div className="rounded-xl border border-dashed border-gray-200 bg-gray-50 px-4 py-6 text-sm text-gray-500">
@@ -316,10 +252,9 @@ export function MetaPagesHub() {
             </div>
           ) : postClicksTrend.length === 1 && latestPostClicksSnapshot ? (
             <div className="rounded-xl border border-gray-200 bg-gray-50 px-4 py-6 text-sm text-gray-700 space-y-1">
-              <p className="font-semibold">Solo hay un snapshot disponible ({latestPostClicksSnapshot.date}).</p>
+              <p className="font-semibold">Estos son los datos disponibles</p>
               <p>Clicks: <strong>{formatNumberEs(Math.round(latestPostClicksSnapshot.clicks))}</strong></p>
               <p>Usuarios enganchados: <strong>{formatNumberEs(Math.round(latestPostClicksSnapshot.engaged))}</strong></p>
-              <p>Vistas: <strong>{formatNumberEs(Math.round(latestPostClicksSnapshot.impressions))}</strong></p>
               <p className="text-xs text-gray-500">Necesitás al menos 2 snapshots en fechas distintas para ver tendencia.</p>
             </div>
           ) : (
