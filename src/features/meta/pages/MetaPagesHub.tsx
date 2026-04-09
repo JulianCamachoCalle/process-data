@@ -12,17 +12,9 @@ type InsightPoint = {
   engagement: number;
 };
 
-function getTodayDateOnly() {
-  return new Date().toISOString().slice(0, 10);
-}
-
-function getDateDaysAgo(days: number) {
-  return new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
-}
-
 export function MetaPagesHub() {
-  const [since, setSince] = useState(getDateDaysAgo(29));
-  const [until, setUntil] = useState(getTodayDateOnly());
+  const [since, setSince] = useState('');
+  const [until, setUntil] = useState('');
   const [draftSince, setDraftSince] = useState(since);
   const [draftUntil, setDraftUntil] = useState(until);
   const [isSyncing, setIsSyncing] = useState(false);
@@ -142,12 +134,10 @@ export function MetaPagesHub() {
           setUntil(draftUntil);
         }}
         onClear={() => {
-          const defaultSince = getDateDaysAgo(29);
-          const defaultUntil = getTodayDateOnly();
-          setSince(defaultSince);
-          setUntil(defaultUntil);
-          setDraftSince(defaultSince);
-          setDraftUntil(defaultUntil);
+          setSince('');
+          setUntil('');
+          setDraftSince('');
+          setDraftUntil('');
         }}
         isApplyDisabled={!isFiltersDirty}
       />

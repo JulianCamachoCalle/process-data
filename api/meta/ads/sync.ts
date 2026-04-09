@@ -301,20 +301,12 @@ function resolveSyncResource(req: VercelRequest, body: JsonRecord): MetaSyncReso
   throw new Error('resource inválido. Permitidos: ads | instagram | pages');
 }
 
-function toIsoDateOnly(value: Date) {
-  return value.toISOString().slice(0, 10);
-}
-
 function resolvePagesDateRange(req: VercelRequest, body: JsonRecord) {
   const sinceParam = getRequestParam(req, body, 'since')?.trim() ?? '';
   const untilParam = getRequestParam(req, body, 'until')?.trim() ?? '';
 
-  const now = new Date();
-  const fallbackUntil = toIsoDateOnly(now);
-  const fallbackSince = toIsoDateOnly(new Date(now.getTime() - 29 * 24 * 60 * 60 * 1000));
-
-  const since = /^\d{4}-\d{2}-\d{2}$/.test(sinceParam) ? sinceParam : fallbackSince;
-  const until = /^\d{4}-\d{2}-\d{2}$/.test(untilParam) ? untilParam : fallbackUntil;
+  const since = /^\d{4}-\d{2}-\d{2}$/.test(sinceParam) ? sinceParam : null;
+  const until = /^\d{4}-\d{2}-\d{2}$/.test(untilParam) ? untilParam : null;
 
   return { since, until };
 }
@@ -1131,15 +1123,17 @@ export default async function metaAdsSyncHandler(req: VercelRequest, res: Vercel
         }
 
         try {
+          const postParams: Record<string, string> = {
+            fields: 'id,message,created_time,permalink_url,full_picture,shares,reactions.summary(true).limit(0),comments.summary(true).limit(0)',
+            limit: '25',
+          };
+          if (since) postParams.since = since;
+          if (until) postParams.until = until;
+
           const pagePosts = await fetchMetaCollection({
             token: pageToken,
             path: `${pageId}/posts`,
-            params: {
-              fields: 'id,message,created_time,permalink_url,full_picture,shares,reactions.summary(true).limit(0),comments.summary(true).limit(0)',
-              limit: '25',
-              since,
-              until,
-            },
+            params: postParams,
             maxPages: Math.min(maxPages, 3),
             startedAt,
             maxRuntimeMs,
@@ -1181,12 +1175,14 @@ export default async function metaAdsSyncHandler(req: VercelRequest, res: Vercel
         }
 
         try {
-          const insightsPayload = await fetchMetaJson(pageToken, `${pageId}/insights`, {
-            metric: 'page_impressions,page_reach,page_post_engagements,page_fans',
+          const insightsParams: Record<string, string> = {
+            metric: 'page_impressions,page_reach,page_engaged_users',
             period: 'day',
-            since,
-            until,
-          });
+          };
+          if (since) insightsParams.since = since;
+          if (until) insightsParams.until = until;
+
+          const insightsPayload = await fetchMetaJson(pageToken, `${pageId}/insights`, insightsParams);
 
           insightsSummary.pages_fetched += 1;
           const insightItems = asObjectArray(insightsPayload.data);
@@ -1274,8 +1270,8 @@ export default async function metaAdsSyncHandler(req: VercelRequest, res: Vercel
         success: true,
         resource,
         duration_ms: durationMs,
-        since,
-        until,
+        since: since ?? '',
+        until: until ?? '',
         pages: pages.map((item) => ({
           id: item.business_id,
           name: item.name,
