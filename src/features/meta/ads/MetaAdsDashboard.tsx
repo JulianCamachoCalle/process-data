@@ -45,10 +45,26 @@ type AudienceMetricKey = 'impressions' | 'reach' | 'clicks' | 'spend';
 
 const audienceMetricMeta: Record<AudienceMetricKey, { label: string; format: 'number' | 'currency' }> = {
   impressions: { label: 'Impresiones', format: 'number' },
-  reach: { label: 'Reach', format: 'number' },
+  reach: { label: 'Alcance', format: 'number' },
   clicks: { label: 'Clicks', format: 'number' },
   spend: { label: 'Gasto', format: 'currency' },
 };
+
+function resolveCountryLabel(codeOrName: string) {
+  const normalized = (codeOrName ?? '').trim();
+  if (!normalized) return 'N/D';
+
+  if (!/^[A-Za-z]{2}$/.test(normalized)) {
+    return normalized;
+  }
+
+  try {
+    const displayNames = new Intl.DisplayNames(['es'], { type: 'region' });
+    return displayNames.of(normalized.toUpperCase()) ?? normalized.toUpperCase();
+  } catch {
+    return normalized.toUpperCase();
+  }
+}
 
 export function MetaAdsDashboard() {
   const [campaignId, setCampaignId] = useState('');
@@ -466,12 +482,34 @@ export function MetaAdsDashboard() {
   const metricLabel = audienceMetricMeta[audienceMetric].label;
   const metricFormat = audienceMetricMeta[audienceMetric].format;
 
-  const audienceByAgeGender = useMemo(() => {
+  const audienceByAge = useMemo(() => {
     const grouped = new Map<string, number>();
 
     for (const row of scopedAudienceRows) {
       if (row.breakdown_type !== 'age_gender') continue;
-      const key = `${row.breakdown_value_1} · ${row.breakdown_value_2 || 'unknown'}`;
+      const key = row.breakdown_value_1 || 'N/D';
+      const value = audienceMetric === 'clicks'
+        ? Number(row.clicks ?? 0)
+        : audienceMetric === 'reach'
+          ? Number(row.reach ?? 0)
+          : audienceMetric === 'spend'
+            ? Number(row.spend ?? 0)
+            : Number(row.impressions ?? 0);
+      grouped.set(key, (grouped.get(key) ?? 0) + value);
+    }
+
+    return Array.from(grouped.entries())
+      .map(([label, value]) => ({ label, value }))
+      .sort((a, b) => b.value - a.value)
+      .slice(0, 12);
+  }, [scopedAudienceRows, audienceMetric]);
+
+  const audienceByGender = useMemo(() => {
+    const grouped = new Map<string, number>();
+
+    for (const row of scopedAudienceRows) {
+      if (row.breakdown_type !== 'age_gender') continue;
+      const key = row.breakdown_value_2 || 'unknown';
       const value = audienceMetric === 'clicks'
         ? Number(row.clicks ?? 0)
         : audienceMetric === 'reach'
@@ -493,7 +531,7 @@ export function MetaAdsDashboard() {
 
     for (const row of scopedAudienceRows) {
       if (row.breakdown_type !== 'country') continue;
-      const key = row.breakdown_value_1 || 'N/D';
+      const key = resolveCountryLabel(row.breakdown_value_1 || 'N/D');
       const value = audienceMetric === 'clicks'
         ? Number(row.clicks ?? 0)
         : audienceMetric === 'reach'
@@ -674,26 +712,44 @@ export function MetaAdsDashboard() {
             className="mt-2 w-full max-w-xs rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-800 outline-none transition focus:border-red-300 focus:ring-2 focus:ring-red-100"
           >
             <option value="impressions">Impresiones</option>
-            <option value="reach">Reach</option>
+            <option value="reach">Alcance</option>
             <option value="clicks">Clicks</option>
             <option value="spend">Gasto</option>
           </select>
         </div>
 
-        <div className="grid grid-cols-1 gap-4 xl:grid-cols-3 mt-4">
-          <ChartCard title={`${metricLabel} por edad y género`} icon={<Target size={16} className="text-red-600" />}>
-            {audienceByAgeGender.length === 0 ? (
+        <div className="grid grid-cols-1 gap-4 xl:grid-cols-4 mt-4">
+          <ChartCard title={`${metricLabel} por edad`} icon={<Target size={16} className="text-red-600" />}>
+            {audienceByAge.length === 0 ? (
               <div className="rounded-xl border border-dashed border-gray-200 bg-gray-50 px-4 py-6 text-sm text-gray-500">
-                No hay data de edad/género todavía.
+                No hay data de edad todavía.
               </div>
             ) : (
               <ResponsiveContainer width="100%" height={280}>
-                <BarChart data={audienceByAgeGender} layout="vertical" margin={{ left: 10, right: 10 }}>
+                <BarChart data={audienceByAge} layout="vertical" margin={{ left: 10, right: 10 }}>
                   <CartesianGrid strokeDasharray="3 3" horizontal={false} />
                   <XAxis type="number" tick={{ fontSize: 12 }} />
                   <YAxis type="category" dataKey="label" width={90} tick={{ fontSize: 11 }} />
                   <Tooltip {...chartTooltipStyle} formatter={(value) => formatCompactMetric(Number(value ?? 0), metricFormat)} />
                   <Bar dataKey="value" fill="#dc2626" radius={[0, 8, 8, 0]} isAnimationActive={false} />
+                </BarChart>
+              </ResponsiveContainer>
+            )}
+          </ChartCard>
+
+          <ChartCard title={`${metricLabel} por género`} icon={<Target size={16} className="text-red-600" />}>
+            {audienceByGender.length === 0 ? (
+              <div className="rounded-xl border border-dashed border-gray-200 bg-gray-50 px-4 py-6 text-sm text-gray-500">
+                No hay data de género todavía.
+              </div>
+            ) : (
+              <ResponsiveContainer width="100%" height={280}>
+                <BarChart data={audienceByGender}>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                  <XAxis dataKey="label" tick={{ fontSize: 11 }} interval={0} />
+                  <YAxis tick={{ fontSize: 12 }} />
+                  <Tooltip {...chartTooltipStyle} formatter={(value) => formatCompactMetric(Number(value ?? 0), metricFormat)} />
+                  <Bar dataKey="value" fill="#dc2626" radius={[8, 8, 0, 0]} isAnimationActive={false} />
                 </BarChart>
               </ResponsiveContainer>
             )}
