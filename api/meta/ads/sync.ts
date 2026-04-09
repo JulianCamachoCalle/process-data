@@ -1081,6 +1081,115 @@ export default async function metaAdsSyncHandler(req: VercelRequest, res: Vercel
       });
     }
 
+    if (mode === 'pages_sql') {
+      const { since, until } = resolvePagesDateRange(req, body);
+      const supabase = getSupabaseAdminClient();
+
+      const pagesQuery = supabase
+        .from('meta_pages' as never)
+        .select('business_id,name,category,fan_count,followers_count,link,picture_url,has_page_token' as never)
+        .order('followers_count' as never, { ascending: false })
+        .order('fan_count' as never, { ascending: false });
+
+      const postsDateStart = since ? `${since}T00:00:00.000Z` : null;
+      const postsDateEnd = until ? `${until}T23:59:59.999Z` : null;
+
+      let postsQuery = supabase
+        .from('meta_page_posts' as never)
+        .select('business_id,page_business_id,page_name,message,created_time,permalink_url,full_picture,reactions,comments,shares' as never)
+        .order('created_time' as never, { ascending: false })
+        .limit(500);
+
+      if (postsDateStart) postsQuery = postsQuery.gte('created_time' as never, postsDateStart as never);
+      if (postsDateEnd) postsQuery = postsQuery.lte('created_time' as never, postsDateEnd as never);
+
+      let insightsQuery = supabase
+        .from('meta_page_insights_daily' as never)
+        .select('page_business_id,page_name,metric,date_end,value' as never)
+        .order('date_end' as never, { ascending: true });
+
+      if (since) insightsQuery = insightsQuery.gte('date_end' as never, since as never);
+      if (until) insightsQuery = insightsQuery.lte('date_end' as never, until as never);
+
+      let postInsightsSnapshotsQuery = supabase
+        .from('meta_page_post_insights_snapshots' as never)
+        .select('post_business_id,page_business_id,page_name,metric,period,snapshot_date,value' as never)
+        .order('snapshot_date' as never, { ascending: true });
+
+      if (since) postInsightsSnapshotsQuery = postInsightsSnapshotsQuery.gte('snapshot_date' as never, since as never);
+      if (until) postInsightsSnapshotsQuery = postInsightsSnapshotsQuery.lte('snapshot_date' as never, until as never);
+
+      const [pagesResult, postsResult, insightsResult, postInsightsSnapshotsResult] = await Promise.all([
+        pagesQuery,
+        postsQuery,
+        insightsQuery,
+        postInsightsSnapshotsQuery,
+      ]);
+
+      if (pagesResult.error) {
+        throw new Error(`No se pudo cargar páginas desde SQL: ${pagesResult.error.message}`);
+      }
+      if (postsResult.error) {
+        throw new Error(`No se pudo cargar posts desde SQL: ${postsResult.error.message}`);
+      }
+      if (insightsResult.error) {
+        throw new Error(`No se pudo cargar page insights desde SQL: ${insightsResult.error.message}`);
+      }
+      if (postInsightsSnapshotsResult.error) {
+        throw new Error(`No se pudo cargar post insights snapshots desde SQL: ${postInsightsSnapshotsResult.error.message}`);
+      }
+
+      return res.status(200).json({
+        success: true,
+        resource: 'pages',
+        duration_ms: 0,
+        since: since ?? '',
+        until: until ?? '',
+        pages: (pagesResult.data ?? []).map((item) => ({
+          id: toNullableText((item as JsonRecord).business_id),
+          name: toNullableText((item as JsonRecord).name),
+          category: toNullableText((item as JsonRecord).category),
+          fan_count: Math.trunc(toNumberOrZero((item as JsonRecord).fan_count)),
+          followers_count: Math.trunc(toNumberOrZero((item as JsonRecord).followers_count)),
+          link: toNullableText((item as JsonRecord).link),
+          picture_url: toNullableText((item as JsonRecord).picture_url),
+          has_page_token: Boolean((item as JsonRecord).has_page_token),
+        })),
+        posts: (postsResult.data ?? []).map((item) => ({
+          id: toNullableText((item as JsonRecord).business_id),
+          page_id: toNullableText((item as JsonRecord).page_business_id),
+          page_name: toNullableText((item as JsonRecord).page_name),
+          message: toNullableText((item as JsonRecord).message),
+          created_time: toNullableIsoTimestamp((item as JsonRecord).created_time),
+          permalink_url: toNullableText((item as JsonRecord).permalink_url),
+          full_picture: toNullableText((item as JsonRecord).full_picture),
+          reactions: Math.trunc(toNumberOrZero((item as JsonRecord).reactions)),
+          comments: Math.trunc(toNumberOrZero((item as JsonRecord).comments)),
+          shares: Math.trunc(toNumberOrZero((item as JsonRecord).shares)),
+        })),
+        insights: (insightsResult.data ?? []).map((item) => ({
+          page_id: toNullableText((item as JsonRecord).page_business_id),
+          page_name: toNullableText((item as JsonRecord).page_name),
+          metric: toNullableText((item as JsonRecord).metric),
+          end_time: toNullableText((item as JsonRecord).date_end)
+            ? `${toNullableText((item as JsonRecord).date_end)}T00:00:00.000Z`
+            : null,
+          value: toNumberOrZero((item as JsonRecord).value),
+        })),
+        post_insights_snapshots: (postInsightsSnapshotsResult.data ?? []).map((item) => ({
+          post_id: toNullableText((item as JsonRecord).post_business_id),
+          page_id: toNullableText((item as JsonRecord).page_business_id),
+          page_name: toNullableText((item as JsonRecord).page_name),
+          metric: toNullableText((item as JsonRecord).metric),
+          period: toNullableText((item as JsonRecord).period),
+          snapshot_date: toNullableText((item as JsonRecord).snapshot_date),
+          value: toNumberOrZero((item as JsonRecord).value),
+        })),
+        errors: [],
+        permissions_hint: ['sql_mode_only'],
+      });
+    }
+
     const resource = resolveSyncResource(req, body);
     const accountBusinessId = resource === 'ads' ? resolveAccountId(req, body) : null;
     accountBusinessIdForRun = accountBusinessId;
@@ -1628,7 +1737,7 @@ export default async function metaAdsSyncHandler(req: VercelRequest, res: Vercel
         path: `${accountBusinessId}/insights`,
         params: {
           level: 'ad',
-          fields: 'ad_id,date_start,date_stop,spend,impressions,reach,clicks,ctr,cpc,age,gender,country,publisher_platform',
+          fields: 'ad_id,date_start,date_stop,spend,impressions,reach,clicks,ctr,cpc',
           breakdowns,
           date_preset: datePreset,
           time_increment: timeIncrement,
