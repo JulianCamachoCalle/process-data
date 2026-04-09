@@ -170,6 +170,42 @@ type MetaInsightHourlyRow = {
   raw_payload: JsonRecord;
 };
 
+type MetaPageRow = {
+  business_id: string;
+  name: string | null;
+  category: string | null;
+  fan_count: number;
+  followers_count: number;
+  link: string | null;
+  picture_url: string | null;
+  has_page_token: boolean;
+  last_synced_at: string;
+  raw_payload: JsonRecord;
+};
+
+type MetaPagePostRow = {
+  business_id: string;
+  page_business_id: string;
+  page_name: string | null;
+  message: string | null;
+  created_time: string | null;
+  permalink_url: string | null;
+  full_picture: string | null;
+  reactions: number;
+  comments: number;
+  shares: number;
+  raw_payload: JsonRecord;
+};
+
+type MetaPageInsightDailyRow = {
+  page_business_id: string;
+  page_name: string | null;
+  metric: string;
+  date_end: string;
+  value: number;
+  raw_payload: JsonRecord;
+};
+
 function asSingleParam(value: unknown): string | undefined {
   if (Array.isArray(value)) {
     const first = value[0];
@@ -421,6 +457,12 @@ function asObjectArray(value: unknown): JsonRecord[] {
     .filter((item) => Object.keys(item).length > 0);
 }
 
+function sanitizePagePayload(payload: JsonRecord) {
+  const clone: JsonRecord = { ...payload };
+  delete clone.access_token;
+  return clone;
+}
+
 function requireMetaAccessToken() {
   const token = process.env.META_ACCESS_TOKEN;
   if (!token) {
@@ -499,7 +541,10 @@ async function parseMetaResponse(response: Response, context: string): Promise<J
     const errorPayload = ensureObject(payload);
     const metaError = ensureObject(errorPayload.error);
     const message = toNullableText(metaError.message) ?? raw.trim() ?? 'Error desconocido';
-    throw new Error(`Meta ${context} error (${response.status}): ${message}`);
+    const code = toNullableText(metaError.code);
+    const subcode = toNullableText(metaError.error_subcode);
+    const codeLabel = [code, subcode ? `subcode=${subcode}` : null].filter(Boolean).join(', ');
+    throw new Error(`Meta ${context} error (${response.status}${codeLabel ? ` | ${codeLabel}` : ''}): ${message}`);
   }
 
   return ensureObject(payload);
@@ -1024,42 +1069,33 @@ export default async function metaAdsSyncHandler(req: VercelRequest, res: Vercel
         maxRuntimeMs,
       });
 
-      const pages = pagesResult.rows.map((page) => {
+      const pageTokenById = new Map<string, string>();
+      const pages: MetaPageRow[] = pagesResult.rows.map((page) => {
         const picture = ensureObject(page.picture);
         const pictureData = ensureObject(picture.data);
+        const pageId = toNullableText(page.id);
+        const pageToken = toNullableText(page.access_token);
+        if (pageId && pageToken) {
+          pageTokenById.set(pageId, pageToken);
+        }
 
         return {
-          id: toNullableText(page.id),
+          business_id: pageId ?? '',
           name: toNullableText(page.name),
           category: toNullableText(page.category),
           fan_count: Math.trunc(toNumberOrZero(page.fan_count)),
           followers_count: Math.trunc(toNumberOrZero(page.followers_count)),
           link: toNullableText(page.link),
           picture_url: toNullableText(pictureData.url),
-          has_page_token: Boolean(toNullableText(page.access_token)),
+          has_page_token: Boolean(pageToken),
+          last_synced_at: new Date().toISOString(),
+          raw_payload: sanitizePagePayload(page),
         };
-      }).filter((page) => Boolean(page.id));
+      }).filter((page) => Boolean(page.business_id));
 
-      const postsRows: Array<{
-        id: string;
-        page_id: string;
-        page_name: string | null;
-        message: string | null;
-        created_time: string | null;
-        permalink_url: string | null;
-        full_picture: string | null;
-        reactions: number;
-        comments: number;
-        shares: number;
-      }> = [];
+      const postsRows: MetaPagePostRow[] = [];
 
-      const insightsRows: Array<{
-        page_id: string;
-        page_name: string | null;
-        metric: string;
-        end_time: string | null;
-        value: number;
-      }> = [];
+      const insightsRows: MetaPageInsightDailyRow[] = [];
 
       const pageErrors: Array<{
         page_id: string;
@@ -1071,17 +1107,19 @@ export default async function metaAdsSyncHandler(req: VercelRequest, res: Vercel
       const postsSummary: SyncResourceSummary = { pages_fetched: 0, pulled: 0, upserted: 0, has_more: false };
       const insightsSummary: SyncResourceSummary = { pages_fetched: 0, pulled: 0, upserted: 0, has_more: false };
 
+      let pagesLoopStoppedEarly = false;
       for (const page of pages) {
         if (!hasRuntimeBudget(startedAt, maxRuntimeMs)) {
+          pagesLoopStoppedEarly = true;
           break;
         }
 
-        const pageId = page.id;
+        const pageId = page.business_id;
         if (!pageId) {
           continue;
         }
 
-        const pageToken = toNullableText((pagesResult.rows.find((item) => toNullableText(item.id) === pageId) ?? {}).access_token);
+        const pageToken = pageTokenById.get(pageId) ?? null;
         if (!pageToken) {
           pageErrors.push({
             page_id: pageId,
@@ -1120,8 +1158,8 @@ export default async function metaAdsSyncHandler(req: VercelRequest, res: Vercel
             if (!postId) continue;
 
             postsRows.push({
-              id: postId,
-              page_id: pageId,
+              business_id: postId,
+              page_business_id: pageId,
               page_name: page.name,
               message: toNullableText(post.message),
               created_time: toNullableIsoTimestamp(post.created_time),
@@ -1130,6 +1168,7 @@ export default async function metaAdsSyncHandler(req: VercelRequest, res: Vercel
               reactions: Math.trunc(toNumberOrZero(reactionsSummary.total_count)),
               comments: Math.trunc(toNumberOrZero(commentsSummary.total_count)),
               shares: Math.trunc(toNumberOrZero(shares.count)),
+              raw_payload: post,
             });
           }
         } catch (error) {
@@ -1157,12 +1196,20 @@ export default async function metaAdsSyncHandler(req: VercelRequest, res: Vercel
 
             const values = asObjectArray(item.values);
             for (const point of values) {
+              const endTime = toNullableIsoTimestamp(point.end_time);
+              const dateEnd = endTime?.slice(0, 10);
+              if (!dateEnd) continue;
+
               insightsRows.push({
-                page_id: pageId,
+                page_business_id: pageId,
                 page_name: page.name,
                 metric,
-                end_time: toNullableIsoTimestamp(point.end_time),
+                date_end: dateEnd,
                 value: toNumberOrZero(point.value),
+                raw_payload: {
+                  metric,
+                  point,
+                },
               });
               insightsSummary.pulled += 1;
             }
@@ -1178,12 +1225,31 @@ export default async function metaAdsSyncHandler(req: VercelRequest, res: Vercel
       }
 
       const durationMs = Date.now() - startedAt;
+      const upsertedPages = await upsertRows(
+        'meta_pages',
+        pages as JsonRecord[],
+        'business_id',
+      );
+      const upsertedPosts = await upsertRows(
+        'meta_page_posts',
+        postsRows as JsonRecord[],
+        'business_id',
+      );
+      const upsertedInsights = await upsertRows(
+        'meta_page_insights_daily',
+        insightsRows as JsonRecord[],
+        'page_business_id,metric,date_end',
+      );
+
+      postsSummary.upserted = upsertedPosts;
+      insightsSummary.upserted = upsertedInsights;
+
       const resourcesPayload: JsonRecord = {
         pages: {
           pages_fetched: pagesResult.pages_fetched,
           pulled: pages.length,
-          upserted: 0,
-          has_more: pagesResult.has_more,
+          upserted: upsertedPages,
+          has_more: pagesResult.has_more || pagesLoopStoppedEarly,
         },
         posts: postsSummary,
         insights: insightsSummary,
@@ -1191,14 +1257,14 @@ export default async function metaAdsSyncHandler(req: VercelRequest, res: Vercel
 
       const totals = {
         pulled: pages.length + postsRows.length + insightsRows.length,
-        upserted: 0,
+        upserted: upsertedPages + upsertedPosts + upsertedInsights,
       };
 
       await finalizeSyncRun(syncRunId, {
         finished_at: new Date().toISOString(),
         duration_ms: durationMs,
         success: true,
-        early_stop: pagesResult.stopped_early ? { resource: 'insights', reason: 'max_runtime_ms' } : null,
+        early_stop: (pagesResult.stopped_early || pagesLoopStoppedEarly) ? { resource: 'insights', reason: 'max_runtime_ms' } : null,
         totals,
         resources: resourcesPayload,
         error_message: null,
@@ -1210,15 +1276,46 @@ export default async function metaAdsSyncHandler(req: VercelRequest, res: Vercel
         duration_ms: durationMs,
         since,
         until,
-        pages,
-        posts: postsRows.sort((a, b) => (b.created_time ?? '').localeCompare(a.created_time ?? '')).slice(0, 300),
-        insights: insightsRows,
+        pages: pages.map((item) => ({
+          id: item.business_id,
+          name: item.name,
+          category: item.category,
+          fan_count: item.fan_count,
+          followers_count: item.followers_count,
+          link: item.link,
+          picture_url: item.picture_url,
+          has_page_token: item.has_page_token,
+        })),
+        posts: postsRows
+          .sort((a, b) => (b.created_time ?? '').localeCompare(a.created_time ?? ''))
+          .slice(0, 300)
+          .map((item) => ({
+            id: item.business_id,
+            page_id: item.page_business_id,
+            page_name: item.page_name,
+            message: item.message,
+            created_time: item.created_time,
+            permalink_url: item.permalink_url,
+            full_picture: item.full_picture,
+            reactions: item.reactions,
+            comments: item.comments,
+            shares: item.shares,
+          })),
+        insights: insightsRows.map((item) => ({
+          page_id: item.page_business_id,
+          page_name: item.page_name,
+          metric: item.metric,
+          end_time: `${item.date_end}T00:00:00.000Z`,
+          value: item.value,
+        })),
         errors: pageErrors,
         permissions_hint: [
-          'pages_show_list',
-          'pages_read_engagement',
-          'read_insights',
-          'pages_read_user_content',
+          'pages_show_list (listar páginas desde /me/accounts)',
+          'pages_read_engagement (leer contenido de página)',
+          'pages_read_user_content (según contenido/visibilidad)',
+          'read_insights (métricas de página)',
+          'business_management (puede ser requerido con business system user)',
+          'Page access token requerido para campos con información de usuarios',
         ],
         totals,
         resources: resourcesPayload,

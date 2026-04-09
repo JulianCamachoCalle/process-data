@@ -3,7 +3,7 @@ import { Activity, BarChart3, BookImage, Eye, FileText, Megaphone } from 'lucide
 import { Bar, BarChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { formatNumberEs } from '../../../lib/tableHelpers';
 import { ChartCard, KpiCard, KpiGrid, MetaAdsFiltersPanel, MetaAdsPageHero, Section } from '../ads/metaAdsShared';
-import { useMetaPagesData } from './useMetaPagesData';
+import { syncMetaPages, useMetaPagesData } from './useMetaPagesData';
 
 type InsightPoint = {
   date: string;
@@ -25,6 +25,8 @@ export function MetaPagesHub() {
   const [until, setUntil] = useState(getTodayDateOnly());
   const [draftSince, setDraftSince] = useState(since);
   const [draftUntil, setDraftUntil] = useState(until);
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [syncMessage, setSyncMessage] = useState<string | null>(null);
 
   const pagesQuery = useMetaPagesData({ since, until });
 
@@ -87,6 +89,20 @@ export function MetaPagesHub() {
     };
   }, [pages, posts]);
 
+  const handleSyncNow = async () => {
+    try {
+      setIsSyncing(true);
+      setSyncMessage(null);
+      await syncMetaPages({ since, until });
+      setSyncMessage('Sincronización a SQL completada. Refrescando vista...');
+      await pagesQuery.refetch();
+    } catch (error) {
+      setSyncMessage(error instanceof Error ? error.message : 'No se pudo sincronizar Meta Pages.');
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
   if (pagesQuery.isLoading) {
     return (
       <div className="flex items-center justify-center h-full text-gray-500 bg-white rounded-2xl border border-gray-200 shadow-sm p-6">
@@ -135,6 +151,27 @@ export function MetaPagesHub() {
         }}
         isApplyDisabled={!isFiltersDirty}
       />
+
+      <div className="rounded-2xl border border-gray-200 bg-white px-4 py-3 shadow-[0_20px_42px_-34px_rgba(15,23,42,0.9)]">
+        <div className="flex items-center justify-between gap-3 flex-wrap">
+          <p className="text-sm text-gray-600">
+            Fuente actual: <span className="font-semibold text-gray-900">SQL (Supabase)</span>.
+          </p>
+          <button
+            type="button"
+            onClick={() => void handleSyncNow()}
+            disabled={isSyncing}
+            className="inline-flex h-[40px] items-center justify-center rounded-xl bg-red-600 px-4 text-sm font-semibold text-white shadow-[0_18px_32px_-18px_rgba(220,38,38,0.95)] transition hover:bg-red-700 disabled:cursor-not-allowed disabled:bg-red-300 disabled:shadow-none"
+          >
+            {isSyncing ? 'Sincronizando...' : 'Sincronizar ahora (Meta → SQL)'}
+          </button>
+        </div>
+        {syncMessage ? (
+          <p className={`mt-2 text-xs ${syncMessage.includes('completada') ? 'text-emerald-700' : 'text-red-600'}`}>
+            {syncMessage}
+          </p>
+        ) : null}
+      </div>
 
       <Section title="KPI (Pages)">
         <KpiGrid>
