@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 import type { ReactNode } from 'react';
-import { isDateRangeValid } from '../lib/dateRange';
+import { getDateRangePresets, isDateRangeValid } from '../lib/dateRange';
 
 type DateLike = string | null | undefined;
 
@@ -19,6 +19,7 @@ export type DateRangePickerProps = {
   showValidationMessage?: boolean;
   validationMessage?: string;
   onValidityChange?: (isValid: boolean) => void;
+  showPresets?: boolean;
   className?: string;
   layoutClassName?: string;
   fieldClassName?: string;
@@ -53,6 +54,7 @@ export function DateRangePicker({
   showValidationMessage = true,
   validationMessage = 'La fecha de inicio no puede ser mayor que la fecha de fin.',
   onValidityChange,
+  showPresets = true,
   className,
   layoutClassName,
   fieldClassName,
@@ -67,6 +69,7 @@ export function DateRangePicker({
   const end = normalizeDate(endDate);
   const isValid = isDateRangeValid(start, end);
   const isDisabled = disabled || loading;
+  const presets = getDateRangePresets();
 
   useEffect(() => {
     onValidityChange?.(isValid);
@@ -109,6 +112,36 @@ export function DateRangePicker({
           </div>
         </label>
       </div>
+
+      {showPresets ? (
+        <div className="flex flex-wrap items-center gap-2" aria-label="Presets de rango de fechas">
+          {presets.map((preset) => {
+            const isSelected = start === preset.startDate && end === preset.endDate;
+
+            return (
+              <button
+                key={preset.key}
+                type="button"
+                onClick={() => {
+                  onStartDateChange(preset.startDate);
+                  onEndDateChange(preset.endDate);
+                }}
+                disabled={isDisabled}
+                className={joinClasses(
+                  'rounded-full border px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.08em] transition',
+                  isSelected
+                    ? 'border-blue-500 bg-blue-50 text-blue-700'
+                    : 'border-gray-300 bg-white text-gray-600 hover:border-gray-400 hover:text-gray-800',
+                  isDisabled && 'cursor-not-allowed opacity-60 hover:border-gray-300 hover:text-gray-600'
+                )}
+                aria-pressed={isSelected}
+              >
+                {preset.label}
+              </button>
+            );
+          })}
+        </div>
+      ) : null}
 
       {showValidationMessage && !isValid ? (
         <p className={joinClasses('text-xs font-semibold uppercase tracking-[0.12em] text-amber-700', helperClassName)}>
