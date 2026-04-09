@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
 import { Activity, Clock3, Database, Filter, RefreshCw } from 'lucide-react';
 import { DateRangePicker } from '../../../components/DateRangePicker';
+import type { DateRangeValue } from '../../../lib/dateRange';
 import { isDateRangeValid } from '../../../lib/dateRange';
 import { formatCurrencyPen, formatNumberEs } from '../../../lib/tableHelpers';
 import type { MetaSyncRunRow } from './types';
@@ -37,8 +38,10 @@ export function MetaAdsFiltersPanel({
   onDraftDateToChange,
   onApply,
   onClear,
+  onPresetApply,
   isApplyDisabled,
   extra,
+  extraContainerClassName,
 }: {
   draftDateFrom: string;
   draftDateTo: string;
@@ -46,11 +49,14 @@ export function MetaAdsFiltersPanel({
   onDraftDateToChange: (value: string) => void;
   onApply: () => void;
   onClear: () => void;
+  onPresetApply?: (value: DateRangeValue) => void;
   isApplyDisabled?: boolean;
   extra?: ReactNode;
+  extraContainerClassName?: string;
 }) {
   const hasExtra = Boolean(extra);
   const hasValidDateRange = isDateRangeValid(draftDateFrom, draftDateTo);
+  const resolvedExtraContainerClassName = extraContainerClassName ?? 'grid grid-cols-1 gap-3 lg:grid-cols-2 2xl:grid-cols-3';
 
   return (
     <div className="rounded-[28px] border border-gray-200 bg-white/95 p-5 shadow-[0_24px_52px_-38px_rgba(15,23,42,0.95)] backdrop-blur-sm space-y-5">
@@ -63,18 +69,18 @@ export function MetaAdsFiltersPanel({
         </div>
       </div>
 
-      <div className={`grid grid-cols-1 gap-4 ${hasExtra ? 'xl:grid-cols-[repeat(3,minmax(0,1fr))_minmax(0,2fr)_auto]' : 'xl:grid-cols-[minmax(0,2fr)_auto]'}`}>
-
-        {extra}
-
+      <div className={`grid grid-cols-1 gap-4 ${hasExtra ? 'xl:grid-cols-[minmax(0,18rem)_minmax(0,1fr)_auto] xl:items-end' : 'xl:grid-cols-[minmax(0,18rem)_auto] xl:items-end'}`}>
         <DateRangePicker
           startDate={draftDateFrom}
           endDate={draftDateTo}
           onStartDateChange={onDraftDateFromChange}
           onEndDateChange={onDraftDateToChange}
+          onPresetApply={(preset) => onPresetApply?.({ startDate: preset.startDate, endDate: preset.endDate })}
           className="xl:col-span-1"
           layoutClassName="grid-cols-1 gap-4 md:grid-cols-2"
         />
+
+        {hasExtra ? <div className={resolvedExtraContainerClassName}>{extra}</div> : null}
 
         <div className="flex min-w-[220px] items-end justify-start gap-2 xl:justify-end">
           <button

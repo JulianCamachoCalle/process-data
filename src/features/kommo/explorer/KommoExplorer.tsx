@@ -198,6 +198,7 @@ export function KommoExplorer() {
 }
 
 function KommoExplorerView({ resource }: { resource: KommoResourceKey }) {
+  const PAGE_SIZE = 10;
   const navigate = useNavigate();
   const uiConfig = useMemo(() => getKommoResource(resource) ?? KOMMO_RESOURCES[0], [resource]);
   const groupedResources = useMemo(() => getGroupedKommoResources(), []);
@@ -206,7 +207,6 @@ function KommoExplorerView({ resource }: { resource: KommoResourceKey }) {
   const [q, setQ] = useState('');
   const [sort, setSort] = useState(() => uiConfig.defaultSort);
   const [order, setOrder] = useState<'asc' | 'desc'>('desc');
-  const [pageSize, setPageSize] = useState(50);
   const [page, setPage] = useState(1);
 
   useEffect(() => {
@@ -218,13 +218,13 @@ function KommoExplorerView({ resource }: { resource: KommoResourceKey }) {
   }, [searchInput]);
 
   const listQuery = useQuery({
-    queryKey: ['kommo-data', resource, page, pageSize, sort, order, q],
+    queryKey: ['kommo-data', resource, page, PAGE_SIZE, sort, order, q],
     queryFn: async (): Promise<ApiResponse> => {
       const params = new URLSearchParams();
       params.set('name', 'KOMMO');
       params.set('resource', resource);
       params.set('page', String(page));
-      params.set('pageSize', String(pageSize));
+      params.set('pageSize', String(PAGE_SIZE));
       params.set('sort', sort);
       params.set('order', order);
       if (q) params.set('q', q);
@@ -243,7 +243,7 @@ function KommoExplorerView({ resource }: { resource: KommoResourceKey }) {
   });
 
   const total = listQuery.data?.total ?? 0;
-  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const safePage = Math.min(page, totalPages);
   const rows = listQuery.data?.rows ?? [];
   const columns = listQuery.data?.columns ?? [];
@@ -424,10 +424,11 @@ function KommoExplorerView({ resource }: { resource: KommoResourceKey }) {
                       <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
                         <button
                           onClick={() => openDetail(row)}
-                          className="inline-flex items-center gap-1.5 rounded-xl border border-gray-200 bg-white px-3 py-1.5 text-xs font-semibold text-gray-700 transition-colors hover:border-red-200 hover:bg-red-50 hover:text-red-700"
+                          className="inline-flex h-8 w-8 items-center justify-center rounded-xl border border-gray-200 bg-white text-gray-700 transition-colors hover:border-red-200 hover:bg-red-50 hover:text-red-700"
+                          title="Ver detalle"
+                          aria-label="Ver detalle"
                         >
                           <Eye size={13} />
-                          Ver detalle
                         </button>
                       </td>
                       {columns.map((col) => {
@@ -454,19 +455,7 @@ function KommoExplorerView({ resource }: { resource: KommoResourceKey }) {
         <div className="flex flex-wrap items-center justify-between gap-4 border-t border-gray-200 bg-white px-6 py-4">
           <div className="inline-flex items-center gap-2 text-sm text-gray-600">
             <span>Filas por página:</span>
-            <select
-              value={pageSize}
-              onChange={(e) => {
-                setPageSize(Number(e.target.value));
-                setPage(1);
-              }}
-              className="rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm"
-            >
-              <option value={25}>25</option>
-              <option value={50}>50</option>
-              <option value={100}>100</option>
-              <option value={200}>200</option>
-            </select>
+            <span className="inline-flex items-center rounded-xl border border-gray-300 bg-gray-50 px-3 py-2 text-sm font-semibold text-gray-700">10</span>
           </div>
 
           <div className="inline-flex items-center gap-2">

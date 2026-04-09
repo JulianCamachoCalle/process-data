@@ -7,7 +7,6 @@ import {
   Trash2,
   TableProperties,
   Search,
-  Filter,
   CalendarRange,
   Tags,
   BarChart3,
@@ -53,12 +52,13 @@ interface InsightCard {
 }
 
 export function DynamicTable({ sheetName, columns, rows, onEdit }: DynamicTableProps) {
+  const PAGE_SIZE = 10;
   const deleteMutation = useDeleteRow(sheetName);
   const [searchTerm, setSearchTerm] = useState('');
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
-  const [selectedType, setSelectedType] = useState('');
-  const [pageSize, setPageSize] = useState(10);
+  const [selectedFilterColumn, setSelectedFilterColumn] = useState('');
+  const [selectedFilterValue, setSelectedFilterValue] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
 
   const dateColumn = useMemo(() => {
@@ -107,6 +107,41 @@ export function DynamicTable({ sheetName, columns, rows, onEdit }: DynamicTableP
     ).sort((a, b) => a.localeCompare(b, 'es'));
   }, [rows, typeColumn]);
 
+  const filterableColumns = useMemo(() => {
+    return columns.filter((column) => {
+      const normalized = normalizeText(column);
+      if (!normalized || normalized === '__id' || normalized === '_id' || normalized === '_rownumber') {
+        return false;
+      }
+
+      return rows.some((row) => String(row[column] ?? '').trim().length > 0);
+    });
+  }, [columns, rows]);
+
+  const activeFilterColumn = useMemo(() => {
+    if (!filterableColumns.length) return '';
+    if (selectedFilterColumn && filterableColumns.includes(selectedFilterColumn)) return selectedFilterColumn;
+    if (typeColumn && filterableColumns.includes(typeColumn)) return typeColumn;
+    return filterableColumns[0] ?? '';
+  }, [filterableColumns, selectedFilterColumn, typeColumn]);
+
+  const filterValueOptions = useMemo(() => {
+    if (!activeFilterColumn) return [] as string[];
+
+    return Array.from(
+      new Set(
+        rows
+          .map((row) => String(row[activeFilterColumn] ?? '').trim())
+          .filter((value) => value.length > 0),
+      ),
+    ).sort((a, b) => a.localeCompare(b, 'es'));
+  }, [rows, activeFilterColumn]);
+
+  const hasSelectedFilterValue = useMemo(() => {
+    if (!selectedFilterValue) return false;
+    return filterValueOptions.some((option) => normalizeText(option) === normalizeText(selectedFilterValue));
+  }, [filterValueOptions, selectedFilterValue]);
+
   const filteredRows = useMemo(() => {
     return rows.filter((row) => {
       if (searchTerm) {
@@ -118,9 +153,9 @@ export function DynamicTable({ sheetName, columns, rows, onEdit }: DynamicTableP
         if (!hasQueryMatch) return false;
       }
 
-      if (typeColumn && selectedType) {
-        const rowType = String(row[typeColumn] ?? '').trim();
-        if (normalizeText(rowType) !== normalizeText(selectedType)) return false;
+      if (activeFilterColumn && selectedFilterValue && hasSelectedFilterValue) {
+        const rowValue = String(row[activeFilterColumn] ?? '').trim();
+        if (normalizeText(rowValue) !== normalizeText(selectedFilterValue)) return false;
       }
 
       if (dateColumn && (dateFrom || dateTo)) {
@@ -144,32 +179,32 @@ export function DynamicTable({ sheetName, columns, rows, onEdit }: DynamicTableP
 
       return true;
     });
-  }, [rows, columns, searchTerm, typeColumn, selectedType, dateColumn, dateFrom, dateTo]);
+  }, [rows, columns, searchTerm, activeFilterColumn, selectedFilterValue, hasSelectedFilterValue, dateColumn, dateFrom, dateTo]);
 
-  const totalPages = Math.max(1, Math.ceil(filteredRows.length / pageSize));
+  const totalPages = Math.max(1, Math.ceil(filteredRows.length / PAGE_SIZE));
   const safeCurrentPage = Math.min(currentPage, totalPages);
 
   const paginatedRows = useMemo(() => {
-    const start = (safeCurrentPage - 1) * pageSize;
-    return filteredRows.slice(start, start + pageSize);
-  }, [filteredRows, safeCurrentPage, pageSize]);
+    const start = (safeCurrentPage - 1) * PAGE_SIZE;
+    return filteredRows.slice(start, start + PAGE_SIZE);
+  }, [filteredRows, safeCurrentPage]);
 
   const typeCoverage = useMemo(() => {
     if (!typeColumn || !typeOptions.length) return null;
 
-    if (selectedType) {
+    if (activeFilterColumn === typeColumn && selectedFilterValue && hasSelectedFilterValue) {
       const totalSelectedType = rows.filter(
-        (row) => normalizeText(String(row[typeColumn] ?? '')) === normalizeText(selectedType)
+        (row) => normalizeText(String(row[typeColumn] ?? '')) === normalizeText(selectedFilterValue)
       ).length;
 
       const visibleSelectedType = filteredRows.filter(
-        (row) => normalizeText(String(row[typeColumn] ?? '')) === normalizeText(selectedType)
+        (row) => normalizeText(String(row[typeColumn] ?? '')) === normalizeText(selectedFilterValue)
       ).length;
 
       const percentage = totalSelectedType > 0 ? (visibleSelectedType / totalSelectedType) * 100 : 0;
 
       return {
-        label: `Cobertura del tipo: ${selectedType}`,
+        label: `Cobertura del tipo: ${selectedFilterValue}`,
         value: `${Math.round(percentage)}%`,
         helper: `${visibleSelectedType} de ${totalSelectedType} visibles`,
       };
@@ -187,7 +222,7 @@ export function DynamicTable({ sheetName, columns, rows, onEdit }: DynamicTableP
       value: `${Math.round(percentage)}%`,
       helper: `${visibleTypes} de ${totalTypes} tipos`,
     };
-  }, [typeColumn, typeOptions.length, selectedType, rows, filteredRows]);
+  }, [typeColumn, typeOptions.length, activeFilterColumn, selectedFilterValue, hasSelectedFilterValue, rows, filteredRows]);
 
   const numericInsight = useMemo(() => {
     if (!numericInsightColumn) return null;
@@ -509,11 +544,12 @@ export function DynamicTable({ sheetName, columns, rows, onEdit }: DynamicTableP
     setSearchTerm('');
     setDateFrom('');
     setDateTo('');
-    setSelectedType('');
+    setSelectedFilterValue('');
     setCurrentPage(1);
   };
 
-  const hasActiveFilters = Boolean(searchTerm || dateFrom || dateTo || selectedType);
+  const hasActiveFilters = Boolean(searchTerm || dateFrom || dateTo || selectedFilterValue);
+  const searchColumnClassName = dateColumn ? 'xl:col-span-3 xl:self-end' : 'xl:col-span-8 xl:self-end';
 
   if (!columns.length) {
     return <div className="p-4 text-gray-500">No hay datos disponibles en esta tabla.</div>;
@@ -544,20 +580,7 @@ export function DynamicTable({ sheetName, columns, rows, onEdit }: DynamicTableP
               </span>
             </div>
 
-            <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-4 gap-3">
-              <label className="rounded-xl border border-gray-200 bg-white px-3 py-2 inline-flex items-center gap-2 text-sm text-gray-600">
-                <Search size={15} className="text-gray-400" />
-                <input
-                    value={searchTerm}
-                    onChange={(event) => {
-                      setSearchTerm(event.target.value);
-                      setCurrentPage(1);
-                    }}
-                  placeholder="Buscar en todos los campos"
-                  className="w-full bg-transparent outline-none"
-                />
-              </label>
-
+            <div className="grid grid-cols-1 gap-3 lg:grid-cols-2 xl:grid-cols-12 xl:items-end">
               {dateColumn ? (
                 <DateRangePicker
                   startDate={dateFrom}
@@ -570,9 +593,10 @@ export function DynamicTable({ sheetName, columns, rows, onEdit }: DynamicTableP
                     setDateTo(value);
                     setCurrentPage(1);
                   }}
+                  showPresets={false}
                   startLabel="Fecha desde"
                   endLabel="Fecha hasta"
-                  className="xl:col-span-2"
+                  className="xl:col-span-5"
                   layoutClassName="grid-cols-1 gap-3 sm:grid-cols-2"
                   fieldClassName="rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm text-gray-600 shadow-none"
                   labelClassName="sr-only"
@@ -582,37 +606,68 @@ export function DynamicTable({ sheetName, columns, rows, onEdit }: DynamicTableP
                   startAdornment={<CalendarRange size={15} className="text-gray-400" />}
                   endAdornment={<CalendarRange size={15} className="text-gray-400" />}
                 />
-              ) : (
-                <div className="rounded-xl border border-dashed border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-500 inline-flex items-center gap-2 xl:col-span-2">
-                  <Filter size={14} className="text-gray-400" />
-                  Filtro de fecha no disponible
-                </div>
-              )}
+              ) : null}
 
-              {typeColumn ? (
-                <label className="rounded-xl border border-gray-200 bg-white px-3 py-2 inline-flex items-center gap-2 text-sm text-gray-600">
-                  <Tags size={15} className="text-gray-400" />
-                  <select
-                    value={selectedType}
-                    onChange={(event) => {
-                      setSelectedType(event.target.value);
-                      setCurrentPage(1);
-                    }}
-                    className="w-full bg-transparent outline-none"
-                    aria-label="Filtrar por tipo o categoría"
-                  >
-                    <option value="">Todos los tipos</option>
-                    {typeOptions.map((option) => (
-                      <option key={option} value={option}>
-                        {option}
-                      </option>
-                    ))}
-                  </select>
-                </label>
+              <label className={`rounded-xl bg-white px-0 py-0 inline-flex items-center gap-2 text-sm text-gray-600 ${searchColumnClassName}`}>
+                <Search size={15} className="text-gray-400 shrink-0" />
+                <input
+                  value={searchTerm}
+                  onChange={(event) => {
+                    setSearchTerm(event.target.value);
+                    setCurrentPage(1);
+                  }}
+                  placeholder="Buscar en todos los campos"
+                  className="w-full rounded-xl border border-gray-300 bg-white px-3 py-2.5 text-sm text-gray-800 outline-none transition focus:border-red-300 focus:ring-2 focus:ring-red-100"
+                />
+              </label>
+
+              {filterableColumns.length ? (
+                <div className="grid grid-cols-1 gap-3 xl:col-span-4 xl:grid-cols-2 xl:self-end">
+                  <label className="rounded-xl bg-white px-0 py-0 inline-flex items-center gap-2 text-sm text-gray-600">
+                    <Tags size={15} className="text-gray-400 shrink-0" />
+                    <select
+                      value={activeFilterColumn}
+                      onChange={(event) => {
+                        setSelectedFilterColumn(event.target.value);
+                        setSelectedFilterValue('');
+                        setCurrentPage(1);
+                      }}
+                      className="w-full rounded-xl border border-gray-300 bg-white px-3 py-2.5 text-sm text-gray-800 outline-none transition focus:border-red-300 focus:ring-2 focus:ring-red-100"
+                      aria-label="Seleccionar campo a filtrar"
+                    >
+                      {filterableColumns.map((column) => (
+                        <option key={column} value={column}>
+                          {column}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+
+                  <label className="rounded-xl bg-white px-0 py-0 inline-flex items-center gap-2 text-sm text-gray-600">
+                    <ListFilter size={15} className="text-gray-400 shrink-0" />
+                    <select
+                      value={selectedFilterValue}
+                      onChange={(event) => {
+                        setSelectedFilterValue(event.target.value);
+                        setCurrentPage(1);
+                      }}
+                      className="w-full rounded-xl border border-gray-300 bg-white px-3 py-2.5 text-sm text-gray-800 outline-none transition focus:border-red-300 focus:ring-2 focus:ring-red-100"
+                      aria-label={activeFilterColumn ? `Filtrar por valor de ${activeFilterColumn}` : 'Filtrar por valor'}
+                      disabled={!activeFilterColumn || filterValueOptions.length === 0}
+                    >
+                      <option value="">Todos los valores</option>
+                      {filterValueOptions.map((option) => (
+                        <option key={option} value={option}>
+                          {option}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
               ) : (
-                <div className="rounded-xl border border-dashed border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-500 inline-flex items-center gap-2">
+                <div className="rounded-xl border border-dashed border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-500 inline-flex items-center gap-2 xl:col-span-4 xl:self-end">
                   <Tags size={14} className="text-gray-400" />
-                  No se detectó columna de tipo o categoría
+                  No hay columnas con valores para filtrar
                 </div>
               )}
             </div>
@@ -670,17 +725,19 @@ export function DynamicTable({ sheetName, columns, rows, onEdit }: DynamicTableP
                         <div className="flex gap-2">
                           <button
                             onClick={() => onEdit(row)}
-                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-red-200 bg-red-50 text-red-700 hover:bg-red-100 transition-colors text-xs font-semibold"
+                            className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-red-200 bg-red-50 text-red-700 hover:bg-red-100 transition-colors"
+                            title="Editar"
+                            aria-label="Editar"
                           >
                             <Pencil size={13} />
-                            Editar
                           </button>
                           <button
                             onClick={() => handleDelete(row)}
-                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-gray-300 bg-white text-gray-700 hover:bg-gray-100 transition-colors text-xs font-semibold"
+                            className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-gray-300 bg-white text-gray-700 hover:bg-gray-100 transition-colors"
+                            title="Eliminar"
+                            aria-label="Eliminar"
                           >
                             <Trash2 size={13} />
-                            Eliminar
                           </button>
                         </div>
                       </td>
@@ -700,18 +757,7 @@ export function DynamicTable({ sheetName, columns, rows, onEdit }: DynamicTableP
         <div className="px-5 py-3 border-t border-gray-200 bg-white flex items-center justify-between gap-4 flex-wrap">
           <div className="inline-flex items-center gap-2 text-sm text-gray-600">
             <span>Filas por página:</span>
-            <select
-              value={pageSize}
-              onChange={(event) => {
-                setPageSize(Number(event.target.value));
-                setCurrentPage(1);
-              }}
-              className="px-2 py-1 rounded-lg border border-gray-300 bg-white text-sm"
-            >
-              <option value={10}>10</option>
-              <option value={25}>25</option>
-              <option value={50}>50</option>
-            </select>
+            <span className="inline-flex items-center rounded-lg border border-gray-300 bg-gray-50 px-2 py-1 text-sm font-semibold text-gray-700">10</span>
           </div>
 
           <div className="inline-flex items-center gap-2">

@@ -855,10 +855,16 @@ export function KommoLeadsInsights() {
             endDate={draftEndDate}
             onStartDateChange={(value) => setDraftStartDate(value || null)}
             onEndDateChange={(value) => setDraftEndDate(value || null)}
+            onPresetApply={({ startDate, endDate }) => {
+              setDraftStartDate(startDate);
+              setDraftEndDate(endDate);
+              setAppliedStartDate(startDate);
+              setAppliedEndDate(endDate);
+            }}
             startLabel="Desde"
             endLabel="Hasta"
             layoutClassName="grid grid-cols-1 gap-3 sm:grid-cols-2"
-            fieldClassName="rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3 text-xs font-semibold uppercase tracking-wide text-gray-600 shadow-none"
+            fieldClassName="rounded-2xl border border-gray-200 bg-white px-4 py-3 text-xs font-semibold uppercase tracking-wide text-gray-600 shadow-none"
             labelClassName="text-xs font-semibold uppercase tracking-wide text-gray-600"
             inputWrapperClassName="mt-2 rounded-xl border border-gray-200 bg-white px-0 py-0"
             inputClassName="px-3 py-2.5 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-red-200"
@@ -1189,7 +1195,7 @@ function PipelineComparisonSelect({
   const peers = new Set(selectedPeers.filter(Boolean));
 
   return (
-    <label className="rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3 text-xs font-semibold uppercase tracking-wide text-gray-600">
+    <label className="rounded-2xl border border-gray-200 bg-white px-4 py-3 text-xs font-semibold uppercase tracking-wide text-gray-600">
       <span>{label}</span>
       <select
         value={value}

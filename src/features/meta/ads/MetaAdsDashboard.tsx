@@ -684,9 +684,15 @@ export function MetaAdsDashboard() {
         draftDateTo={draftDateTo}
         onDraftDateFromChange={setDraftDateFrom}
         onDraftDateToChange={setDraftDateTo}
+        onPresetApply={({ startDate, endDate }) => {
+          setDraftDateFrom(startDate);
+          setDraftDateTo(endDate);
+          setDateFrom(startDate);
+          setDateTo(endDate);
+        }}
         extra={(
           <>
-            <label className="rounded-2xl border border-gray-200 bg-gray-50/70 px-4 py-3 text-sm text-gray-600 shadow-inner shadow-white/50">
+            <label className="rounded-2xl bg-white px-0 py-0 text-sm text-gray-600">
               <span className="text-xs font-semibold uppercase tracking-wide text-gray-500">Campaña</span>
               <select
                 value={draftCampaignId}
@@ -706,7 +712,7 @@ export function MetaAdsDashboard() {
               </select>
             </label>
 
-            <label className="rounded-2xl border border-gray-200 bg-gray-50/70 px-4 py-3 text-sm text-gray-600 shadow-inner shadow-white/50">
+            <label className="rounded-2xl bg-white px-0 py-0 text-sm text-gray-600">
               <span className="text-xs font-semibold uppercase tracking-wide text-gray-500">Conjunto de ads</span>
               <select
                 value={draftAdsetId}
@@ -725,7 +731,7 @@ export function MetaAdsDashboard() {
               </select>
             </label>
 
-            <label className="rounded-2xl border border-gray-200 bg-gray-50/70 px-4 py-3 text-sm text-gray-600 shadow-inner shadow-white/50">
+            <label className="rounded-2xl bg-white px-0 py-0 text-sm text-gray-600">
               <span className="text-xs font-semibold uppercase tracking-wide text-gray-500">Ad</span>
               <select
                 value={draftAdId}
@@ -784,7 +790,7 @@ export function MetaAdsDashboard() {
           </div>
         ) : null}
 
-        <div className="mt-4 rounded-xl border border-gray-200 bg-gray-50/70 px-4 py-3">
+        <div className="mt-4 rounded-xl border border-gray-200 bg-white px-4 py-3">
           <label className="text-xs font-semibold uppercase tracking-wide text-gray-500">Métrica para gráficos de audiencia</label>
           <select
             value={audienceMetric}
@@ -1176,8 +1182,23 @@ export function MetaAdsDashboard() {
         <div className="rounded-[24px] border border-gray-200 bg-white p-4 shadow-[0_16px_34px_-28px_rgba(15,23,42,0.8)] space-y-4">
           <p className="text-xs font-semibold uppercase tracking-[0.18em] text-gray-500">Filtros de comparativa (independientes)</p>
 
-          <div className="grid grid-cols-1 gap-4 xl:grid-cols-[repeat(2,minmax(0,1fr))_minmax(0,2fr)_auto]">
-            <label className="rounded-2xl border border-gray-200 bg-gray-50/70 px-4 py-3 text-sm text-gray-600 shadow-inner shadow-white/50">
+          <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,18rem)_repeat(2,minmax(0,1fr))_auto] xl:items-end">
+            <DateRangePicker
+              startDate={comparisonDraftDateFrom}
+              endDate={comparisonDraftDateTo}
+              onStartDateChange={setComparisonDraftDateFrom}
+              onEndDateChange={setComparisonDraftDateTo}
+              onPresetApply={({ startDate, endDate }) => {
+                setComparisonDraftDateFrom(startDate);
+                setComparisonDraftDateTo(endDate);
+                setComparisonDateFrom(startDate);
+                setComparisonDateTo(endDate);
+              }}
+              className="xl:col-span-1"
+              layoutClassName="grid-cols-1 gap-4 md:grid-cols-2"
+            />
+
+            <label className="rounded-2xl bg-white px-0 py-0 text-sm text-gray-600">
               <span className="text-xs font-semibold uppercase tracking-wide text-gray-500">Campaña</span>
               <select
                 value={comparisonDraftCampaignId}
@@ -1196,7 +1217,7 @@ export function MetaAdsDashboard() {
               </select>
             </label>
 
-            <label className="rounded-2xl border border-gray-200 bg-gray-50/70 px-4 py-3 text-sm text-gray-600 shadow-inner shadow-white/50">
+            <label className="rounded-2xl bg-white px-0 py-0 text-sm text-gray-600">
               <span className="text-xs font-semibold uppercase tracking-wide text-gray-500">Ad</span>
               <select
                 value={comparisonDraftAdId}
@@ -1211,15 +1232,6 @@ export function MetaAdsDashboard() {
                 ))}
               </select>
             </label>
-
-            <DateRangePicker
-              startDate={comparisonDraftDateFrom}
-              endDate={comparisonDraftDateTo}
-              onStartDateChange={setComparisonDraftDateFrom}
-              onEndDateChange={setComparisonDraftDateTo}
-              className="xl:col-span-1"
-              layoutClassName="grid-cols-1 gap-4 md:grid-cols-2"
-            />
 
             <div className="flex items-end justify-start gap-2 xl:justify-end">
               <button
@@ -1486,7 +1498,7 @@ function ComparisonSelect({
   onChange: (value: string) => void;
 }) {
   return (
-    <label className="rounded-2xl border border-gray-200 bg-white px-4 py-3 text-sm text-gray-600 shadow-[inset_0_1px_0_rgba(255,255,255,0.85)]">
+    <label className="rounded-2xl bg-white px-0 py-0 text-sm text-gray-600">
       <span className="text-xs font-semibold uppercase tracking-[0.18em] text-gray-500">{label}</span>
       <select
         value={value}

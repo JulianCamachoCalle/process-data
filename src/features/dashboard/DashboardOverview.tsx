@@ -290,7 +290,6 @@ export function DashboardOverview() {
             inputWrapperClassName="mt-1 rounded-xl border border-gray-300 px-3 py-2"
             inputClassName="text-sm"
           />
-          <div className="text-xs font-semibold text-gray-500 uppercase tracking-[0.22em]">Periodo: <span className="font-semibold text-gray-800">{metrics.periodo}</span></div>
         </div>
       </div>
 
