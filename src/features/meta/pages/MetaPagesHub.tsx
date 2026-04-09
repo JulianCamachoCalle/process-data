@@ -239,13 +239,13 @@ export function MetaPagesHub() {
                     <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-500">Compartidos</p>
                     <p className="mt-1 text-sm font-bold text-gray-800">{formatNumberEs(post.shares)}</p>
                   </div>
-                  <div className="rounded-lg border border-gray-200 bg-red-50 px-2.5 py-2">
-                    <p className="text-[10px] font-semibold uppercase tracking-wide text-red-500">Clicks</p>
-                    <p className="mt-1 text-sm font-bold text-red-700">{formatNumberEs(post.clicks)}</p>
+                  <div className="rounded-lg border border-gray-200 bg-green-50 px-2.5 py-2">
+                    <p className="text-[10px] font-semibold uppercase tracking-wide text-green-500">Clicks</p>
+                    <p className="mt-1 text-sm font-bold text-green-700">{formatNumberEs(post.clicks)}</p>
                   </div>
-                  <div className="col-span-2 rounded-lg border border-blue-200 bg-blue-50 px-2.5 py-2">
-                    <p className="text-[10px] font-semibold uppercase tracking-wide text-blue-600">Vistas</p>
-                    <p className="mt-1 text-sm font-bold text-blue-700">{formatNumberEs(post.views)}</p>
+                  <div className="col-span-2 rounded-lg border border-green-200 bg-green-50 px-2.5 py-2">
+                    <p className="text-[10px] font-semibold uppercase tracking-wide text-green-600">Vistas</p>
+                    <p className="mt-1 text-sm font-bold text-green-700">{formatNumberEs(post.views)}</p>
                   </div>
                 </div>
                 {post.permalink_url ? (
