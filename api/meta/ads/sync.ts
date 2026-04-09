@@ -1361,6 +1361,9 @@ export default async function metaAdsSyncHandler(req: VercelRequest, res: Vercel
     const timeIncrement = getRequestParam(req, body, 'time_increment')?.trim() || '1';
     const limit = parsePositiveInt(getRequestParam(req, body, 'limit'), DEFAULT_LIMIT, 500);
     const maxPages = parsePositiveInt(getRequestParam(req, body, 'max_pages'), DEFAULT_MAX_PAGES);
+    const postLimit = parsePositiveInt(getRequestParam(req, body, 'post_limit'), limit, 500);
+    const postMaxPages = parsePositiveInt(getRequestParam(req, body, 'post_max_pages'), maxPages);
+    const hourlyAdLimit = parsePositiveInt(getRequestParam(req, body, 'hourly_ad_limit'), 100, 500);
     const maxRuntimeMs = parsePositiveInt(
       getRequestParam(req, body, 'max_runtime_ms'),
       DEFAULT_MAX_RUNTIME_MS,
@@ -1382,6 +1385,9 @@ export default async function metaAdsSyncHandler(req: VercelRequest, res: Vercel
         time_increment: timeIncrement,
         limit,
         max_pages: maxPages,
+        post_limit: postLimit,
+        post_max_pages: postMaxPages,
+        hourly_ad_limit: hourlyAdLimit,
         max_runtime_ms: maxRuntimeMs,
       },
     });
@@ -1536,7 +1542,7 @@ export default async function metaAdsSyncHandler(req: VercelRequest, res: Vercel
         try {
           const postParams: Record<string, string> = {
             fields: 'id,message,created_time,permalink_url,full_picture,shares,reactions.summary(true).limit(0),comments.summary(true).limit(0)',
-            limit: '25',
+            limit: String(postLimit),
           };
           if (since) postParams.since = since;
           if (until) postParams.until = until;
@@ -1545,7 +1551,7 @@ export default async function metaAdsSyncHandler(req: VercelRequest, res: Vercel
             token: pageToken,
             path: `${pageId}/posts`,
             params: postParams,
-            maxPages: Math.min(maxPages, 3),
+            maxPages: postMaxPages,
             startedAt,
             maxRuntimeMs,
           });
@@ -1884,7 +1890,7 @@ export default async function metaAdsSyncHandler(req: VercelRequest, res: Vercel
           time_increment: timeIncrement,
           limit: String(limit),
         },
-        maxPages: Math.min(maxPages, 5),
+        maxPages,
         startedAt,
         maxRuntimeMs,
         mapItem: (item) => mapInsightBreakdownRow(item, breakdownType),
@@ -1963,7 +1969,7 @@ export default async function metaAdsSyncHandler(req: VercelRequest, res: Vercel
         };
 
         if (hourlyDebug.pulled === 0 && hasRuntimeBudget(startedAt, maxRuntimeMs)) {
-          const adIds = await getAdIdsForAccount(accountBusinessId, 30);
+          const adIds = await getAdIdsForAccount(accountBusinessId, hourlyAdLimit);
 
           for (const adId of adIds) {
             if (!hasRuntimeBudget(startedAt, maxRuntimeMs)) {
@@ -1981,7 +1987,7 @@ export default async function metaAdsSyncHandler(req: VercelRequest, res: Vercel
                 time_increment: '1',
                 limit: String(limit),
               },
-              maxPages: 2,
+              maxPages,
               startedAt,
               maxRuntimeMs,
               mapItem: (item) => mapInsightHourlyRow(item, adId),
