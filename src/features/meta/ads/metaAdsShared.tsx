@@ -1,5 +1,7 @@
 import type { ReactNode } from 'react';
 import { Activity, Clock3, Database, Filter, RefreshCw } from 'lucide-react';
+import { DateRangePicker } from '../../../components/DateRangePicker';
+import { isDateRangeValid } from '../../../lib/dateRange';
 import { formatCurrencyPen, formatNumberEs } from '../../../lib/tableHelpers';
 import type { MetaSyncRunRow } from './types';
 import { formatDateTime, formatDurationMs, formatSyncResourceSummary } from './metaAdsUtils';
@@ -48,6 +50,7 @@ export function MetaAdsFiltersPanel({
   extra?: ReactNode;
 }) {
   const hasExtra = Boolean(extra);
+  const hasValidDateRange = isDateRangeValid(draftDateFrom, draftDateTo);
 
   return (
     <div className="rounded-[28px] border border-gray-200 bg-white/95 p-5 shadow-[0_24px_52px_-38px_rgba(15,23,42,0.95)] backdrop-blur-sm space-y-5">
@@ -60,29 +63,18 @@ export function MetaAdsFiltersPanel({
         </div>
       </div>
 
-      <div className={`grid grid-cols-1 gap-4 ${hasExtra ? 'xl:grid-cols-[repeat(5,minmax(0,1fr))_auto]' : 'xl:grid-cols-[repeat(2,minmax(0,1fr))_auto]'}`}>
+      <div className={`grid grid-cols-1 gap-4 ${hasExtra ? 'xl:grid-cols-[repeat(3,minmax(0,1fr))_minmax(0,2fr)_auto]' : 'xl:grid-cols-[minmax(0,2fr)_auto]'}`}>
 
         {extra}
 
-        <label className="rounded-2xl border border-gray-200 bg-gray-50/70 px-4 py-3 text-sm text-gray-600 shadow-inner shadow-white/50">
-          <span className="text-xs font-semibold uppercase tracking-wide text-gray-500">Fecha inicio</span>
-          <input
-            type="date"
-            value={draftDateFrom}
-            onChange={(event) => onDraftDateFromChange(event.target.value)}
-            className="mt-2 w-full rounded-xl border border-gray-300 bg-white px-3 py-2.5 text-sm text-gray-800 outline-none transition focus:border-red-300 focus:ring-2 focus:ring-red-100"
-          />
-        </label>
-
-        <label className="rounded-2xl border border-gray-200 bg-gray-50/70 px-4 py-3 text-sm text-gray-600 shadow-inner shadow-white/50">
-          <span className="text-xs font-semibold uppercase tracking-wide text-gray-500">Fecha fin</span>
-          <input
-            type="date"
-            value={draftDateTo}
-            onChange={(event) => onDraftDateToChange(event.target.value)}
-            className="mt-2 w-full rounded-xl border border-gray-300 bg-white px-3 py-2.5 text-sm text-gray-800 outline-none transition focus:border-red-300 focus:ring-2 focus:ring-red-100"
-          />
-        </label>
+        <DateRangePicker
+          startDate={draftDateFrom}
+          endDate={draftDateTo}
+          onStartDateChange={onDraftDateFromChange}
+          onEndDateChange={onDraftDateToChange}
+          className="xl:col-span-1"
+          layoutClassName="grid-cols-1 gap-4 md:grid-cols-2"
+        />
 
         <div className="flex min-w-[220px] items-end justify-start gap-2 xl:justify-end">
           <button
@@ -95,7 +87,7 @@ export function MetaAdsFiltersPanel({
           <button
             type="button"
             onClick={onApply}
-            disabled={isApplyDisabled}
+            disabled={isApplyDisabled || !hasValidDateRange}
             className="inline-flex h-[42px] items-center justify-center rounded-xl bg-red-600 px-4 text-sm font-semibold text-white shadow-[0_18px_32px_-18px_rgba(220,38,38,0.95)] transition hover:bg-red-700 disabled:cursor-not-allowed disabled:bg-red-300 disabled:shadow-none"
           >
             Aplicar filtros

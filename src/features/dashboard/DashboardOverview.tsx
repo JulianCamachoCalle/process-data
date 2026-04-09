@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import { Activity, AlertCircle, Filter } from 'lucide-react';
+import { DateRangePicker } from '../../components/DateRangePicker';
 import { useSheetData } from '../../hooks/useSheetData';
 import { formatCurrencyPen, formatNumberEs, normalizeText, parseDateValue, parseNumericValue } from '../../lib/tableHelpers';
 
@@ -277,24 +278,18 @@ export function DashboardOverview() {
           Filtros
         </p>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3 items-end mt-2">
-          <label className="text-xs font-semibold text-gray-500 uppercase tracking-[0.22em]">
-            Fecha inicio
-            <input
-              type="date"
-              value={dateFrom}
-              onChange={(event) => setDateFrom(event.target.value)}
-              className="mt-1 w-full rounded-xl border border-gray-300 px-3 py-2"
-            />
-          </label>
-          <label className="text-xs font-semibold text-gray-500 uppercase tracking-[0.22em]">
-            Fecha fin
-            <input
-              type="date"
-              value={dateTo}
-              onChange={(event) => setDateTo(event.target.value)}
-              className="mt-1 w-full rounded-xl border border-gray-300 px-3 py-2"
-            />
-          </label>
+          <DateRangePicker
+            startDate={dateFrom}
+            endDate={dateTo}
+            onStartDateChange={setDateFrom}
+            onEndDateChange={setDateTo}
+            className="md:col-span-2"
+            layoutClassName="grid-cols-1 gap-3 md:grid-cols-2"
+            fieldClassName="rounded-none border-0 bg-transparent px-0 py-0 text-xs font-semibold uppercase tracking-[0.22em] text-gray-500 shadow-none"
+            labelClassName="text-xs font-semibold uppercase tracking-[0.22em] text-gray-500"
+            inputWrapperClassName="mt-1 rounded-xl border border-gray-300 px-3 py-2"
+            inputClassName="text-sm"
+          />
           <div className="text-xs font-semibold text-gray-500 uppercase tracking-[0.22em]">Periodo: <span className="font-semibold text-gray-800">{metrics.periodo}</span></div>
         </div>
       </div>

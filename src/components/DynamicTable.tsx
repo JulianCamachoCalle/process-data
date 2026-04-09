@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import Swal from 'sweetalert2';
 import { useDeleteRow } from '../hooks/useSheetData';
+import { DateRangePicker } from './DateRangePicker';
 import {
   Pencil,
   Trash2,
@@ -558,42 +559,31 @@ export function DynamicTable({ sheetName, columns, rows, onEdit }: DynamicTableP
               </label>
 
               {dateColumn ? (
-                <label className="rounded-xl border border-gray-200 bg-white px-3 py-2 inline-flex items-center gap-2 text-sm text-gray-600">
-                  <CalendarRange size={15} className="text-gray-400" />
-                  <input
-                    type="date"
-                    value={dateFrom}
-                    onChange={(event) => {
-                      setDateFrom(event.target.value);
-                      setCurrentPage(1);
-                    }}
-                    className="w-full bg-transparent outline-none"
-                    aria-label="Fecha desde"
-                  />
-                </label>
+                <DateRangePicker
+                  startDate={dateFrom}
+                  endDate={dateTo}
+                  onStartDateChange={(value) => {
+                    setDateFrom(value);
+                    setCurrentPage(1);
+                  }}
+                  onEndDateChange={(value) => {
+                    setDateTo(value);
+                    setCurrentPage(1);
+                  }}
+                  startLabel="Fecha desde"
+                  endLabel="Fecha hasta"
+                  className="xl:col-span-2"
+                  layoutClassName="grid-cols-1 gap-3 sm:grid-cols-2"
+                  fieldClassName="rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm text-gray-600 shadow-none"
+                  labelClassName="sr-only"
+                  inputWrapperClassName="mt-0 border-0 bg-transparent px-0 py-0"
+                  inputClassName="text-sm"
+                  helperClassName="tracking-normal"
+                  startAdornment={<CalendarRange size={15} className="text-gray-400" />}
+                  endAdornment={<CalendarRange size={15} className="text-gray-400" />}
+                />
               ) : (
-                <div className="rounded-xl border border-dashed border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-500 inline-flex items-center gap-2">
-                  <CalendarRange size={14} className="text-gray-400" />
-                  No se detectó columna de fecha
-                </div>
-              )}
-
-              {dateColumn ? (
-                <label className="rounded-xl border border-gray-200 bg-white px-3 py-2 inline-flex items-center gap-2 text-sm text-gray-600">
-                  <CalendarRange size={15} className="text-gray-400" />
-                  <input
-                    type="date"
-                    value={dateTo}
-                    onChange={(event) => {
-                      setDateTo(event.target.value);
-                      setCurrentPage(1);
-                    }}
-                    className="w-full bg-transparent outline-none"
-                    aria-label="Fecha hasta"
-                  />
-                </label>
-              ) : (
-                <div className="rounded-xl border border-dashed border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-500 inline-flex items-center gap-2">
+                <div className="rounded-xl border border-dashed border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-500 inline-flex items-center gap-2 xl:col-span-2">
                   <Filter size={14} className="text-gray-400" />
                   Filtro de fecha no disponible
                 </div>

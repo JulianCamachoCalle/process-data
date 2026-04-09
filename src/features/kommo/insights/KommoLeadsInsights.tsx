@@ -23,6 +23,8 @@ import {
   XAxis,
   YAxis,
 } from 'recharts';
+import { DateRangePicker } from '../../../components/DateRangePicker';
+import { isDateRangeValid } from '../../../lib/dateRange';
 
 type PipelineInsight = {
   pipeline_id: number | null;
@@ -514,12 +516,27 @@ function buildEmptyPayload(startDate: string | null, endDate: string | null, err
   };
 }
 
+function buildPdfFileName(startDate: string | null, endDate: string | null) {
+  const startSegment = startDate ?? 'sin-inicio';
+  const endSegment = endDate ?? 'sin-fin';
+  return `leads-insights-${startSegment}_${endSegment}.pdf`;
+}
+
+function nextFrame() {
+  return new Promise<void>((resolve) => {
+    window.requestAnimationFrame(() => resolve());
+  });
+}
+
 export function KommoLeadsInsights() {
   const [draftStartDate, setDraftStartDate] = useState<string | null>(null);
   const [draftEndDate, setDraftEndDate] = useState<string | null>(null);
   const [appliedStartDate, setAppliedStartDate] = useState<string | null>(null);
   const [appliedEndDate, setAppliedEndDate] = useState<string | null>(null);
   const [isExportingPdf, setIsExportingPdf] = useState(false);
+  const [pdfExportError, setPdfExportError] = useState<string | null>(null);
+  const [pdfExportSuccess, setPdfExportSuccess] = useState<string | null>(null);
+  const hasValidDraftDateRange = isDateRangeValid(draftStartDate, draftEndDate);
 
   const insightsQuery = useQuery({
     queryKey: ['kommo-leads-insights', appliedStartDate, appliedEndDate],
@@ -641,39 +658,119 @@ export function KommoLeadsInsights() {
       timeStyle: 'short',
     }).format(new Date());
 
+    setPdfExportError(null);
+    setPdfExportSuccess(null);
     setIsExportingPdf(true);
 
-    try {
-      const exportWindow = window.open('', '_blank', 'noopener,noreferrer');
-      if (!exportWindow) {
-        throw new Error('El navegador bloqueó la ventana de exportación.');
-      }
+    const exportRoot = document.createElement('div');
+    exportRoot.style.position = 'fixed';
+    exportRoot.style.left = '-10000px';
+    exportRoot.style.top = '0';
+    exportRoot.style.zIndex = '-1';
+    exportRoot.style.pointerEvents = 'none';
+    exportRoot.style.width = '1120px';
+    exportRoot.style.background = '#f8fafc';
+    exportRoot.setAttribute('aria-hidden', 'true');
 
-      exportWindow.document.open();
-      exportWindow.document.write(buildExportDocument({
+    try {
+      const [{ default: html2canvas }, { jsPDF }] = await Promise.all([
+        import('html2canvas'),
+        import('jspdf'),
+      ]);
+
+      const exportHtml = buildExportDocument({
         data: currentData,
         generatedAt,
         appliedRangeLabel: `${currentData.filters.start_date ?? 'sin inicio'} — ${currentData.filters.end_date ?? 'sin fin'}`,
         statusesByNameForPie,
-      }));
-      exportWindow.document.close();
+      });
 
-      const finalizePrint = () => {
-        exportWindow.focus();
-        window.setTimeout(() => {
-          exportWindow.print();
-          setIsExportingPdf(false);
-        }, 150);
-      };
+      const parsed = new DOMParser().parseFromString(exportHtml, 'text/html');
+      const inlineStyle = parsed.querySelector('style')?.textContent;
+      const bodyMarkup = parsed.body.innerHTML;
 
-      if (exportWindow.document.readyState === 'complete') {
-        finalizePrint();
-      } else {
-        exportWindow.addEventListener('load', finalizePrint, { once: true });
+      if (!bodyMarkup.trim()) {
+        throw new Error('No se pudo construir el contenido del reporte para exportación.');
       }
+
+      exportRoot.innerHTML = `${inlineStyle ? `<style>${inlineStyle}</style>` : ''}${bodyMarkup}`;
+      document.body.appendChild(exportRoot);
+
+      await nextFrame();
+      if ('fonts' in document) {
+        await document.fonts.ready;
+      }
+
+      const canvas = await html2canvas(exportRoot, {
+        backgroundColor: '#f8fafc',
+        scale: Math.min(window.devicePixelRatio || 1, 2),
+        useCORS: true,
+        logging: false,
+      });
+
+      if (canvas.width === 0 || canvas.height === 0) {
+        throw new Error('El reporte generado no contiene dimensiones válidas para PDF.');
+      }
+
+      const pdf = new jsPDF({
+        orientation: 'portrait',
+        unit: 'mm',
+        format: 'a4',
+        compress: true,
+      });
+
+      const pageWidthMm = pdf.internal.pageSize.getWidth();
+      const pageHeightMm = pdf.internal.pageSize.getHeight();
+      const pixelsPerMm = canvas.width / pageWidthMm;
+      const pageHeightPx = Math.max(1, Math.floor(pageHeightMm * pixelsPerMm));
+
+      let renderedHeightPx = 0;
+      let pageIndex = 0;
+
+      while (renderedHeightPx < canvas.height) {
+        const sliceHeightPx = Math.min(pageHeightPx, canvas.height - renderedHeightPx);
+        const pageCanvas = document.createElement('canvas');
+        pageCanvas.width = canvas.width;
+        pageCanvas.height = sliceHeightPx;
+
+        const context = pageCanvas.getContext('2d');
+        if (!context) {
+          throw new Error('No se pudo preparar una página del PDF para exportación.');
+        }
+
+        context.drawImage(
+          canvas,
+          0,
+          renderedHeightPx,
+          canvas.width,
+          sliceHeightPx,
+          0,
+          0,
+          canvas.width,
+          sliceHeightPx,
+        );
+
+        if (pageIndex > 0) {
+          pdf.addPage();
+        }
+
+        const pageHeightSliceMm = sliceHeightPx / pixelsPerMm;
+        pdf.addImage(pageCanvas.toDataURL('image/png'), 'PNG', 0, 0, pageWidthMm, pageHeightSliceMm, undefined, 'FAST');
+
+        renderedHeightPx += sliceHeightPx;
+        pageIndex += 1;
+      }
+
+      const fileName = buildPdfFileName(currentData.filters.start_date, currentData.filters.end_date);
+      pdf.save(fileName);
+      setPdfExportSuccess(`PDF descargado: ${fileName}`);
     } catch (error) {
       console.error('No se pudo exportar Leads Insights a PDF', error);
-      window.alert('No se pudo exportar el PDF. Probá nuevamente.');
+      setPdfExportError('No se pudo exportar el PDF. Probá nuevamente.');
+    } finally {
+      if (exportRoot.parentNode) {
+        exportRoot.parentNode.removeChild(exportRoot);
+      }
       setIsExportingPdf(false);
     }
   }, [insightsQuery.data, isExportingPdf, statusesByNameForPie]);
@@ -726,6 +823,12 @@ export function KommoLeadsInsights() {
             Ver Explorer
           </Link>
         </div>
+        <div className="w-full print:hidden">
+          {pdfExportError ? <p className="text-xs font-semibold uppercase tracking-[0.12em] text-red-600">{pdfExportError}</p> : null}
+          {!pdfExportError && pdfExportSuccess ? (
+            <p className="text-xs font-semibold uppercase tracking-[0.12em] text-emerald-600">{pdfExportSuccess}</p>
+          ) : null}
+        </div>
       </header>
 
       <section className="space-y-5 rounded-[28px] border border-gray-200 bg-white p-5 shadow-[0_20px_36px_-30px_rgba(15,23,42,0.8)]">
@@ -746,25 +849,20 @@ export function KommoLeadsInsights() {
           <QuickRangeButton label="Todo" onClick={() => applyQuickRange('all')} />
         </div>
 
-        <div className="grid grid-cols-1 gap-3 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] xl:items-end">
-          <label className="rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3 text-xs font-semibold uppercase tracking-wide text-gray-600">
-            <span>Desde</span>
-            <input
-              type="date"
-              className="mt-2 w-full rounded-xl border border-gray-200 bg-white px-3 py-2.5 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-red-200"
-              value={draftStartDate ?? ''}
-              onChange={(event) => setDraftStartDate(event.target.value || null)}
-            />
-          </label>
-          <label className="rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3 text-xs font-semibold uppercase tracking-wide text-gray-600">
-            <span>Hasta</span>
-            <input
-              type="date"
-              className="mt-2 w-full rounded-xl border border-gray-200 bg-white px-3 py-2.5 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-red-200"
-              value={draftEndDate ?? ''}
-              onChange={(event) => setDraftEndDate(event.target.value || null)}
-            />
-          </label>
+        <div className="grid grid-cols-1 gap-3 xl:grid-cols-[minmax(0,2fr)_auto] xl:items-end">
+          <DateRangePicker
+            startDate={draftStartDate}
+            endDate={draftEndDate}
+            onStartDateChange={(value) => setDraftStartDate(value || null)}
+            onEndDateChange={(value) => setDraftEndDate(value || null)}
+            startLabel="Desde"
+            endLabel="Hasta"
+            layoutClassName="grid grid-cols-1 gap-3 sm:grid-cols-2"
+            fieldClassName="rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3 text-xs font-semibold uppercase tracking-wide text-gray-600 shadow-none"
+            labelClassName="text-xs font-semibold uppercase tracking-wide text-gray-600"
+            inputWrapperClassName="mt-2 rounded-xl border border-gray-200 bg-white px-0 py-0"
+            inputClassName="px-3 py-2.5 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-red-200"
+          />
 
           <div className="flex items-end justify-start gap-2 xl:justify-end">
             <button
@@ -777,7 +875,8 @@ export function KommoLeadsInsights() {
             <button
               type="button"
               onClick={applyFilters}
-              className="inline-flex items-center rounded-2xl bg-red-600 px-4 py-2.5 text-xs font-semibold uppercase tracking-[0.16em] text-white shadow-[0_18px_32px_-18px_rgba(220,38,38,0.9)] transition hover:bg-red-700"
+              disabled={!hasValidDraftDateRange}
+              className="inline-flex items-center rounded-2xl bg-red-600 px-4 py-2.5 text-xs font-semibold uppercase tracking-[0.16em] text-white shadow-[0_18px_32px_-18px_rgba(220,38,38,0.9)] transition hover:bg-red-700 disabled:cursor-not-allowed disabled:bg-red-300 disabled:shadow-none"
             >
               Aplicar filtros
             </button>
