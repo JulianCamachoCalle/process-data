@@ -1,13 +1,14 @@
-import { useEffect, useRef, useState } from 'react';
+import { useState } from 'react';
 import {
   ArrowRight,
   BadgeCheck,
-  ChevronDown,
   MapPinned,
   MessageCircle,
+  Moon,
   PackageCheck,
   ShieldCheck,
   Star,
+  Sun,
   Truck,
   Warehouse,
 } from 'lucide-react';
@@ -85,240 +86,102 @@ const testimonials = [
 
 const isoCodes = ['ISO 9001', 'ISO 14001', 'ISO 45001', 'ISO 27001', 'ISO 28000', 'ISO 50001'];
 
-const storyStages = [
-  'Recojo y control del pedido.',
-  'Apertura de caja y preparación final.',
-  'Entrega segura al cliente.',
-];
-
-const clamp = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max);
-
-function useStoryProgress(sectionRef: React.RefObject<HTMLElement | null>) {
-  const [progress, setProgress] = useState(0);
-  const [motionEnabled, setMotionEnabled] = useState(true);
-
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-
-    const mediaQuery = window.matchMedia('(max-width: 767px), (prefers-reduced-motion: reduce)');
-
-    const syncMotionPreference = (matches: boolean) => setMotionEnabled(!matches);
-
-    const updateProgress = () => {
-      const section = sectionRef.current;
-
-      if (!section) {
-        setProgress(0);
-        return;
-      }
-
-      const rect = section.getBoundingClientRect();
-      const totalScrollableDistance = Math.max(section.offsetHeight - window.innerHeight, 1);
-      setProgress(clamp(-rect.top / totalScrollableDistance, 0, 1));
-    };
-
-    syncMotionPreference(mediaQuery.matches);
-
-    const handleMediaChange = (event: MediaQueryListEvent) => {
-      syncMotionPreference(event.matches);
-      updateProgress();
-    };
-
-    if (typeof mediaQuery.addEventListener === 'function') {
-      mediaQuery.addEventListener('change', handleMediaChange);
-    } else {
-      mediaQuery.addListener(handleMediaChange);
-    }
-
-    let rafId = 0;
-
-    const requestUpdate = () => {
-      if (rafId) return;
-      rafId = window.requestAnimationFrame(() => {
-        updateProgress();
-        rafId = 0;
-      });
-    };
-
-    requestUpdate();
-    window.addEventListener('scroll', requestUpdate, { passive: true });
-    window.addEventListener('resize', requestUpdate);
-
-    return () => {
-      window.removeEventListener('scroll', requestUpdate);
-      window.removeEventListener('resize', requestUpdate);
-
-      if (typeof mediaQuery.removeEventListener === 'function') {
-        mediaQuery.removeEventListener('change', handleMediaChange);
-      } else {
-        mediaQuery.removeListener(handleMediaChange);
-      }
-
-      if (rafId) window.cancelAnimationFrame(rafId);
-    };
-  }, [sectionRef]);
-
-  return { progress, motionEnabled };
+function joinClasses(...values: Array<string | false | null | undefined>) {
+  return values.filter(Boolean).join(' ');
 }
 
-function Header() {
+function Header({ isNight, isAnimating, onToggleTheme }: { isNight: boolean; isAnimating: boolean; onToggleTheme: () => void }) {
   return (
-    <header className="fixed inset-x-0 top-0 z-50 border-b border-white/10 bg-black/70 backdrop-blur-lg">
+    <header className={joinClasses(
+      'fixed inset-x-0 top-0 z-50 border-b backdrop-blur-lg transition-colors duration-500',
+      isNight ? 'border-white/10 bg-black/70' : 'border-black/10 bg-white/75',
+    )}>
       <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-5 py-4 sm:px-8 lg:px-10">
         <a href="#inicio" className="flex items-center gap-3">
-          <img src="/icon-dinsides.png" alt="Dinsides Courier" className="h-10 w-10 rounded-2xl border border-white/10 object-cover" />
+          <img src="/icon-dinsides.png" alt="Dinsides Courier" className={joinClasses('h-10 w-10 rounded-2xl border object-cover', isNight ? 'border-white/10' : 'border-black/10')} />
           <div>
             <p className="text-[11px] uppercase tracking-[0.32em] text-red-300">Dinsides Courier</p>
-            <p className="text-sm text-white/80">La satisfacción de tu cliente es nuestra prioridad</p>
+            <p className={joinClasses('text-sm', isNight ? 'text-white/80' : 'text-gray-600')}>La satisfacción de tu cliente es nuestra prioridad</p>
           </div>
         </a>
 
-        <nav className="hidden items-center gap-6 text-sm text-white/70 md:flex">
+        <nav className={joinClasses('hidden items-center gap-6 text-sm md:flex', isNight ? 'text-white/70' : 'text-gray-700')}>
           {navItems.map((item) => (
-            <a key={item.href} href={item.href} className="transition hover:text-white">
+            <a key={item.href} href={item.href} className={joinClasses('transition', isNight ? 'hover:text-white' : 'hover:text-black')}>
               {item.label}
             </a>
           ))}
         </nav>
 
-        <a
-          href={whatsappPremiumUrl}
-          target="_blank"
-          rel="noreferrer"
-          className="inline-flex items-center gap-2 rounded-full border border-red-500/40 bg-red-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-red-500"
-        >
-          <MessageCircle size={16} />
-          Tarifas exclusivas
-        </a>
+        <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={onToggleTheme}
+            aria-label="Cambiar tema día y noche"
+            className={joinClasses(
+              'relative inline-flex h-9 w-9 items-center justify-center rounded-full border transition duration-500',
+              isNight
+                ? 'border-white/15 bg-white/5 text-white hover:bg-white/10'
+                : 'border-black/15 bg-black/5 text-black hover:bg-black/10',
+              isAnimating && 'ring-2 ring-red-400/40',
+            )}
+          >
+            <span className={joinClasses('transition-transform duration-500', isNight ? 'rotate-0 scale-100' : 'rotate-180 scale-95')}>
+              {isNight ? <Moon size={16} /> : <Sun size={16} />}
+            </span>
+          </button>
+
+          <a
+            href={whatsappPremiumUrl}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex items-center gap-2 rounded-full border border-red-500/40 bg-red-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-red-500"
+          >
+            <MessageCircle size={16} />
+            Tarifas exclusivas
+          </a>
+        </div>
       </div>
     </header>
   );
 }
 
-function BoxReveal({ progress, motionEnabled }: { progress: number; motionEnabled: boolean }) {
-  const p = motionEnabled ? progress : 0.65;
-  const lidRotation = -clamp(p * 120, 0, 102);
-  const innerLift = clamp((p - 0.16) / 0.84, 0, 1);
-  const cardTranslate = 80 - innerLift * 132;
-
-  return (
-    <div className="relative mx-auto aspect-square w-full max-w-[28rem] rounded-[2.2rem] border border-white/10 bg-[radial-gradient(circle_at_50%_20%,rgba(230,0,0,0.2),transparent_30%),linear-gradient(180deg,#111_0%,#050505_100%)] p-6">
-      <div className="landing-grid absolute inset-0 rounded-[2.2rem] opacity-20" />
-
-      <div className="absolute inset-x-6 bottom-6 top-10 rounded-[1.6rem] border border-white/10 bg-black/40">
-        <div className="absolute inset-x-[13%] bottom-[12%] h-[32%] rounded-[1.5rem] border border-[#6f4a2f] bg-[linear-gradient(180deg,#6d462b_0%,#51311d_100%)]" />
-
-        <div
-          className="absolute inset-x-[13%] bottom-[39%] h-[12%] origin-bottom rounded-t-[1.4rem] border border-[#7a5336] bg-[linear-gradient(180deg,#94603b_0%,#70452b_100%)]"
-          style={{ transform: `perspective(900px) rotateX(${lidRotation}deg)` }}
-        />
-
-        <div
-          className="absolute inset-x-[21%] bottom-[34%] rounded-[1.3rem] border border-white/12 bg-white/10 p-4 backdrop-blur-sm"
-          style={{ transform: `translate3d(0, ${cardTranslate}px, 0)` }}
-        >
-          <p className="text-[10px] uppercase tracking-[0.26em] text-red-200">Entrega Dinsides</p>
-          <p className="mt-2 text-xl font-black text-white">Tu pedido llega seguro</p>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 export function LandingPage() {
-  const storyRef = useRef<HTMLElement | null>(null);
-  const { progress, motionEnabled } = useStoryProgress(storyRef);
-  const stageOpacities = [0.18, 0.52, 0.84].map((center) => clamp(1 - Math.abs(progress - center) / 0.22, 0, 1));
+  const [isNight, setIsNight] = useState(true);
+  const [isThemeAnimating, setIsThemeAnimating] = useState(false);
+  const softBorderClass = isNight ? 'border-white/10' : 'border-black/10';
+  const sectionAltClass = isNight ? 'bg-white/[0.02]' : 'bg-black/[0.02]';
+  const mutedTextClass = isNight ? 'text-white/75' : 'text-gray-600';
+  const cardClass = isNight ? 'bg-black/30' : 'bg-white';
+
+  const handleToggleTheme = () => {
+    setIsThemeAnimating(true);
+    setIsNight((current) => !current);
+    window.setTimeout(() => setIsThemeAnimating(false), 520);
+  };
 
   return (
-    <div className="min-h-screen bg-black text-white selection:bg-red-600 selection:text-white">
-      <Header />
+    <div className={joinClasses('relative min-h-screen overflow-x-hidden selection:bg-red-600 selection:text-white', isNight ? 'text-white' : 'text-gray-900')}>
+      <div className={joinClasses('pointer-events-none fixed inset-0 -z-20 transition-opacity duration-700', isNight ? 'bg-black opacity-100' : 'bg-black opacity-0')} />
+      <div className={joinClasses('pointer-events-none fixed inset-0 -z-20 transition-opacity duration-700', isNight ? 'bg-white opacity-0' : 'bg-white opacity-100')} />
+      <div
+        className={joinClasses(
+          'pointer-events-none fixed inset-0 -z-10 bg-[radial-gradient(circle_at_20%_20%,rgba(239,68,68,0.22),transparent_42%)] transition-opacity duration-500',
+          isThemeAnimating ? 'opacity-100' : 'opacity-0',
+        )}
+      />
+
+      <Header isNight={isNight} isAnimating={isThemeAnimating} onToggleTheme={handleToggleTheme} />
 
       <main>
-        <section ref={storyRef} id="inicio" className={`relative overflow-hidden border-b border-white/10 ${motionEnabled ? 'min-h-[250svh]' : 'min-h-screen'}`}>
-          {motionEnabled ? (
-            <div className="sticky top-[76px] h-[calc(100svh-76px)] overflow-hidden">
-              <div className="landing-noise absolute inset-0 opacity-35" />
-              <div className="landing-grid absolute inset-0 opacity-15" />
-
-              <div className="relative mx-auto h-full max-w-7xl px-5 py-6 sm:px-8 lg:px-10">
-                <div className="flex items-center justify-between text-[11px] uppercase tracking-[0.32em] text-white/52">
-                  <span>Lima, Perú</span>
-                  <a
-                    href={whatsappPremiumUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/5 px-4 py-2 text-[11px] font-semibold tracking-[0.18em] text-white transition hover:bg-white/10"
-                  >
-                    Tarifas exclusivas
-                    <ArrowRight size={14} />
-                  </a>
-                </div>
-
-                <div className="pointer-events-none absolute inset-x-0 top-[16%] text-center">
-                  <h1 className="text-[18vw] font-black uppercase leading-[0.84] tracking-[0.14em] text-white/[0.08] md:text-[13vw]">DINSIDES</h1>
-                </div>
-
-                <div className="absolute inset-x-0 top-[20%]">
-                  <BoxReveal progress={progress} motionEnabled={motionEnabled} />
-                </div>
-
-                <article
-                  className="absolute left-5 top-[24%] max-w-xs rounded-[1.5rem] border border-white/10 bg-black/55 p-5 backdrop-blur-sm md:left-10"
-                  style={{ opacity: 0.25 + stageOpacities[0] * 0.75, transform: `translate3d(0, ${(1 - stageOpacities[0]) * 24}px,0)` }}
-                >
-                  <p className="text-[10px] uppercase tracking-[0.3em] text-red-300">01</p>
-                  <p className="mt-3 text-xl font-semibold text-white">{storyStages[0]}</p>
-                </article>
-
-                <article
-                  className="absolute right-5 top-[44%] max-w-xs rounded-[1.5rem] border border-white/10 bg-black/55 p-5 backdrop-blur-sm md:right-10"
-                  style={{ opacity: 0.25 + stageOpacities[1] * 0.75, transform: `translate3d(0, ${(1 - stageOpacities[1]) * 24}px,0)` }}
-                >
-                  <p className="text-[10px] uppercase tracking-[0.3em] text-red-300">02</p>
-                  <p className="mt-3 text-xl font-semibold text-white">{storyStages[1]}</p>
-                </article>
-
-                <article
-                  className="absolute left-5 bottom-[18%] max-w-xs rounded-[1.5rem] border border-white/10 bg-black/55 p-5 backdrop-blur-sm md:left-10"
-                  style={{ opacity: 0.25 + stageOpacities[2] * 0.75, transform: `translate3d(0, ${(1 - stageOpacities[2]) * 24}px,0)` }}
-                >
-                  <p className="text-[10px] uppercase tracking-[0.3em] text-red-300">03</p>
-                  <p className="mt-3 text-xl font-semibold text-white">{storyStages[2]}</p>
-                </article>
-
-                <div className="absolute bottom-8 right-5 flex flex-col gap-3 sm:flex-row md:right-10">
-                  <a
-                    href={whatsappSalesUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="inline-flex items-center justify-center gap-2 rounded-full bg-white px-6 py-3 text-sm font-semibold text-black transition hover:bg-neutral-200"
-                  >
-                    Conoce nuestro servicio
-                    <ArrowRight size={16} />
-                  </a>
-                  <a
-                    href="#nosotros"
-                    className="inline-flex items-center justify-center gap-2 rounded-full border border-white/15 bg-white/5 px-6 py-3 text-sm font-semibold text-white transition hover:bg-white/10"
-                  >
-                    Seguir bajando
-                    <ChevronDown size={16} />
-                  </a>
-                </div>
-              </div>
-            </div>
-          ) : (
-            <div className="relative mx-auto max-w-7xl px-5 pb-10 pt-28 sm:px-8 lg:px-10">
-              <div className="grid gap-6 lg:grid-cols-[1fr_1fr] lg:items-center">
-                <div>
-                  <p className="text-[11px] uppercase tracking-[0.32em] text-red-300">Lima, Perú</p>
-                  <h1 className="mt-3 text-[4.8rem] font-black uppercase leading-[0.84] tracking-[-0.08em] md:text-[7rem]">DINSIDES</h1>
-                  <p className="mt-4 max-w-xl text-white/75">Impulsamos el crecimiento de tu marca con entregas seguras, rápidas y formales.</p>
-                </div>
-                <BoxReveal progress={0.7} motionEnabled={false} />
-              </div>
-            </div>
-          )}
+        <section id="inicio" className={joinClasses('relative overflow-hidden border-b min-h-[72svh]', softBorderClass)}>
+          <div className={joinClasses('landing-noise absolute inset-0', isNight ? 'opacity-35' : 'opacity-10')} />
+          <div className={joinClasses('landing-grid absolute inset-0', isNight ? 'opacity-15' : 'opacity-10')} />
+          <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+            <h1 className={joinClasses('text-[26vw] font-black uppercase leading-[0.84] tracking-[0.14em] md:text-[18vw]', isNight ? 'text-white/[0.08]' : 'text-black/[0.08]')}>
+              DINSIDES
+            </h1>
+          </div>
         </section>
 
         <section id="nosotros" className="mx-auto max-w-7xl px-5 py-18 sm:px-8 lg:px-10">
@@ -328,7 +191,7 @@ export function LandingPage() {
               <h2 className="mt-3 text-4xl font-black tracking-[-0.06em] md:text-5xl">Nuestro objetivo es impulsar el crecimiento de tu marca.</h2>
             </div>
 
-            <div className="space-y-4 text-white/75">
+            <div className={joinClasses('space-y-4', mutedTextClass)}>
               <p className="text-base leading-8">Somos el operador logístico oficial de Gamarra, avalados por la Cámara de Comercio de Gamarra.</p>
               <p className="text-base leading-8">Empresa 100% formal con permiso del Ministerio de Transporte.</p>
               <p className="text-base leading-8">Av. Arica 1702, Cercado de Lima · Jirón Antonio Bazo 1218, La Victoria.</p>
@@ -336,7 +199,7 @@ export function LandingPage() {
           </div>
         </section>
 
-        <section id="servicios" className="border-y border-white/10 bg-white/[0.02]">
+        <section id="servicios" className={joinClasses('border-y', softBorderClass, sectionAltClass)}>
           <div className="mx-auto max-w-7xl px-5 py-18 sm:px-8 lg:px-10">
             <div className="mb-8 flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
               <h2 className="text-4xl font-black tracking-[-0.06em] md:text-5xl">Servicios</h2>
@@ -344,7 +207,10 @@ export function LandingPage() {
                 href={whatsappPremiumUrl}
                 target="_blank"
                 rel="noreferrer"
-                className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/5 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-white/10"
+                className={joinClasses(
+                  'inline-flex items-center gap-2 rounded-full border px-5 py-2.5 text-sm font-semibold transition',
+                  isNight ? 'border-white/15 bg-white/5 text-white hover:bg-white/10' : 'border-black/15 bg-black/5 text-black hover:bg-black/10',
+                )}
               >
                 Solicita tu plan premium
                 <ArrowRight size={16} />
@@ -353,10 +219,10 @@ export function LandingPage() {
 
             <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
               {services.map(({ title, description, icon: Icon }) => (
-                <article key={title} className="rounded-[1.6rem] border border-white/10 bg-black/35 p-5">
+                <article key={title} className={joinClasses('rounded-[1.6rem] border p-5', softBorderClass, isNight ? 'bg-black/35' : 'bg-white')}>
                   <Icon size={20} className="text-red-300" />
                   <h3 className="mt-4 text-2xl font-semibold">{title}</h3>
-                  <p className="mt-3 text-sm leading-7 text-white/70">{description}</p>
+                  <p className={joinClasses('mt-3 text-sm leading-7', isNight ? 'text-white/70' : 'text-gray-600')}>{description}</p>
                 </article>
               ))}
             </div>
@@ -368,13 +234,13 @@ export function LandingPage() {
             <div>
               <p className="text-xs uppercase tracking-[0.3em] text-red-300">Zona de cobertura</p>
               <h2 className="mt-3 text-4xl font-black tracking-[-0.06em] md:text-5xl">Tarifario regular</h2>
-              <p className="mt-5 max-w-xl text-sm leading-7 text-white/70">Precios referenciales para paquetes de 30cm x 20cm x 15cm o 1.5 kg. Medidas mayores, consultar.</p>
+              <p className={joinClasses('mt-5 max-w-xl text-sm leading-7', isNight ? 'text-white/70' : 'text-gray-600')}>Precios referenciales para paquetes de 30cm x 20cm x 15cm o 1.5 kg. Medidas mayores, consultar.</p>
             </div>
 
             <div className="grid gap-3 sm:grid-cols-2">
               {coverageHighlights.map(({ district, price }) => (
-                <article key={district} className="flex items-center justify-between rounded-[1.3rem] border border-white/10 bg-white/5 px-4 py-3">
-                  <div className="flex items-center gap-2 text-white/85">
+                <article key={district} className={joinClasses('flex items-center justify-between rounded-[1.3rem] border px-4 py-3', softBorderClass, isNight ? 'bg-white/5' : 'bg-black/[0.02]')}>
+                  <div className={joinClasses('flex items-center gap-2', isNight ? 'text-white/85' : 'text-gray-700')}>
                     <MapPinned size={16} className="text-red-300" />
                     <span>{district}</span>
                   </div>
@@ -385,7 +251,7 @@ export function LandingPage() {
           </div>
         </section>
 
-        <section className="border-y border-white/10 bg-white/[0.02]">
+        <section className={joinClasses('border-y', softBorderClass, sectionAltClass)}>
           <div className="mx-auto max-w-7xl px-5 py-18 sm:px-8 lg:px-10">
             <div className="grid gap-8 lg:grid-cols-[1fr_1fr]">
               <div>
@@ -393,14 +259,14 @@ export function LandingPage() {
                 <h2 className="mt-3 text-4xl font-black tracking-[-0.06em] md:text-5xl">Nuestros clientes hablan por nosotros</h2>
                 <div className="mt-6 space-y-4">
                   {testimonials.map(({ quote, author }) => (
-                    <article key={author} className="rounded-[1.4rem] border border-white/10 bg-black/30 p-5">
+                    <article key={author} className={joinClasses('rounded-[1.4rem] border p-5', softBorderClass, cardClass)}>
                       <div className="mb-3 flex gap-1 text-red-400">
                         {Array.from({ length: 5 }).map((_, index) => (
                           <Star key={`${author}-${index}`} size={14} fill="currentColor" />
                         ))}
                       </div>
-                      <p className="text-sm leading-7 text-white/75">“{quote}”</p>
-                      <p className="mt-4 text-sm font-semibold text-white">{author}</p>
+                      <p className={joinClasses('text-sm leading-7', mutedTextClass)}>“{quote}”</p>
+                      <p className={joinClasses('mt-4 text-sm font-semibold', isNight ? 'text-white' : 'text-black')}>{author}</p>
                     </article>
                   ))}
                 </div>
@@ -411,7 +277,7 @@ export function LandingPage() {
                 <h2 className="mt-3 text-4xl font-black tracking-[-0.06em] md:text-5xl">Formalidad y respaldo</h2>
                 <div className="mt-6 grid gap-3 sm:grid-cols-2">
                   {isoCodes.map((code) => (
-                    <article key={code} className="rounded-[1.3rem] border border-white/10 bg-black/30 p-4">
+                    <article key={code} className={joinClasses('rounded-[1.3rem] border p-4', softBorderClass, cardClass)}>
                       <p className="text-lg font-semibold">{code}</p>
                     </article>
                   ))}
