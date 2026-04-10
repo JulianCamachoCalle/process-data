@@ -1586,6 +1586,7 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
       const sampleRows = parseEnviosProbeLimit(asSingleQueryParam(req.query.sample_rows), 1200, 10000);
       const singleBusiness = asSingleQueryParam(req.query.search_negocio)?.trim();
       const singleSearchTipo = asSingleQueryParam(req.query.search_tipo)?.trim();
+      const debug = ['1', 'true', 'yes'].includes((asSingleQueryParam(req.query.debug) ?? '').toLowerCase());
 
       const supabase = getSupabaseAdminClient();
       const businessNames = singleBusiness
@@ -1599,67 +1600,101 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
       const { cookieHeader } = await loginDinsidesAndGetCookieHeader();
 
       const dedupe = new Map<string, Record<string, unknown>>();
+      const diagnostics = {
+        businesses_total: businessNames.length,
+        businesses_with_rows: 0,
+        attempts: 0,
+        errors: [] as string[],
+        tried_businesses: [] as Array<{ name: string; variants: string[]; rows: number }>,
+      };
+
       for (const businessName of businessNames) {
         const variants = buildBusinessSearchVariants(businessName);
         let matchedAny = false;
-        for (const variant of variants) {
-          const rows = await fetchDinsidesEnviosRows({
-            cookieHeader,
-            searchNegocio: variant,
-            searchTipo: singleSearchTipo,
-          });
+        let rowsForBusiness = 0;
 
-          for (const row of rows) {
-            const key = buildDedupeKeyFromEnvioRow(row);
-            if (!dedupe.has(key)) {
-              dedupe.set(key, row);
-            }
-          }
+        try {
+          for (const variant of variants) {
+            diagnostics.attempts += 1;
+            const rows = await fetchDinsidesEnviosRows({
+              cookieHeader,
+              searchNegocio: variant,
+              searchTipo: singleSearchTipo,
+            });
 
-          if (rows.length > 0) {
-            matchedAny = true;
-            break;
-          }
-        }
-
-        if (!matchedAny) {
-          const clientIds = await lookupDinsidesClientIds({
-            cookieHeader,
-            businessName,
-          });
-
-          for (const clientId of clientIds) {
-            const attempts = [
-              { searchNegocio: clientId, searchTipo: '' },
-              { searchNegocio: '', searchTipo: clientId },
-              { searchNegocio: clientId, searchTipo: clientId },
-            ];
-
-            let foundForClient = false;
-            for (const attempt of attempts) {
-              const rows = await fetchDinsidesEnviosRows({
-                cookieHeader,
-                searchNegocio: attempt.searchNegocio,
-                searchTipo: attempt.searchTipo,
-              });
-
-              for (const row of rows) {
-                const key = buildDedupeKeyFromEnvioRow(row);
-                if (!dedupe.has(key)) {
-                  dedupe.set(key, row);
-                }
-              }
-
-              if (rows.length > 0) {
-                foundForClient = true;
-                break;
+            rowsForBusiness += rows.length;
+            for (const row of rows) {
+              const key = buildDedupeKeyFromEnvioRow(row);
+              if (!dedupe.has(key)) {
+                dedupe.set(key, row);
               }
             }
 
-            if (foundForClient) {
+            if (rows.length > 0) {
+              matchedAny = true;
               break;
             }
           }
+
+          if (!matchedAny) {
+            const clientIds = await lookupDinsidesClientIds({
+              cookieHeader,
+              businessName,
+            });
+
+            for (const clientId of clientIds) {
+              const attempts = [
+                { searchNegocio: clientId, searchTipo: '' },
+                { searchNegocio: '', searchTipo: clientId },
+                { searchNegocio: clientId, searchTipo: clientId },
+              ];
+
+              let foundForClient = false;
+              for (const attempt of attempts) {
+                diagnostics.attempts += 1;
+                const rows = await fetchDinsidesEnviosRows({
+                  cookieHeader,
+                  searchNegocio: attempt.searchNegocio,
+                  searchTipo: attempt.searchTipo,
+                });
+
+                rowsForBusiness += rows.length;
+                for (const row of rows) {
+                  const key = buildDedupeKeyFromEnvioRow(row);
+                  if (!dedupe.has(key)) {
+                    dedupe.set(key, row);
+                  }
+                }
+
+                if (rows.length > 0) {
+                  foundForClient = true;
+                  matchedAny = true;
+                  break;
+                }
+              }
+
+              if (foundForClient) {
+                break;
+              }
+            }
+          }
+        } catch (error: unknown) {
+          if (diagnostics.errors.length < 25) {
+            const message = error instanceof Error ? error.message : String(error);
+            diagnostics.errors.push(`${businessName}: ${message}`);
+          }
+        }
+
+        if (matchedAny) {
+          diagnostics.businesses_with_rows += 1;
+        }
+
+        if (debug && diagnostics.tried_businesses.length < 40) {
+          diagnostics.tried_businesses.push({
+            name: businessName,
+            variants,
+            rows: rowsForBusiness,
+          });
         }
 
         if (dedupe.size >= limitRows) {
@@ -1668,6 +1703,15 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
       }
 
       const finalRows = Array.from(dedupe.values()).slice(0, limitRows);
+      if (debug) {
+        return res.status(200).json({
+          success: true,
+          mode,
+          rows: finalRows,
+          diagnostics,
+        });
+      }
+
       return res.status(200).json(finalRows);
     }
 
