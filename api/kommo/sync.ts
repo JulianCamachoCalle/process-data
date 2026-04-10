@@ -20,6 +20,9 @@ const CHAT_CHANNEL_SECRET_ENV = 'KOMMO_CHAT_CHANNEL_SECRET';
 const DEFAULT_CHAT_CONVERSATIONS_LIMIT = 20;
 const DEFAULT_CHAT_PAGE_SIZE = 50;
 const DEFAULT_CHAT_MAX_PAGES = 10;
+const DINSIDES_BASE_URL = 'https://dinsidescourier.com';
+const DINSIDES_LOGIN_VALIDATE_URL = `${DINSIDES_BASE_URL}/login/validar`;
+const DINSIDES_ENVIOS_URL = `${DINSIDES_BASE_URL}/Admin/getlistadoBuscadorActualiza`;
 type StandardCustomFieldEntityType = typeof STANDARD_CUSTOM_FIELD_ENTITY_TYPES[number];
 type CustomFieldEntityType = typeof CUSTOM_FIELD_ENTITY_TYPES[number];
 type LinkEntityType = typeof LINK_ENTITY_TYPES[number];
@@ -160,6 +163,107 @@ function asArrayQueryParam(value: string | string[] | undefined) {
   if (value === undefined) return [];
   const values = Array.isArray(value) ? value : [value];
   return values.map((v) => v.trim()).filter(Boolean);
+}
+
+function parseEnviosProbeLimit(value: string | undefined, fallback = 10, max = 2000) {
+  if (!value) return fallback;
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
+  return Math.min(parsed, max);
+}
+
+function extractSetCookieValuesFromResponse(response: Response) {
+  const headers = response.headers as Headers & { getSetCookie?: () => string[] };
+
+  if (typeof headers.getSetCookie === 'function') {
+    return headers.getSetCookie();
+  }
+
+  const fallback = response.headers.get('set-cookie');
+  if (!fallback) return [];
+  return fallback.split(/,(?=\s*[A-Za-z0-9_\-]+=)/g);
+}
+
+function toCookieHeader(rawSetCookieValues: string[]) {
+  return rawSetCookieValues
+    .map((item) => item.split(';')[0]?.trim())
+    .filter(Boolean)
+    .join('; ');
+}
+
+async function loginDinsidesAndGetCookieHeader() {
+  const tlf = process.env.DINSIDES_ADMIN_TLF?.trim();
+  const clave = process.env.DINSIDES_ADMIN_CLAVE?.trim();
+
+  if (!tlf || !clave) {
+    throw new Error('Faltan DINSIDES_ADMIN_TLF y/o DINSIDES_ADMIN_CLAVE en el entorno.');
+  }
+
+  const body = new URLSearchParams({ tlf, clave });
+
+  const loginResponse = await fetch(DINSIDES_LOGIN_VALIDATE_URL, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+      'X-Requested-With': 'XMLHttpRequest',
+      Origin: DINSIDES_BASE_URL,
+      Referer: `${DINSIDES_BASE_URL}/login`,
+    },
+    body: body.toString(),
+  });
+
+  const rawText = await loginResponse.text();
+
+  let loginRole: number | null = null;
+  try {
+    const parsed = JSON.parse(rawText) as unknown;
+    if (typeof parsed === 'number') {
+      loginRole = parsed;
+    }
+  } catch {
+    // noop
+  }
+
+  if (!loginResponse.ok || !loginRole || loginRole <= 0) {
+    throw new Error(`Login Dinsides inválido. status=${loginResponse.status}, body=${rawText.slice(0, 180)}`);
+  }
+
+  const setCookieValues = extractSetCookieValuesFromResponse(loginResponse);
+  const cookieHeader = toCookieHeader(setCookieValues);
+  if (!cookieHeader) {
+    throw new Error('Login exitoso pero no se recibió cookie de sesión.');
+  }
+
+  return { cookieHeader, loginRole };
+}
+
+async function fetchDinsidesEnviosRows(cookieHeader: string) {
+  const response = await fetch(DINSIDES_ENVIOS_URL, {
+    method: 'GET',
+    headers: {
+      Cookie: cookieHeader,
+      'X-Requested-With': 'XMLHttpRequest',
+      Referer: `${DINSIDES_BASE_URL}/admin/listado`,
+    },
+  });
+
+  const rawText = await response.text();
+  if (!response.ok) {
+    throw new Error(`Error al leer envíos. status=${response.status}, body=${rawText.slice(0, 180)}`);
+  }
+
+  let payload: unknown;
+  try {
+    payload = JSON.parse(rawText);
+  } catch {
+    throw new Error(`La respuesta de envíos no es JSON válido: ${rawText.slice(0, 220)}`);
+  }
+
+  if (!Array.isArray(payload)) {
+    throw new Error('La respuesta de envíos no es un array.');
+  }
+
+  return payload as Array<Record<string, unknown>>;
 }
 
 function getNestedQueryValue(
@@ -1292,6 +1396,23 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
       }
     }
 
+    const mode = asSingleQueryParam(req.query.mode)?.trim();
+    if (mode === 'dinsides_envios_probe') {
+      const limit = parseEnviosProbeLimit(asSingleQueryParam(req.query.limit), 10, 2000);
+      const { cookieHeader, loginRole } = await loginDinsidesAndGetCookieHeader();
+      const rows = await fetchDinsidesEnviosRows(cookieHeader);
+
+      return res.status(200).json({
+        success: true,
+        mode,
+        source: 'dinsidescourier.com/Admin/getlistadoBuscadorActualiza',
+        login_role: loginRole,
+        total_rows: rows.length,
+        returned_rows: Math.min(rows.length, limit),
+        rows: rows.slice(0, limit),
+      });
+    }
+
     const baseUrlRaw = asSingleQueryParam(req.query.base_url) ?? asSingleQueryParam(req.query.baseUrl);
     const baseUrl = baseUrlRaw ? normalizeKommoBaseUrl(baseUrlRaw) : null;
     const subdomain = baseUrl ? new URL(baseUrl).hostname.split('.')[0] : undefined;
@@ -1303,7 +1424,6 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
 
     const freshConnection = await ensureFreshConnection(connection);
     const supabase = getSupabaseAdminClient();
-    const mode = asSingleQueryParam(req.query.mode)?.trim();
 
     if (mode === 'chat_history') {
       const chatSync = await runChatHistorySyncMode({ req, supabase });
