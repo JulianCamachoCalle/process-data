@@ -353,18 +353,34 @@ function TopPostsListCard({
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0 flex-1">
                   <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">#{index + 1}</p>
-                  <p className="text-sm font-semibold text-gray-800 truncate">{post.page_name ?? post.page_id}</p>
+                  <div className="flex items-center gap-2 min-w-0">
+                    <p className="text-sm font-semibold text-gray-800 truncate">{post.page_name ?? post.page_id}</p>
+                    <span className="shrink-0 text-[11px] text-gray-400">
+                      {post.created_time ? new Date(post.created_time).toLocaleDateString('es-PE') : 'Sin fecha'}
+                    </span>
+                  </div>
                   <p className="text-xs text-gray-600 line-clamp-2">{post.message ?? 'Sin texto en publicación'}</p>
                   {post.full_picture ? (
-                    <img
-                      src={post.full_picture}
-                      alt={post.id}
-                      className="mt-2 h-14 w-24 rounded-md border border-gray-200 object-cover"
-                      loading="lazy"
-                    />
+                    post.permalink_url ? (
+                      <a href={post.permalink_url} target="_blank" rel="noreferrer" className="inline-block mt-2">
+                        <img
+                          src={post.full_picture}
+                          alt={post.id}
+                          className="h-14 w-24 rounded-md border border-gray-200 object-cover transition hover:opacity-90"
+                          loading="lazy"
+                        />
+                      </a>
+                    ) : (
+                      <img
+                        src={post.full_picture}
+                        alt={post.id}
+                        className="mt-2 h-14 w-24 rounded-md border border-gray-200 object-cover"
+                        loading="lazy"
+                      />
+                    )
                   ) : null}
                 </div>
-                <p className="text-sm font-extrabold text-gray-900">{formatNumberEs(getMetric(post))}</p>
+                <p className="text-base font-extrabold text-gray-900">{formatNumberEs(getMetric(post))}</p>
               </div>
             </article>
           ))}
