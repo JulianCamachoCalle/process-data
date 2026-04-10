@@ -181,6 +181,14 @@ function inferFullfilmentFromTags(tags: string[]): boolean {
   return tags.some((tag) => normalizeText(tag).includes('fullfilment'));
 }
 
+function isPlaceholderLeadName(value: string): boolean {
+  const normalized = normalizeText(value);
+  if (!normalized) return true;
+  if (/^lead\s*#\s*\d+$/i.test(value.trim())) return true;
+  if (normalized === 'lead sin nombre') return true;
+  return false;
+}
+
 export function isWonLead(args: {
   lead: Pick<KommoLeadRow, 'status_id' | 'closed_at'>;
   statusName: string | null;
@@ -349,6 +357,11 @@ export async function syncLeadsGanadosFromKommoLeadIds(
     const existing = existingByKommoLeadId.get(leadId);
 
     const tiendaNombreSnapshotComputed = String(lead.name ?? '').trim() || 'Lead sin nombre';
+    const existingTiendaSnapshot = String(existing?.tienda_nombre_snapshot ?? '').trim();
+    const resolvedTiendaSnapshot = existingTiendaSnapshot || tiendaNombreSnapshotComputed;
+    if (isPlaceholderLeadName(resolvedTiendaSnapshot)) {
+      continue;
+    }
     const vendedorNombreSnapshotComputed = pipelineNameById.get(pipelineId) ?? '';
     const pipelineIdSnapshotComputed = pipelineId > 0 ? pipelineId : null;
     const origenSnapshotComputed = inferOrigenFromTags(tags);
@@ -358,7 +371,7 @@ export async function syncLeadsGanadosFromKommoLeadIds(
 
     rowsToUpsert.push({
       kommo_lead_id: leadId,
-      tienda_nombre_snapshot: existing?.tienda_nombre_snapshot || tiendaNombreSnapshotComputed,
+      tienda_nombre_snapshot: resolvedTiendaSnapshot,
       vendedor_nombre_snapshot: existing?.vendedor_nombre_snapshot || vendedorNombreSnapshotComputed,
       pipeline_id_snapshot: existing?.pipeline_id_snapshot ?? pipelineIdSnapshotComputed,
       origen_snapshot: existing?.origen_snapshot || origenSnapshotComputed,

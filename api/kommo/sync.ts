@@ -394,6 +394,8 @@ async function getDistinctBusinessNamesFromLeads(args: {
     .select('tienda_nombre_snapshot' as never)
     .not('tienda_nombre_snapshot' as never, 'is' as never, null as never)
     .neq('tienda_nombre_snapshot' as never, '' as never)
+    .not('tienda_nombre_snapshot' as never, 'ilike' as never, 'Lead #%' as never)
+    .not('tienda_nombre_snapshot' as never, 'ilike' as never, 'Lead sin nombre' as never)
     .limit(args.sampleRows);
 
   if (error) {
@@ -406,6 +408,8 @@ async function getDistinctBusinessNamesFromLeads(args: {
   for (const row of rows) {
     const normalized = normalizeBusinessName(row.tienda_nombre_snapshot);
     if (!normalized) continue;
+    if (/^lead\s*#\s*\d+/i.test(normalized)) continue;
+    if (/^lead\s+sin\s+nombre$/i.test(normalized)) continue;
 
     const key = normalized.toLocaleLowerCase('es');
     if (!dedupe.has(key)) {
@@ -1713,6 +1717,52 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
       }
 
       return res.status(200).json(finalRows);
+    }
+
+    if (mode === 'cleanup_placeholder_leads_ganados') {
+      const supabase = getSupabaseAdminClient();
+
+      const { data: rowsRaw, error: listError } = await supabase
+        .from('leads_ganados' as never)
+        .select('kommo_lead_id,tienda_nombre_snapshot' as never)
+        .limit(5000);
+
+      if (listError) {
+        throw new Error(`No se pudieron listar placeholders en leads_ganados: ${listError.message}`);
+      }
+
+      const rowsToDelete = ((rowsRaw ?? []) as Array<{ kommo_lead_id: number | null; tienda_nombre_snapshot: string | null }>)
+        .filter((row) => {
+          const name = String(row.tienda_nombre_snapshot ?? '').trim();
+          return /^Lead\s*#\s*\d+/i.test(name) || /^Lead\s+sin\s+nombre$/i.test(name);
+        });
+      const leadIds = rowsToDelete
+        .map((row) => Number(row.kommo_lead_id ?? 0))
+        .filter((id) => Number.isFinite(id) && id > 0);
+
+      if (leadIds.length === 0) {
+        return res.status(200).json({
+          success: true,
+          mode,
+          deleted: 0,
+          message: 'No se encontraron registros placeholder para eliminar.',
+        });
+      }
+
+      const { error: deleteError } = await supabase
+        .from('leads_ganados' as never)
+        .delete()
+        .in('kommo_lead_id', leadIds);
+
+      if (deleteError) {
+        throw new Error(`No se pudieron eliminar placeholders de leads_ganados: ${deleteError.message}`);
+      }
+
+      return res.status(200).json({
+        success: true,
+        mode,
+        deleted: leadIds.length,
+      });
     }
 
     const baseUrlRaw = asSingleQueryParam(req.query.base_url) ?? asSingleQueryParam(req.query.baseUrl);
