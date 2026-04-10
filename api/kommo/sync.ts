@@ -384,6 +384,43 @@ function buildDedupeKeyFromEnvioRow(row: Record<string, unknown>) {
   return `fallback:${fallback}`;
 }
 
+function parseNumeric(value: unknown) {
+  const normalized = String(value ?? '').replace(',', '.').trim();
+  if (!normalized) return 0;
+  const parsed = Number.parseFloat(normalized);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function parseDateOnlyFromUnknown(value: unknown) {
+  const raw = String(value ?? '').trim();
+  if (!raw) return null;
+  const parsed = new Date(raw.replace(' ', 'T'));
+  if (Number.isNaN(parsed.getTime())) {
+    return raw.slice(0, 10) || null;
+  }
+  return parsed.toISOString().slice(0, 10);
+}
+
+function normalizeLookupKey(value: unknown) {
+  return removeDiacritics(String(value ?? '').trim().toLowerCase());
+}
+
+function mapByNormalizedLabel<T extends { business_id?: unknown }>(
+  rows: T[],
+  getLabel: (row: T) => unknown,
+) {
+  const map = new Map<string, number>();
+  for (const row of rows) {
+    const key = normalizeLookupKey(getLabel(row));
+    const id = Number(row.business_id ?? 0);
+    if (!key || !Number.isFinite(id) || id <= 0) continue;
+    if (!map.has(key)) {
+      map.set(key, id);
+    }
+  }
+  return map;
+}
+
 async function getDistinctBusinessNamesFromLeads(args: {
   supabase: ReturnType<typeof getSupabaseAdminClient>;
   limitBusinesses: number;
@@ -1707,6 +1744,128 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
       }
 
       const finalRows = Array.from(dedupe.values()).slice(0, limitRows);
+
+      const persist = ['1', 'true', 'yes'].includes((asSingleQueryParam(req.query.persist) ?? '').toLowerCase());
+      if (persist) {
+        const leadsResult = await supabase
+          .from('leads_ganados' as never)
+          .select('business_id,tienda_nombre_snapshot' as never)
+          .not('tienda_nombre_snapshot' as never, 'is' as never, null as never)
+          .neq('tienda_nombre_snapshot' as never, '' as never)
+          .limit(10000);
+
+        if (leadsResult.error) {
+          throw new Error(`No se pudieron leer leads_ganados para persistir envíos: ${leadsResult.error.message}`);
+        }
+
+        const destinosResult = await supabase
+          .from('destinos' as never)
+          .select('business_id,destino' as never)
+          .limit(1000);
+
+        if (destinosResult.error) {
+          throw new Error(`No se pudieron leer destinos para persistir envíos: ${destinosResult.error.message}`);
+        }
+
+        const resultadosResult = await supabase
+          .from('resultados' as never)
+          .select('business_id,resultado' as never)
+          .limit(1000);
+
+        if (resultadosResult.error) {
+          throw new Error(`No se pudieron leer resultados para persistir envíos: ${resultadosResult.error.message}`);
+        }
+
+        const leadsRows = (leadsResult.data ?? []) as Array<{ business_id: number; tienda_nombre_snapshot: string | null }>;
+        const destinoRows = (destinosResult.data ?? []) as Array<{ business_id: number; destino: string | null }>;
+        const resultadoRows = (resultadosResult.data ?? []) as Array<{ business_id: number; resultado: string | null }>;
+
+        const leadByBusinessName = mapByNormalizedLabel(leadsRows, (row) => row.tienda_nombre_snapshot);
+        const destinoByName = mapByNormalizedLabel(destinoRows, (row) => row.destino);
+        const resultadoByName = mapByNormalizedLabel(resultadoRows, (row) => row.resultado);
+        const fallbackResultadoEntregado = resultadoRows.find((row) => normalizeLookupKey(row.resultado).includes('entregado'));
+        const fallbackResultadoId = Number(fallbackResultadoEntregado?.business_id ?? 1);
+
+        const rowsToUpsert: Array<Record<string, unknown>> = [];
+        let skippedMissingLead = 0;
+        let skippedMissingDestino = 0;
+        let skippedByEstado = 0;
+
+        for (const row of finalRows) {
+          const idPedido = String(row.id_pedido ?? '').trim();
+          if (!idPedido) continue;
+
+          const negocio = normalizeLookupKey(row.nombre_negocio);
+          const distrito = normalizeLookupKey(row.nombre_distrito);
+          const seguimiento = normalizeLookupKey(row.seguimiento);
+
+          const isEstadoPermitido =
+            seguimiento === 'entregado'
+            || seguimiento === 'rechazado por cliente en punto';
+          if (!isEstadoPermitido) {
+            skippedByEstado += 1;
+            continue;
+          }
+
+          const idLeadGanado = leadByBusinessName.get(negocio);
+          if (!idLeadGanado) {
+            skippedMissingLead += 1;
+            continue;
+          }
+
+          const idDestino = destinoByName.get(distrito);
+          if (!idDestino) {
+            skippedMissingDestino += 1;
+            continue;
+          }
+
+          const idResultado = resultadoByName.get(seguimiento) ?? fallbackResultadoId;
+          const pagoMoto = parseNumeric(row.costo_service);
+          const tarifaDistrito = parseNumeric(row.tarifa_distrito);
+          const montoCobrar = parseNumeric(row.monto_cobrar);
+          const cobroBruto = tarifaDistrito > 0 ? tarifaDistrito : montoCobrar;
+          const cobroEntrega = cobroBruto > 0 ? Number((cobroBruto / 1.18).toFixed(2)) : 0;
+          const fechaEnvio = parseDateOnlyFromUnknown(row.fecha_entrega) ?? parseDateOnlyFromUnknown(row.fecha_pedido);
+
+          rowsToUpsert.push({
+            stable_id: `envio-dinsides-${idPedido}`,
+            fecha_envio: fechaEnvio,
+            id_lead_ganado: idLeadGanado,
+            id_destino: idDestino,
+            id_resultado: idResultado,
+            cobro_entrega: cobroEntrega,
+            pago_moto: pagoMoto,
+            excedente_pagado_moto: 0,
+            ingreso_total_fila: cobroEntrega,
+            costo_total_fila: pagoMoto,
+            observaciones: String(row.observacion ?? '').trim() || null,
+            id_tipo_punto: 1,
+            extra_punto_moto: 0,
+            extra_punto_empresa: 0,
+          });
+        }
+
+        if (rowsToUpsert.length > 0) {
+          const { error: upsertError } = await supabase
+            .from('envios' as never)
+            .upsert(rowsToUpsert as never, { onConflict: 'stable_id' as never });
+
+          if (upsertError) {
+            throw new Error(`No se pudieron upsertar envíos desde Dinsides: ${upsertError.message}`);
+          }
+        }
+
+        return res.status(200).json({
+          success: true,
+          mode,
+          pulled: finalRows.length,
+          upserted: rowsToUpsert.length,
+          skipped_by_estado: skippedByEstado,
+          skipped_missing_lead: skippedMissingLead,
+          skipped_missing_destino: skippedMissingDestino,
+        });
+      }
+
       if (debug) {
         return res.status(200).json({
           success: true,
