@@ -23,6 +23,7 @@ const DEFAULT_CHAT_MAX_PAGES = 10;
 const DINSIDES_BASE_URL = 'https://dinsidescourier.com';
 const DINSIDES_LOGIN_VALIDATE_URL = `${DINSIDES_BASE_URL}/login/validar`;
 const DINSIDES_ENVIOS_URL = `${DINSIDES_BASE_URL}/Admin/getlistadoBuscadorActualiza`;
+const DINSIDES_CLIENTES_LOOKUP_URL = `${DINSIDES_BASE_URL}/admin/datosclientenombre`;
 type StandardCustomFieldEntityType = typeof STANDARD_CUSTOM_FIELD_ENTITY_TYPES[number];
 type CustomFieldEntityType = typeof CUSTOM_FIELD_ENTITY_TYPES[number];
 type LinkEntityType = typeof LINK_ENTITY_TYPES[number];
@@ -240,6 +241,7 @@ async function loginDinsidesAndGetCookieHeader() {
 async function fetchDinsidesEnviosRows(args: {
   cookieHeader: string;
   searchNegocio?: string;
+  searchTipo?: string;
   searchTelefono?: string;
   searchIdPedido?: string;
 }) {
@@ -249,7 +251,7 @@ async function fetchDinsidesEnviosRows(args: {
     SearchTelefono: args.searchTelefono ?? '',
     searchMotorizado: '',
     searchNegocio: args.searchNegocio ?? '',
-    searchTipo: '',
+    searchTipo: args.searchTipo ?? '',
     selectEstadoPunto: '',
     selectEstadoSeguimiento: '',
   });
@@ -298,6 +300,52 @@ async function fetchDinsidesEnviosRows(args: {
     }
 
   throw new Error('La respuesta de envíos no es un array ni objeto JSON reconocido.');
+}
+
+async function lookupDinsidesClientIds(args: { cookieHeader: string; businessName: string }) {
+  const form = new URLSearchParams({
+    datos: args.businessName,
+    super_admin: '0',
+  });
+
+  const response = await fetch(DINSIDES_CLIENTES_LOOKUP_URL, {
+    method: 'POST',
+    headers: {
+      Cookie: args.cookieHeader,
+      'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+      'X-Requested-With': 'XMLHttpRequest',
+      Origin: DINSIDES_BASE_URL,
+      Referer: `${DINSIDES_BASE_URL}/admin/clientes_new`,
+      Accept: 'text/html, */*; q=0.01',
+    },
+    body: form.toString(),
+  });
+
+  const rawText = await response.text();
+  if (!response.ok) {
+    return [] as string[];
+  }
+
+  const ids = new Set<string>();
+  const lines = rawText.split(/\r?\n/);
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    const match = trimmed.match(/^(\d{3,})\b/);
+    if (match?.[1]) {
+      ids.add(match[1]);
+    }
+  }
+
+  if (ids.size === 0) {
+    const fallbackMatches = rawText.match(/\b\d{4,}\b/g) ?? [];
+    for (const candidate of fallbackMatches) {
+      ids.add(candidate);
+      if (ids.size >= 10) break;
+    }
+  }
+
+  return Array.from(ids);
 }
 
 function normalizeBusinessName(value: unknown) {
@@ -1537,6 +1585,7 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
       const limitRows = parseEnviosProbeLimit(asSingleQueryParam(req.query.limit_rows), 1000, 10000);
       const sampleRows = parseEnviosProbeLimit(asSingleQueryParam(req.query.sample_rows), 1200, 10000);
       const singleBusiness = asSingleQueryParam(req.query.search_negocio)?.trim();
+      const singleSearchTipo = asSingleQueryParam(req.query.search_tipo)?.trim();
 
       const supabase = getSupabaseAdminClient();
       const businessNames = singleBusiness
@@ -1552,10 +1601,12 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
       const dedupe = new Map<string, Record<string, unknown>>();
       for (const businessName of businessNames) {
         const variants = buildBusinessSearchVariants(businessName);
+        let matchedAny = false;
         for (const variant of variants) {
           const rows = await fetchDinsidesEnviosRows({
             cookieHeader,
             searchNegocio: variant,
+            searchTipo: singleSearchTipo,
           });
 
           for (const row of rows) {
@@ -1566,7 +1617,48 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
           }
 
           if (rows.length > 0) {
+            matchedAny = true;
             break;
+          }
+        }
+
+        if (!matchedAny) {
+          const clientIds = await lookupDinsidesClientIds({
+            cookieHeader,
+            businessName,
+          });
+
+          for (const clientId of clientIds) {
+            const attempts = [
+              { searchNegocio: clientId, searchTipo: '' },
+              { searchNegocio: '', searchTipo: clientId },
+              { searchNegocio: clientId, searchTipo: clientId },
+            ];
+
+            let foundForClient = false;
+            for (const attempt of attempts) {
+              const rows = await fetchDinsidesEnviosRows({
+                cookieHeader,
+                searchNegocio: attempt.searchNegocio,
+                searchTipo: attempt.searchTipo,
+              });
+
+              for (const row of rows) {
+                const key = buildDedupeKeyFromEnvioRow(row);
+                if (!dedupe.has(key)) {
+                  dedupe.set(key, row);
+                }
+              }
+
+              if (rows.length > 0) {
+                foundForClient = true;
+                break;
+              }
+            }
+
+            if (foundForClient) {
+              break;
+            }
           }
         }
 
