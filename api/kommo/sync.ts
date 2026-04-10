@@ -300,6 +300,56 @@ async function fetchDinsidesEnviosRows(args: {
   throw new Error('La respuesta de envíos no es un array ni objeto JSON reconocido.');
 }
 
+function normalizeBusinessName(value: unknown) {
+  if (typeof value !== 'string') return '';
+  return value.replace(/\s+/g, ' ').trim();
+}
+
+function buildDedupeKeyFromEnvioRow(row: Record<string, unknown>) {
+  const idPedido = row.id_pedido;
+  if (typeof idPedido === 'string' && idPedido.trim()) {
+    return `id_pedido:${idPedido.trim()}`;
+  }
+
+  const fallback = [
+    typeof row.nombre_negocio === 'string' ? row.nombre_negocio : '',
+    typeof row.nombre_destinataio === 'string' ? row.nombre_destinataio : '',
+    typeof row.fecha_pedido === 'string' ? row.fecha_pedido : '',
+  ].join('|');
+
+  return `fallback:${fallback}`;
+}
+
+async function getDistinctBusinessNamesFromLeads(args: {
+  supabase: ReturnType<typeof getSupabaseAdminClient>;
+  limitBusinesses: number;
+  sampleRows: number;
+}) {
+  const { data, error } = await args.supabase
+    .from('leads_ganados' as never)
+    .select('tienda_nombre_snapshot' as never)
+    .limit(args.sampleRows);
+
+  if (error) {
+    throw new Error(`No se pudieron leer nombres de negocio desde leads_ganados: ${error.message}`);
+  }
+
+  const rows = (data ?? []) as Array<{ tienda_nombre_snapshot?: unknown }>;
+  const dedupe = new Map<string, string>();
+
+  for (const row of rows) {
+    const normalized = normalizeBusinessName(row.tienda_nombre_snapshot);
+    if (!normalized) continue;
+
+    const key = normalized.toLocaleLowerCase('es');
+    if (!dedupe.has(key)) {
+      dedupe.set(key, normalized);
+    }
+  }
+
+  return Array.from(dedupe.values()).slice(0, args.limitBusinesses);
+}
+
 function getNestedQueryValue(
   root: unknown,
   path: string[],
@@ -1458,6 +1508,43 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
         returned_rows: Math.min(rows.length, limit),
         rows: rows.slice(0, limit),
       });
+    }
+
+    if (mode === 'dinsides_envios_sync_from_leads') {
+      const limitBusinesses = parseEnviosProbeLimit(asSingleQueryParam(req.query.limit_businesses), 30, 300);
+      const limitRows = parseEnviosProbeLimit(asSingleQueryParam(req.query.limit_rows), 1000, 10000);
+      const sampleRows = parseEnviosProbeLimit(asSingleQueryParam(req.query.sample_rows), 1200, 10000);
+
+      const supabase = getSupabaseAdminClient();
+      const businessNames = await getDistinctBusinessNamesFromLeads({
+        supabase,
+        limitBusinesses,
+        sampleRows,
+      });
+
+      const { cookieHeader } = await loginDinsidesAndGetCookieHeader();
+
+      const dedupe = new Map<string, Record<string, unknown>>();
+      for (const businessName of businessNames) {
+        const rows = await fetchDinsidesEnviosRows({
+          cookieHeader,
+          searchNegocio: businessName,
+        });
+
+        for (const row of rows) {
+          const key = buildDedupeKeyFromEnvioRow(row);
+          if (!dedupe.has(key)) {
+            dedupe.set(key, row);
+          }
+        }
+
+        if (dedupe.size >= limitRows) {
+          break;
+        }
+      }
+
+      const finalRows = Array.from(dedupe.values()).slice(0, limitRows);
+      return res.status(200).json(finalRows);
     }
 
     const baseUrlRaw = asSingleQueryParam(req.query.base_url) ?? asSingleQueryParam(req.query.baseUrl);
