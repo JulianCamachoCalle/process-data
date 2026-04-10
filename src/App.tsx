@@ -11,7 +11,8 @@ import { KommoExplorer } from './features/kommo/explorer/KommoExplorer';
 import { KommoLeadsInsights } from './features/kommo/insights/KommoLeadsInsights';
 import { MetaAdsDashboard } from './features/meta/ads/MetaAdsDashboard';
 import { MetaAdsDataPage } from './features/meta/ads/MetaAdsDataPage';
-import { MetaPagesHub } from './features/meta/pages/MetaPagesHub';
+import { MetaPagesDashboard } from './features/meta/pages/MetaPagesHub';
+import { MetaAdsOrganicDashboard } from './features/meta/compare/MetaAdsOrganicDashboard';
 import { LandingPage } from './features/landing/LandingPage';
 import { GoogleSheetsExportPage } from './features/exports/GoogleSheetsExportTester';
 import { prefetchSheetData } from './hooks/useSheetData';
@@ -199,7 +200,10 @@ function Layout() {
               <Route path="/meta/ads" element={<Navigate to="/meta/ads/dashboard" replace />} />
               <Route path="/meta/ads/dashboard" element={<MetaAdsDashboard />} />
               <Route path="/meta/ads/data" element={<MetaAdsDataPage />} />
-              <Route path="/meta/pages" element={<MetaPagesHub />} />
+              <Route path="/meta/compare" element={<Navigate to="/meta/compare/dashboard" replace />} />
+              <Route path="/meta/compare/dashboard" element={<MetaAdsOrganicDashboard />} />
+              <Route path="/meta/pages" element={<Navigate to="/meta/pages/dashboard" replace />} />
+              <Route path="/meta/pages/dashboard" element={<MetaPagesDashboard />} />
               <Route path="/exports/google-sheets" element={<GoogleSheetsExportPage />} />
             </Routes>
           </div>

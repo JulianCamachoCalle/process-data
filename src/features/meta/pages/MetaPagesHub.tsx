@@ -52,7 +52,7 @@ const chartTooltipStyle = {
   },
 } as const;
 
-export function MetaPagesHub() {
+export function MetaPagesDashboard() {
   const [since, setSince] = useState('');
   const [until, setUntil] = useState('');
   const [draftSince, setDraftSince] = useState(since);
@@ -159,7 +159,7 @@ export function MetaPagesHub() {
     return (
       <div className="flex items-center justify-center h-full text-gray-500 bg-white rounded-2xl border border-gray-200 shadow-sm p-6">
         <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-red-600 mr-3"></div>
-        Cargando apartado de Meta Pages...
+        Cargando apartado de Pages Dashboard...
       </div>
     );
   }
@@ -168,7 +168,7 @@ export function MetaPagesHub() {
     return (
       <div className="flex flex-col items-center justify-center h-full text-red-500 space-y-4">
         <Activity size={48} />
-        <p className="text-lg font-medium">Error al cargar Meta Pages</p>
+        <p className="text-lg font-medium">Error al cargar Pages Dashboard</p>
         <p className="text-sm text-red-400 max-w-xl text-center">
           {pagesQuery.error instanceof Error ? pagesQuery.error.message : 'Error desconocido'}
         </p>
@@ -179,7 +179,7 @@ export function MetaPagesHub() {
   return (
     <div className="space-y-6">
       <MetaAdsPageHero
-        title="Meta Pages"
+        title="Pages Dashboard"
         description="Explorer + top posts por métrica + tendencias de publicaciones."
         icon={<BookImage className="text-red-600" size={24} />}
       />
