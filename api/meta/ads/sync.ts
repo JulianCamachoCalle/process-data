@@ -340,6 +340,130 @@ function resolvePagesDateRange(req: VercelRequest, body: JsonRecord) {
   return { since, until };
 }
 
+function isTruthyFlag(value: string | undefined) {
+  if (!value) return false;
+  const normalized = value.trim().toLowerCase();
+  return normalized === '1' || normalized === 'true' || normalized === 'yes';
+}
+
+function parseYearMonth(value: string | undefined) {
+  if (!value) return null;
+  const match = value.trim().match(/^(\d{4})-(\d{2})$/);
+  if (!match) return null;
+
+  const year = Number.parseInt(match[1], 10);
+  const month = Number.parseInt(match[2], 10);
+  if (!Number.isInteger(year) || !Number.isInteger(month) || month < 1 || month > 12) {
+    return null;
+  }
+
+  return { year, month };
+}
+
+function toYearMonth(year: number, month: number) {
+  return `${String(year).padStart(4, '0')}-${String(month).padStart(2, '0')}`;
+}
+
+function shiftMonth(year: number, month: number, delta: number) {
+  const date = new Date(Date.UTC(year, month - 1 + delta, 1));
+  return {
+    year: date.getUTCFullYear(),
+    month: date.getUTCMonth() + 1,
+  };
+}
+
+function getMonthBounds(year: number, month: number) {
+  const since = `${toYearMonth(year, month)}-01`;
+  const untilDate = new Date(Date.UTC(year, month, 0));
+  const until = `${toYearMonth(untilDate.getUTCFullYear(), untilDate.getUTCMonth() + 1)}-${String(untilDate.getUTCDate()).padStart(2, '0')}`;
+  return { since, until };
+}
+
+async function resolvePagesMonthlyBackfillRange(args: {
+  req: VercelRequest;
+  body: JsonRecord;
+  since: string | null;
+  until: string | null;
+}) {
+  if (args.since && args.until) {
+    return {
+      since: args.since,
+      until: args.until,
+      backfillMonth: args.since.slice(0, 7),
+      source: 'explicit_range' as const,
+    };
+  }
+
+  const supabase = getSupabaseAdminClient();
+  const startMonthParam = parseYearMonth(getRequestParam(args.req, args.body, 'backfill_start_month'));
+
+  const { data: runsData } = await supabase
+    .from('meta_sync_runs' as never)
+    .select('request_params,started_at' as never)
+    .eq('provider' as never, 'meta' as never)
+    .eq('resource' as never, 'pages' as never)
+    .eq('success' as never, true as never)
+    .order('started_at' as never, { ascending: false })
+    .limit(50);
+
+  const runs = (runsData ?? []) as Array<{ request_params?: unknown }>;
+  const previousBackfillMonthRaw = runs
+    .map((row) => ensureObject(row.request_params).backfill_month)
+    .map((value) => toNullableText(value))
+    .find((value) => Boolean(parseYearMonth(value ?? undefined)));
+
+  const previousBackfillMonth = parseYearMonth(previousBackfillMonthRaw ?? undefined);
+  if (previousBackfillMonth) {
+    const next = shiftMonth(previousBackfillMonth.year, previousBackfillMonth.month, -1);
+    const bounds = getMonthBounds(next.year, next.month);
+    return {
+      ...bounds,
+      backfillMonth: toYearMonth(next.year, next.month),
+      source: 'cursor_previous_run' as const,
+    };
+  }
+
+  if (startMonthParam) {
+    const bounds = getMonthBounds(startMonthParam.year, startMonthParam.month);
+    return {
+      ...bounds,
+      backfillMonth: toYearMonth(startMonthParam.year, startMonthParam.month),
+      source: 'start_month_param' as const,
+    };
+  }
+
+  const { data: oldestPosts } = await supabase
+    .from('meta_page_posts' as never)
+    .select('created_time' as never)
+    .order('created_time' as never, { ascending: true })
+    .limit(1);
+
+  const oldestCreatedAt = toNullableText((oldestPosts?.[0] as { created_time?: unknown } | undefined)?.created_time);
+  if (oldestCreatedAt) {
+    const parsed = new Date(oldestCreatedAt);
+    if (!Number.isNaN(parsed.getTime())) {
+      const oldestYear = parsed.getUTCFullYear();
+      const oldestMonth = parsed.getUTCMonth() + 1;
+      const next = shiftMonth(oldestYear, oldestMonth, -1);
+      const bounds = getMonthBounds(next.year, next.month);
+      return {
+        ...bounds,
+        backfillMonth: toYearMonth(next.year, next.month),
+        source: 'oldest_post' as const,
+      };
+    }
+  }
+
+  const now = new Date();
+  const fallback = shiftMonth(now.getUTCFullYear(), now.getUTCMonth() + 1, -1);
+  const bounds = getMonthBounds(fallback.year, fallback.month);
+  return {
+    ...bounds,
+    backfillMonth: toYearMonth(fallback.year, fallback.month),
+    source: 'fallback_last_month' as const,
+  };
+}
+
 function resolveInstagramUserId(req: VercelRequest, body: JsonRecord) {
   const requestValue = getRequestParam(req, body, 'instagram_user_id')?.trim();
   if (requestValue) return requestValue;
@@ -1357,6 +1481,17 @@ export default async function metaAdsSyncHandler(req: VercelRequest, res: Vercel
     const resource = resolveSyncResource(req, body);
     const accountBusinessId = resource === 'ads' ? resolveAccountId(req, body) : null;
     accountBusinessIdForRun = accountBusinessId;
+    const pagesBackfillMonthly =
+      resource === 'pages' && isTruthyFlag(getRequestParam(req, body, 'backfill_monthly'));
+    const requestedPagesRange = resource === 'pages' ? resolvePagesDateRange(req, body) : { since: null, until: null };
+    const resolvedPagesRange = pagesBackfillMonthly
+      ? await resolvePagesMonthlyBackfillRange({
+        req,
+        body,
+        since: requestedPagesRange.since,
+        until: requestedPagesRange.until,
+      })
+      : null;
     const datePreset = resolveDatePreset(req, body);
     const timeIncrement = getRequestParam(req, body, 'time_increment')?.trim() || '1';
     const limit = parsePositiveInt(getRequestParam(req, body, 'limit'), DEFAULT_LIMIT, 500);
@@ -1389,6 +1524,11 @@ export default async function metaAdsSyncHandler(req: VercelRequest, res: Vercel
         post_max_pages: postMaxPages,
         hourly_ad_limit: hourlyAdLimit,
         max_runtime_ms: maxRuntimeMs,
+        since: resource === 'pages' ? (resolvedPagesRange?.since ?? requestedPagesRange.since) : null,
+        until: resource === 'pages' ? (resolvedPagesRange?.until ?? requestedPagesRange.until) : null,
+        backfill_monthly: pagesBackfillMonthly,
+        backfill_month: resolvedPagesRange?.backfillMonth ?? null,
+        backfill_source: resolvedPagesRange?.source ?? null,
       },
     });
 
@@ -1462,7 +1602,16 @@ export default async function metaAdsSyncHandler(req: VercelRequest, res: Vercel
     }
 
     if (resource === 'pages') {
-      const { since, until } = resolvePagesDateRange(req, body);
+      const since = resolvedPagesRange?.since ?? requestedPagesRange.since;
+      const until = resolvedPagesRange?.until ?? requestedPagesRange.until;
+      const processedBackfillMonth = resolvedPagesRange?.backfillMonth ?? null;
+      const parsedProcessedBackfillMonth = parseYearMonth(processedBackfillMonth ?? undefined);
+      const nextBackfillMonth = parsedProcessedBackfillMonth
+        ? toYearMonth(
+          shiftMonth(parsedProcessedBackfillMonth.year, parsedProcessedBackfillMonth.month, -1).year,
+          shiftMonth(parsedProcessedBackfillMonth.year, parsedProcessedBackfillMonth.month, -1).month,
+        )
+        : null;
 
       const pagesResult = await fetchMetaCollection({
         token,
@@ -1705,6 +1854,20 @@ export default async function metaAdsSyncHandler(req: VercelRequest, res: Vercel
         duration_ms: durationMs,
         since: since ?? '',
         until: until ?? '',
+        backfill: pagesBackfillMonthly
+          ? {
+            enabled: true,
+            month: processedBackfillMonth,
+            next_month: nextBackfillMonth,
+            source: resolvedPagesRange?.source ?? null,
+            status: processedBackfillMonth
+              ? `Backfill mensual OK. Mes procesado: ${processedBackfillMonth}. Próximo mes sugerido: ${nextBackfillMonth ?? 'N/D'}.`
+              : 'Backfill mensual OK. Mes procesado no disponible.',
+          }
+          : {
+            enabled: false,
+            status: 'Backfill mensual desactivado. Usando rango manual o default.',
+          },
         pages: pages.map((item) => ({
           id: item.business_id,
           name: item.name,
