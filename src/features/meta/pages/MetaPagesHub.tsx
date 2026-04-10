@@ -351,10 +351,18 @@ function TopPostsListCard({
           {posts.map((post, index) => (
             <article key={`${title}-${post.id}`} className="rounded-xl border border-gray-200 bg-gray-50 px-3 py-2.5">
               <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
+                <div className="min-w-0 flex-1">
                   <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">#{index + 1}</p>
                   <p className="text-sm font-semibold text-gray-800 truncate">{post.page_name ?? post.page_id}</p>
                   <p className="text-xs text-gray-600 line-clamp-2">{post.message ?? 'Sin texto en publicación'}</p>
+                  {post.full_picture ? (
+                    <img
+                      src={post.full_picture}
+                      alt={post.id}
+                      className="mt-2 h-14 w-24 rounded-md border border-gray-200 object-cover"
+                      loading="lazy"
+                    />
+                  ) : null}
                 </div>
                 <p className="text-sm font-extrabold text-gray-900">{formatNumberEs(getMetric(post))}</p>
               </div>
