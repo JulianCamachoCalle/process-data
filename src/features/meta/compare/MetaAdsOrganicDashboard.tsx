@@ -11,7 +11,7 @@ type ComparePoint = {
   ads_clicks: number;
   organic_clicks: number;
   ads_impressions: number;
-  organic_views: number;
+  organic_impressions: number;
 };
 
 const chartTooltipStyle = {
@@ -81,7 +81,7 @@ export function MetaAdsOrganicDashboard() {
         ads_clicks: 0,
         organic_clicks: 0,
         ads_impressions: 0,
-        organic_views: 0,
+        organic_impressions: 0,
       };
       current.ads_clicks += Number(row.clicks ?? 0);
       current.ads_impressions += Number(row.impressions ?? 0);
@@ -96,10 +96,10 @@ export function MetaAdsOrganicDashboard() {
         ads_clicks: 0,
         organic_clicks: 0,
         ads_impressions: 0,
-        organic_views: 0,
+        organic_impressions: 0,
       };
       current.organic_clicks += latestByPostMetric.get(`${post.id}:post_clicks`) ?? 0;
-      current.organic_views += latestByPostMetric.get(`${post.id}:post_impressions`) ?? 0;
+      current.organic_impressions += latestByPostMetric.get(`${post.id}:post_impressions`) ?? 0;
       byDate.set(date, current);
     }
 
@@ -112,9 +112,9 @@ export function MetaAdsOrganicDashboard() {
         adsClicks: acc.adsClicks + row.ads_clicks,
         organicClicks: acc.organicClicks + row.organic_clicks,
         adsImpressions: acc.adsImpressions + row.ads_impressions,
-        organicViews: acc.organicViews + row.organic_views,
+        organicImpressions: acc.organicImpressions + row.organic_impressions,
       }),
-      { adsClicks: 0, organicClicks: 0, adsImpressions: 0, organicViews: 0 },
+      { adsClicks: 0, organicClicks: 0, adsImpressions: 0, organicImpressions: 0 },
     );
   }, [compareByDate]);
 
@@ -173,7 +173,7 @@ export function MetaAdsOrganicDashboard() {
           <KpiCard title="Clicks Ads" value={formatNumberEs(Math.round(totals.adsClicks))} helper="Total del periodo" icon={<MousePointerClick className="text-red-600" size={18} />} />
           <KpiCard title="Clicks Orgánico" value={formatNumberEs(Math.round(totals.organicClicks))} helper="Total del periodo" icon={<MousePointerClick className="text-red-600" size={18} />} />
           <KpiCard title="Impresiones Ads" value={formatNumberEs(Math.round(totals.adsImpressions))} helper="Total del periodo" icon={<BarChart3 className="text-red-600" size={18} />} />
-          <KpiCard title="Vistas Orgánico" value={formatNumberEs(Math.round(totals.organicViews))} helper="Total del periodo" icon={<LineChartIcon className="text-red-600" size={18} />} />
+          <KpiCard title="Impresiones Orgánico" value={formatNumberEs(Math.round(totals.organicImpressions))} helper="Total del periodo" icon={<LineChartIcon className="text-red-600" size={18} />} />
         </KpiGrid>
       </Section>
 
@@ -198,8 +198,8 @@ export function MetaAdsOrganicDashboard() {
         </ChartCard>
       </Section>
 
-      <Section title="2) Impresiones vs Vistas por día (líneas)">
-        <ChartCard title="Ads vs Orgánico · Alcance visual" icon={<BarChart3 size={16} className="text-red-600" />}>
+      <Section title="2) Impresiones Ads vs Impresiones Orgánico por día (líneas)">
+        <ChartCard title="Ads vs Orgánico · Impresiones" icon={<BarChart3 size={16} className="text-red-600" />}>
           {compareByDate.length === 0 ? (
             <div className="rounded-xl border border-dashed border-gray-200 bg-gray-50 px-4 py-6 text-sm text-gray-500">
               Sin datos para este rango.
@@ -212,7 +212,7 @@ export function MetaAdsOrganicDashboard() {
                 <YAxis tick={{ fontSize: 12 }} />
                 <Tooltip {...chartTooltipStyle} />
                 <Line type="monotone" dataKey="ads_impressions" name="Impresiones Ads" stroke="#dc2626" strokeWidth={2.5} dot={false} isAnimationActive={false} />
-                <Line type="monotone" dataKey="organic_views" name="Vistas Orgánico" stroke="#059669" strokeWidth={2.5} dot={false} isAnimationActive={false} />
+                <Line type="monotone" dataKey="organic_impressions" name="Impresiones Orgánico" stroke="#059669" strokeWidth={2.5} dot={false} isAnimationActive={false} />
               </LineChart>
             </ResponsiveContainer>
           )}
@@ -234,9 +234,9 @@ export function MetaAdsOrganicDashboard() {
             </ResponsiveContainer>
           </ChartCard>
 
-          <ChartCard title="Total Impresiones/Vistas · Ads vs Orgánico" icon={<BarChart3 size={16} className="text-red-600" />}>
+          <ChartCard title="Total Impresiones · Ads vs Orgánico" icon={<BarChart3 size={16} className="text-red-600" />}>
             <ResponsiveContainer width="100%" height={280}>
-              <BarChart data={[{ label: 'Visualizaciones', ads: totals.adsImpressions, organico: totals.organicViews }]}> 
+              <BarChart data={[{ label: 'Impresiones', ads: totals.adsImpressions, organico: totals.organicImpressions }]}> 
                 <CartesianGrid strokeDasharray="3 3" vertical={false} />
                 <XAxis dataKey="label" tick={{ fontSize: 12 }} />
                 <YAxis tick={{ fontSize: 12 }} />
