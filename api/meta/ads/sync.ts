@@ -464,6 +464,29 @@ async function resolvePagesMonthlyBackfillRange(args: {
   };
 }
 
+function resolvePagesLatestMonthRange(args: {
+  since: string | null;
+  until: string | null;
+}) {
+  if (args.since && args.until) {
+    return {
+      since: args.since,
+      until: args.until,
+      latestMonth: args.since.slice(0, 7),
+      source: 'explicit_range' as const,
+    };
+  }
+
+  const now = new Date();
+  const lastClosedMonth = shiftMonth(now.getUTCFullYear(), now.getUTCMonth() + 1, -1);
+  const bounds = getMonthBounds(lastClosedMonth.year, lastClosedMonth.month);
+  return {
+    ...bounds,
+    latestMonth: toYearMonth(lastClosedMonth.year, lastClosedMonth.month),
+    source: 'last_closed_month' as const,
+  };
+}
+
 function resolveInstagramUserId(req: VercelRequest, body: JsonRecord) {
   const requestValue = getRequestParam(req, body, 'instagram_user_id')?.trim();
   if (requestValue) return requestValue;
@@ -1483,6 +1506,10 @@ export default async function metaAdsSyncHandler(req: VercelRequest, res: Vercel
     accountBusinessIdForRun = accountBusinessId;
     const pagesBackfillMonthly =
       resource === 'pages' && isTruthyFlag(getRequestParam(req, body, 'backfill_monthly'));
+    const pagesLatestMonthly =
+      resource === 'pages'
+      && !pagesBackfillMonthly
+      && isTruthyFlag(getRequestParam(req, body, 'latest_monthly'));
     const requestedPagesRange = resource === 'pages' ? resolvePagesDateRange(req, body) : { since: null, until: null };
     const resolvedPagesRange = pagesBackfillMonthly
       ? await resolvePagesMonthlyBackfillRange({
@@ -1492,6 +1519,14 @@ export default async function metaAdsSyncHandler(req: VercelRequest, res: Vercel
         until: requestedPagesRange.until,
       })
       : null;
+    const resolvedPagesLatestRange = pagesLatestMonthly
+      ? resolvePagesLatestMonthRange({
+        since: requestedPagesRange.since,
+        until: requestedPagesRange.until,
+      })
+      : null;
+    const effectivePagesSince = resolvedPagesRange?.since ?? resolvedPagesLatestRange?.since ?? requestedPagesRange.since;
+    const effectivePagesUntil = resolvedPagesRange?.until ?? resolvedPagesLatestRange?.until ?? requestedPagesRange.until;
     const datePreset = resolveDatePreset(req, body);
     const timeIncrement = getRequestParam(req, body, 'time_increment')?.trim() || '1';
     const limit = parsePositiveInt(getRequestParam(req, body, 'limit'), DEFAULT_LIMIT, 500);
@@ -1524,11 +1559,14 @@ export default async function metaAdsSyncHandler(req: VercelRequest, res: Vercel
         post_max_pages: postMaxPages,
         hourly_ad_limit: hourlyAdLimit,
         max_runtime_ms: maxRuntimeMs,
-        since: resource === 'pages' ? (resolvedPagesRange?.since ?? requestedPagesRange.since) : null,
-        until: resource === 'pages' ? (resolvedPagesRange?.until ?? requestedPagesRange.until) : null,
+        since: resource === 'pages' ? effectivePagesSince : null,
+        until: resource === 'pages' ? effectivePagesUntil : null,
         backfill_monthly: pagesBackfillMonthly,
         backfill_month: resolvedPagesRange?.backfillMonth ?? null,
         backfill_source: resolvedPagesRange?.source ?? null,
+        latest_monthly: pagesLatestMonthly,
+        latest_month: resolvedPagesLatestRange?.latestMonth ?? null,
+        latest_source: resolvedPagesLatestRange?.source ?? null,
       },
     });
 
@@ -1602,8 +1640,8 @@ export default async function metaAdsSyncHandler(req: VercelRequest, res: Vercel
     }
 
     if (resource === 'pages') {
-      const since = resolvedPagesRange?.since ?? requestedPagesRange.since;
-      const until = resolvedPagesRange?.until ?? requestedPagesRange.until;
+      const since = effectivePagesSince;
+      const until = effectivePagesUntil;
       const processedBackfillMonth = resolvedPagesRange?.backfillMonth ?? null;
       const parsedProcessedBackfillMonth = parseYearMonth(processedBackfillMonth ?? undefined);
       const nextBackfillMonth = parsedProcessedBackfillMonth
@@ -1612,6 +1650,7 @@ export default async function metaAdsSyncHandler(req: VercelRequest, res: Vercel
           shiftMonth(parsedProcessedBackfillMonth.year, parsedProcessedBackfillMonth.month, -1).month,
         )
         : null;
+      const latestMonth = resolvedPagesLatestRange?.latestMonth ?? null;
 
       const pagesResult = await fetchMetaCollection({
         token,
@@ -1867,6 +1906,19 @@ export default async function metaAdsSyncHandler(req: VercelRequest, res: Vercel
           : {
             enabled: false,
             status: 'Backfill mensual desactivado. Usando rango manual o default.',
+          },
+        latest: pagesLatestMonthly
+          ? {
+            enabled: true,
+            month: latestMonth,
+            source: resolvedPagesLatestRange?.source ?? null,
+            status: latestMonth
+              ? `Sync mensual de actualización OK. Mes objetivo: ${latestMonth}.`
+              : 'Sync mensual de actualización OK. Mes objetivo no disponible.',
+          }
+          : {
+            enabled: false,
+            status: 'Sync mensual de actualización desactivado.',
           },
         pages: pages.map((item) => ({
           id: item.business_id,

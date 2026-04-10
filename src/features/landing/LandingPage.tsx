@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useState } from 'react';
 import {
   ArrowRight,
   BadgeCheck,
@@ -101,6 +101,27 @@ const heroSlides = [
   },
 ] as const;
 
+// Ajustable: glow monocromo (suave/casi imperceptible) para DINSIDES en el HERO.
+const HERO_LED_GLOW = {
+  blurSoftPx: 10,
+  blurStrongPx: 24,
+  baseOpacityNight: 0.11,
+  baseOpacityDay: 0.06,
+  glowOpacityNight: 0.08,
+  glowOpacityDay: 0.045,
+  strokeOpacityNight: 0.14,
+  strokeOpacityDay: 0.08,
+} as const;
+
+// Ajustable: PNG superpuesto junto al título (detrás + delante del texto).
+const HERO_OVERLAY_IMAGE = {
+  src: '/ImagenHeader.png',
+  heightVh: 80,
+  rightPercent: -5,
+  centerYOffsetPx: 40,
+  frontClipPercent: 100,
+} as const;
+
 function joinClasses(...values: Array<string | false | null | undefined>) {
   return values.filter(Boolean).join(' ');
 }
@@ -112,11 +133,11 @@ function Header({ isNight, isAnimating, onToggleTheme }: { isNight: boolean; isA
       isNight ? 'border-white/10 bg-black/70' : 'border-black/10 bg-white/75',
     )}>
       <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-5 py-4 sm:px-8 lg:px-10">
-        <a href="#inicio" className="flex items-center gap-3">
-          <img src="/icon-dinsides.png" alt="Dinsides Courier" className={joinClasses('h-10 w-10 rounded-2xl border object-cover', isNight ? 'border-white/10' : 'border-black/10')} />
-          <div>
-            <p className="text-[11px] uppercase tracking-[0.32em] text-red-300">Dinsides Courier</p>
-            <p className={joinClasses('text-sm', isNight ? 'text-white/80' : 'text-gray-600')}>La satisfacción de tu cliente es nuestra prioridad</p>
+        <a href="#inicio" className="flex items-center gap-0.5">
+          <img src="/icon-dinsides.png" alt="Dinsides Courier" className={joinClasses('h-15 w-15 rounded-2xl object-cover')} />
+          <div className="hidden flex-col items-start leading-[0.9] md:flex gap-0.5">
+            <p className={joinClasses('text-[12px] uppercase tracking-[0.1em] font-extrabold', isNight ? 'text-white' : 'text-black')}>Dinsides</p>
+            <p className={joinClasses('text-[8px] uppercase tracking-[0.15em] font-thin', isNight ? 'text-white' : 'text-red-500')}>Courier</p>
           </div>
         </a>
 
@@ -164,48 +185,19 @@ function Header({ isNight, isAnimating, onToggleTheme }: { isNight: boolean; isA
 export function LandingPage() {
   const [isNight, setIsNight] = useState(true);
   const [isThemeAnimating, setIsThemeAnimating] = useState(false);
-  const [heroProgress, setHeroProgress] = useState(0);
-  const heroSectionRef = useRef<HTMLElement | null>(null);
   const softBorderClass = isNight ? 'border-white/10' : 'border-black/10';
   const sectionAltClass = isNight ? 'bg-white/[0.02]' : 'bg-black/[0.02]';
   const mutedTextClass = isNight ? 'text-white/75' : 'text-gray-600';
   const cardClass = isNight ? 'bg-black/30' : 'bg-white';
-  const heroSlidesCount = heroSlides.length;
-
-  const heroSectionMinHeight = useMemo(
-    () => `calc(${Math.max(1, heroSlidesCount)} * 100svh)`,
-    [heroSlidesCount],
-  );
-
-  const currentHeroSlide = useMemo(() => {
-    if (heroSlidesCount <= 1) return 0;
-    return Math.min(heroSlidesCount - 1, Math.floor(heroProgress * heroSlidesCount));
-  }, [heroProgress, heroSlidesCount]);
-
-  useEffect(() => {
-    const onScroll = () => {
-      const section = heroSectionRef.current;
-      if (!section) return;
-
-      const rect = section.getBoundingClientRect();
-      const sectionTop = window.scrollY + rect.top;
-      const sectionHeight = section.offsetHeight;
-      const viewportHeight = window.innerHeight;
-      const travel = Math.max(1, sectionHeight - viewportHeight);
-      const raw = (window.scrollY - sectionTop) / travel;
-      const clamped = Math.max(0, Math.min(1, raw));
-      setHeroProgress(clamped);
-    };
-
-    onScroll();
-    window.addEventListener('scroll', onScroll, { passive: true });
-    window.addEventListener('resize', onScroll);
-
-    return () => {
-      window.removeEventListener('scroll', onScroll);
-      window.removeEventListener('resize', onScroll);
-    };
-  }, []);
+  const activeHeroSlide = heroSlides[0];
+  const ledRgb = isNight ? '255, 255, 255' : '0, 0, 0';
+  const ledBaseOpacity = isNight ? HERO_LED_GLOW.baseOpacityNight : HERO_LED_GLOW.baseOpacityDay;
+  const ledGlowOpacity = isNight ? HERO_LED_GLOW.glowOpacityNight : HERO_LED_GLOW.glowOpacityDay;
+  const ledStrokeOpacity = isNight ? HERO_LED_GLOW.strokeOpacityNight : HERO_LED_GLOW.strokeOpacityDay;
+  const heroLedTextStyle = {
+    textShadow: `0 0 ${HERO_LED_GLOW.blurSoftPx}px rgba(${ledRgb}, ${ledBaseOpacity}), 0 0 ${HERO_LED_GLOW.blurStrongPx}px rgba(${ledRgb}, ${ledGlowOpacity})`,
+    WebkitTextStroke: `1px rgba(${ledRgb}, ${ledStrokeOpacity})`,
+  } as const;
 
   const handleToggleTheme = () => {
     setIsThemeAnimating(true);
@@ -219,7 +211,7 @@ export function LandingPage() {
       <div className={joinClasses('pointer-events-none fixed inset-0 -z-20 transition-opacity duration-700', isNight ? 'bg-white opacity-0' : 'bg-white opacity-100')} />
       <div
         className={joinClasses(
-          'pointer-events-none fixed inset-0 -z-10 bg-[radial-gradient(circle_at_20%_20%,rgba(239,68,68,0.22),transparent_42%)] transition-opacity duration-500',
+          'pointer-events-none fixed inset-0 -z-10 bg-[radial-gradient(circle_at_20%_20%,rgba(255, 0, 0, 0.22),transparent_42%)] transition-opacity duration-500',
           isThemeAnimating ? 'opacity-100' : 'opacity-0',
         )}
       />
@@ -229,47 +221,76 @@ export function LandingPage() {
       <main>
         <section
           id="inicio"
-          ref={heroSectionRef}
-          className={joinClasses('relative overflow-hidden border-b', softBorderClass)}
-          style={{ minHeight: heroSectionMinHeight }}
+          className={joinClasses('relative overflow-hidden border-b min-h-[100svh]', softBorderClass)}
         >
           <div className={joinClasses('landing-noise absolute inset-0', isNight ? 'opacity-35' : 'opacity-10')} />
           <div className={joinClasses('landing-grid absolute inset-0', isNight ? 'opacity-15' : 'opacity-10')} />
 
-          <div className="sticky top-0 h-[100svh] overflow-hidden">
-            {heroSlides.map((slide, index) => (
+          <div className="relative h-[100svh] overflow-hidden">
+            <div className="absolute inset-0 transition-all duration-[1400ms] ease-out opacity-100 scale-100 translate-y-0">
+              <img
+                src={activeHeroSlide.image}
+                alt="Slide principal"
+                className="absolute inset-0 h-full w-full object-cover object-center transition-transform duration-[1800ms] ease-out scale-100"
+                style={{ objectPosition: activeHeroSlide.objectPosition }}
+              />
               <div
-                key={slide.image}
                 className={joinClasses(
-                  'absolute inset-0 transition-all duration-[1400ms] ease-out',
-                  index === currentHeroSlide ? 'opacity-100' : 'opacity-0',
-                  index === currentHeroSlide ? 'scale-100 translate-y-0' : 'scale-105 translate-y-2',
+                  'absolute inset-0',
+                  isNight
+                    ? 'bg-[linear-gradient(96deg,rgba(0,0,0,0.72)_0%,rgba(0,0,0,0.42)_38%,rgba(0,0,0,0.58)_100%)]'
+                    : 'bg-[linear-gradient(96deg,rgba(255,255,255,0.84)_0%,rgba(255,255,255,0.52)_38%,rgba(245,245,245,0.38)_100%)]',
                 )}
-              >
-                <img
-                  src={slide.image}
-                  alt={`Slide ${index + 1}`}
-                  className={joinClasses(
-                    'absolute inset-0 h-full w-full object-cover object-center transition-transform duration-[1800ms] ease-out',
-                    index === currentHeroSlide ? 'scale-100' : 'scale-110',
-                  )}
-                  style={{ objectPosition: slide.objectPosition }}
-                />
-                <div
-                  className={joinClasses(
-                    'absolute inset-0',
-                    isNight
-                      ? 'bg-[linear-gradient(96deg,rgba(0,0,0,0.80)_0%,rgba(0,0,0,0.48)_38%,rgba(0,0,0,0.62)_100%)]'
-                      : 'bg-[linear-gradient(96deg,rgba(255,255,255,0.84)_0%,rgba(255,255,255,0.48)_38%,rgba(10,10,10,0.34)_100%)]',
-                  )}
-                />
-              </div>
-            ))}
+              />
+            </div>
 
-            <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-              <h1 className={joinClasses('text-[26vw] font-black uppercase leading-[0.84] tracking-[0.14em] md:text-[18vw]', isNight ? 'text-white/[0.08]' : 'text-black/[0.08]')}>
-                DINSIDES
-              </h1>
+            <div className="pointer-events-none absolute inset-0">
+              <img
+                src={HERO_OVERLAY_IMAGE.src}
+                alt=""
+                aria-hidden="true"
+                className="absolute top-1/2 object-contain"
+                style={{
+                  height: `${HERO_OVERLAY_IMAGE.heightVh}svh`,
+                  right: `${HERO_OVERLAY_IMAGE.rightPercent}%`,
+                  transform: `translateY(calc(-50% + ${HERO_OVERLAY_IMAGE.centerYOffsetPx}px))`,
+                  zIndex: 12,
+                }}
+              />
+
+              <div className="absolute inset-0 z-20 flex items-center justify-center">
+                <div className="relative inline-flex flex-col items-start">
+                  <h1
+                    className={joinClasses('text-[26vw] font-black uppercase leading-[0.8] tracking-[0.1em] md:text-[16vw]', isNight ? 'text-white/[0.32]' : 'text-black/[0.85]')}
+                    style={heroLedTextStyle}
+                  >
+                    DINSIDES
+                  </h1>
+
+                  <p className={joinClasses(
+                    'mt-1 max-w-[min(88vw,720px)] rounded-full px-3  text-[11px] font-medium leading-relaxed sm:mt-2 sm:px-4 sm:py-1 sm:text-sm md:text-xl backdrop-blur-[2px]',
+                    isNight
+                      ? '+text-white/88'
+                      : 'text-black/78',
+                  )}>
+                    Más que un servicio logístico, somos el motor que impulsa tu marca.
+                  </p>
+                </div>
+              </div>
+
+              <img
+                src={HERO_OVERLAY_IMAGE.src}
+                alt=""
+                aria-hidden="true"
+                className="absolute top-1/2 object-contain"
+                style={{
+                  height: `${HERO_OVERLAY_IMAGE.heightVh}svh`,
+                  right: `${HERO_OVERLAY_IMAGE.rightPercent}%`,
+                  transform: `translateY(calc(-50% + ${HERO_OVERLAY_IMAGE.centerYOffsetPx}px))`,
+                  clipPath: `inset(0 ${100 - HERO_OVERLAY_IMAGE.frontClipPercent}% 0 0)`,
+                  zIndex: 28,
+                }}
+              />
             </div>
 
           </div>

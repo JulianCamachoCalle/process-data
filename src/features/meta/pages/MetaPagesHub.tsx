@@ -1,16 +1,56 @@
 import { useMemo, useState } from 'react';
-import { Activity, BarChart3, BookImage, Eye, FileText } from 'lucide-react';
+import { Activity, BarChart3, BookImage, Eye, FileText, MessageSquare, MousePointerClick, Share2, ThumbsUp } from 'lucide-react';
 import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { formatNumberEs } from '../../../lib/tableHelpers';
 import { ChartCard, KpiCard, KpiGrid, MetaAdsFiltersPanel, MetaAdsPageHero, Section } from '../ads/metaAdsShared';
 import { useMetaPagesData } from './useMetaPagesData';
 
-type PostClicksSnapshotPoint = {
-  date: string;
+type EnrichedPost = {
+  id: string;
+  page_id: string;
+  page_name: string | null;
+  message: string | null;
+  created_time: string | null;
+  permalink_url: string | null;
+  full_picture: string | null;
+  reactions: number;
+  comments: number;
+  shares: number;
   clicks: number;
-  engaged: number;
-  impressions: number;
+  views: number;
 };
+
+type PostMetricTrendPoint = {
+  date: string;
+  reactions: number;
+  comments: number;
+  shares: number;
+  clicks: number;
+  views: number;
+};
+
+const chartTooltipStyle = {
+  contentStyle: {
+    borderRadius: '10px',
+    border: '1px solid #d1d5db',
+    backgroundColor: '#f9fafb',
+    boxShadow: '0 8px 16px -12px rgba(15,23,42,0.35)',
+    padding: '6px 8px',
+  },
+  labelStyle: {
+    color: '#374151',
+    fontWeight: 600,
+    fontSize: 12,
+  },
+  itemStyle: {
+    color: '#374151',
+    fontWeight: 500,
+    fontSize: 12,
+  },
+  cursor: {
+    fill: 'rgba(107,114,128,0.08)',
+  },
+} as const;
 
 export function MetaPagesHub() {
   const [since, setSince] = useState('');
@@ -19,11 +59,11 @@ export function MetaPagesHub() {
   const [draftUntil, setDraftUntil] = useState(until);
 
   const pagesQuery = useMetaPagesData({ since, until });
-
   const isFiltersDirty = since !== draftSince || until !== draftUntil;
 
   const pages = useMemo(() => pagesQuery.data?.pages ?? [], [pagesQuery.data?.pages]);
   const posts = useMemo(() => pagesQuery.data?.posts ?? [], [pagesQuery.data?.posts]);
+  const insights = useMemo(() => pagesQuery.data?.insights ?? [], [pagesQuery.data?.insights]);
   const postInsightSnapshots = useMemo(
     () => pagesQuery.data?.post_insights_snapshots ?? [],
     [pagesQuery.data?.post_insights_snapshots],
@@ -36,7 +76,7 @@ export function MetaPagesHub() {
       .slice(0, 8);
   }, [pages]);
 
-  const topPosts = useMemo(() => {
+  const enrichedPosts = useMemo<EnrichedPost[]>(() => {
     const latestByPostMetric = new Map<string, number>();
 
     for (const snapshot of postInsightSnapshots) {
@@ -47,75 +87,73 @@ export function MetaPagesHub() {
       }
     }
 
-    return [...posts]
-      .map((post) => ({
-        ...post,
-        engagement: post.reactions + post.comments + post.shares,
-        clicks: latestByPostMetric.get(`${post.id}:post_clicks`) ?? 0,
-        views: latestByPostMetric.get(`${post.id}:post_impressions`) ?? 0,
-        engagedUsers: latestByPostMetric.get(`${post.id}:post_engaged_users`) ?? 0,
-      }))
-      .sort((a, b) => b.engagement - a.engagement)
-      .slice(0, 12);
+    return posts.map((post) => ({
+      ...post,
+      clicks: latestByPostMetric.get(`${post.id}:post_clicks`) ?? 0,
+      views: latestByPostMetric.get(`${post.id}:post_impressions`) ?? 0,
+    }));
   }, [posts, postInsightSnapshots]);
 
-  const postClicksTrend = useMemo(() => {
-    const groupedBySnapshot = new Map<string, PostClicksSnapshotPoint>();
+  const topByReactions = useMemo(
+    () => [...enrichedPosts].sort((a, b) => b.reactions - a.reactions).slice(0, 5),
+    [enrichedPosts],
+  );
+  const topByComments = useMemo(
+    () => [...enrichedPosts].sort((a, b) => b.comments - a.comments).slice(0, 5),
+    [enrichedPosts],
+  );
+  const topByShares = useMemo(
+    () => [...enrichedPosts].sort((a, b) => b.shares - a.shares).slice(0, 5),
+    [enrichedPosts],
+  );
+  const topByClicks = useMemo(
+    () => [...enrichedPosts].sort((a, b) => b.clicks - a.clicks).slice(0, 5),
+    [enrichedPosts],
+  );
+  const topByViews = useMemo(
+    () => [...enrichedPosts].sort((a, b) => b.views - a.views).slice(0, 5),
+    [enrichedPosts],
+  );
 
-    for (const snapshot of postInsightSnapshots) {
-      const date = snapshot.snapshot_date;
-      if (!date) continue;
+  const trendByPostDate = useMemo<PostMetricTrendPoint[]>(() => {
+    const grouped = new Map<string, PostMetricTrendPoint>();
 
-      const current = groupedBySnapshot.get(date) ?? { date, clicks: 0, engaged: 0, impressions: 0 };
-      if (snapshot.metric === 'post_clicks') current.clicks += snapshot.value;
-      if (snapshot.metric === 'post_engaged_users') current.engaged += snapshot.value;
-      if (snapshot.metric === 'post_impressions') current.impressions += snapshot.value;
-      groupedBySnapshot.set(date, current);
-    }
-
-    const snapshotSeries = Array.from(groupedBySnapshot.values()).sort((a, b) => a.date.localeCompare(b.date));
-    if (snapshotSeries.length >= 2) {
-      return snapshotSeries;
-    }
-
-    // Fallback: si hay un solo snapshot (o ninguno), usar fecha de publicación del post
-    // para evitar que toda la tendencia colapse en un mismo día.
-    const groupedByPostDate = new Map<string, PostClicksSnapshotPoint>();
-    for (const post of topPosts) {
+    for (const post of enrichedPosts) {
       const date = (post.created_time ?? '').slice(0, 10);
       if (!date) continue;
 
-      const current = groupedByPostDate.get(date) ?? { date, clicks: 0, engaged: 0, impressions: 0 };
+      const current = grouped.get(date) ?? {
+        date,
+        reactions: 0,
+        comments: 0,
+        shares: 0,
+        clicks: 0,
+        views: 0,
+      };
+
+      current.reactions += post.reactions;
+      current.comments += post.comments;
+      current.shares += post.shares;
       current.clicks += post.clicks;
-      current.engaged += post.engagedUsers;
-      current.impressions += post.views;
-      groupedByPostDate.set(date, current);
+      current.views += post.views;
+      grouped.set(date, current);
     }
 
-    return Array.from(groupedByPostDate.values()).sort((a, b) => a.date.localeCompare(b.date));
-  }, [postInsightSnapshots, topPosts]);
-
-  const latestPostClicksSnapshot = useMemo(() => {
-    if (postClicksTrend.length === 0) return null;
-    return postClicksTrend[postClicksTrend.length - 1];
-  }, [postClicksTrend]);
+    return Array.from(grouped.values()).sort((a, b) => a.date.localeCompare(b.date));
+  }, [enrichedPosts]);
 
   const totals = useMemo(() => {
-    const followers = pages.reduce((acc, page) => acc + (page.followers_count || 0), 0);
-    const postEngagement = posts.reduce((acc, post) => acc + post.reactions + post.comments + post.shares, 0);
-    const latestSnapshotDate = postInsightSnapshots.reduce((acc, item) => item.snapshot_date > acc ? item.snapshot_date : acc, '');
-    const totalPostClicks = postInsightSnapshots
-      .filter((item) => item.metric === 'post_clicks' && item.snapshot_date === latestSnapshotDate)
-      .reduce((acc, item) => acc + item.value, 0);
-
     return {
-      totalPages: pages.length,
-      totalFollowers: followers,
+      totalInsights: insights.length,
+      totalFollowers: pages.reduce((acc, page) => acc + (page.followers_count || 0), 0),
       totalPosts: posts.length,
-      avgEngagementPerPost: posts.length > 0 ? postEngagement / posts.length : 0,
-      totalPostClicks,
+      totalReactions: enrichedPosts.reduce((acc, post) => acc + post.reactions, 0),
+      totalComments: enrichedPosts.reduce((acc, post) => acc + post.comments, 0),
+      totalShares: enrichedPosts.reduce((acc, post) => acc + post.shares, 0),
+      totalClicks: enrichedPosts.reduce((acc, post) => acc + post.clicks, 0),
+      totalViews: enrichedPosts.reduce((acc, post) => acc + post.views, 0),
     };
-  }, [pages, posts, postInsightSnapshots]);
+  }, [enrichedPosts, insights.length, pages, posts.length]);
 
   if (pagesQuery.isLoading) {
     return (
@@ -142,7 +180,7 @@ export function MetaPagesHub() {
     <div className="space-y-6">
       <MetaAdsPageHero
         title="Meta Pages"
-        description="Explorer + publicaciones + insights del periodo seleccionado."
+        description="Explorer + top posts por métrica + tendencias de publicaciones."
         icon={<BookImage className="text-red-600" size={24} />}
       />
 
@@ -166,10 +204,14 @@ export function MetaPagesHub() {
 
       <Section title="KPI (Pages)">
         <KpiGrid>
+          <KpiCard title="Insights" value={formatNumberEs(totals.totalInsights)} helper="Filas de insights del periodo" icon={<BarChart3 className="text-red-600" size={18} />} />
           <KpiCard title="Seguidores" value={formatNumberEs(totals.totalFollowers)} helper="Total de seguidores" icon={<Eye className="text-red-600" size={18} />} />
-          <KpiCard title="Posts Totales" value={formatNumberEs(totals.totalPosts)} helper="Publicaciones totales" icon={<FileText className="text-red-600" size={18} />} />
-          <KpiCard title="Engagement/post" value={formatNumberEs(Math.round(totals.avgEngagementPerPost))} helper="Reacciones + comentarios + compartidos" icon={<BarChart3 className="text-red-600" size={18} />} />
-          <KpiCard title="Clicks orgánicos" value={formatNumberEs(Math.round(totals.totalPostClicks))} helper="Total de clicks orgánicos" icon={<Activity className="text-red-600" size={18} />} />
+          <KpiCard title="Posts" value={formatNumberEs(totals.totalPosts)} helper="Publicaciones del rango" icon={<FileText className="text-red-600" size={18} />} />
+          <KpiCard title="Reacciones" value={formatNumberEs(totals.totalReactions)} helper="Total acumulado" icon={<ThumbsUp className="text-red-600" size={18} />} />
+          <KpiCard title="Comentarios" value={formatNumberEs(totals.totalComments)} helper="Total acumulado" icon={<MessageSquare className="text-red-600" size={18} />} />
+          <KpiCard title="Compartidos" value={formatNumberEs(totals.totalShares)} helper="Total acumulado" icon={<Share2 className="text-red-600" size={18} />} />
+          <KpiCard title="Clicks" value={formatNumberEs(totals.totalClicks)} helper="Total acumulado" icon={<MousePointerClick className="text-red-600" size={18} />} />
+          <KpiCard title="Vistas" value={formatNumberEs(totals.totalViews)} helper="Total acumulado" icon={<Eye className="text-red-600" size={18} />} />
         </KpiGrid>
       </Section>
 
@@ -182,6 +224,7 @@ export function MetaPagesHub() {
                   <th className="px-4 py-3">Página</th>
                   <th className="px-4 py-3">Categoría</th>
                   <th className="px-4 py-3 text-right">Followers</th>
+                  <th className="px-4 py-3 text-right">Fans</th>
                   <th className="px-4 py-3">Enlace</th>
                 </tr>
               </thead>
@@ -214,78 +257,69 @@ export function MetaPagesHub() {
         </div>
       </Section>
 
-      <Section title="2) Publicaciones (top engagement)">
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
-          {topPosts.length === 0 ? (
-            <div className="rounded-xl border border-dashed border-gray-200 bg-gray-50 px-4 py-6 text-sm text-gray-500">
-              No se pudieron leer posts para el rango actual.
-            </div>
-          ) : topPosts.map((post) => (
-            <ChartCard key={post.id} title={post.page_name ?? post.page_id} icon={<FileText size={16} className="text-red-600" />}>
-              <div className="space-y-2">
-                <p className="text-xs text-gray-500">{post.created_time ? new Date(post.created_time).toLocaleString('es-PE') : 'Sin fecha'}</p>
-                <p className="text-sm text-gray-700 line-clamp-3">{post.message ?? 'Sin texto en publicación'}</p>
-                {post.full_picture ? <img src={post.full_picture} alt={post.id} className="w-full rounded-xl border border-gray-200" loading="lazy" /> : null}
-                <div className="grid grid-cols-2 gap-2 text-xs">
-                  <div className="rounded-lg border border-gray-200 bg-gray-50 px-2.5 py-2">
-                    <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-500">Reacciones</p>
-                    <p className="mt-1 text-sm font-bold text-gray-800">{formatNumberEs(post.reactions)}</p>
-                  </div>
-                  <div className="rounded-lg border border-gray-200 bg-gray-50 px-2.5 py-2">
-                    <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-500">Comentarios</p>
-                    <p className="mt-1 text-sm font-bold text-gray-800">{formatNumberEs(post.comments)}</p>
-                  </div>
-                  <div className="rounded-lg border border-gray-200 bg-gray-50 px-2.5 py-2">
-                    <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-500">Compartidos</p>
-                    <p className="mt-1 text-sm font-bold text-gray-800">{formatNumberEs(post.shares)}</p>
-                  </div>
-                  <div className="rounded-lg border border-gray-200 bg-green-50 px-2.5 py-2">
-                    <p className="text-[10px] font-semibold uppercase tracking-wide text-green-500">Clicks</p>
-                    <p className="mt-1 text-sm font-bold text-green-700">{formatNumberEs(post.clicks)}</p>
-                  </div>
-                  <div className="col-span-2 rounded-lg border border-green-200 bg-green-50 px-2.5 py-2">
-                    <p className="text-[10px] font-semibold uppercase tracking-wide text-green-600">Vistas</p>
-                    <p className="mt-1 text-sm font-bold text-green-700">{formatNumberEs(post.views)}</p>
-                  </div>
-                </div>
-                {post.permalink_url ? (
-                  <a href={post.permalink_url} target="_blank" rel="noreferrer" className="inline-block text-xs font-semibold text-red-600 hover:text-red-700">
-                    Abrir
-                  </a>
-                ) : null}
-              </div>
-            </ChartCard>
-          ))}
+      <Section title="2) Top 5 publicaciones por métrica">
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+          <TopPostsListCard
+            title="Top 5 · Reacciones"
+            posts={topByReactions}
+            getMetric={(post) => post.reactions}
+          />
+          <TopPostsListCard
+            title="Top 5 · Comentarios"
+            posts={topByComments}
+            getMetric={(post) => post.comments}
+          />
+          <TopPostsListCard
+            title="Top 5 · Compartidos"
+            posts={topByShares}
+            getMetric={(post) => post.shares}
+          />
+          <TopPostsListCard
+            title="Top 5 · Clicks"
+            posts={topByClicks}
+            getMetric={(post) => post.clicks}
+          />
+          <TopPostsListCard
+            title="Top 5 · Vistas"
+            posts={topByViews}
+            getMetric={(post) => post.views}
+          />
         </div>
       </Section>
 
-      <Section title="4) Clicks y Engagement">
-        <ChartCard title="Clicks y usuarios enganchados por día" icon={<BarChart3 size={16} className="text-red-600" />}>
-          {postClicksTrend.length === 0 ? (
-            <div className="rounded-xl border border-dashed border-gray-200 bg-gray-50 px-4 py-6 text-sm text-gray-500">
-              Sin snapshots de post insights todavía.
-            </div>
-          ) : postClicksTrend.length === 1 && latestPostClicksSnapshot ? (
-            <div className="rounded-xl border border-gray-200 bg-gray-50 px-4 py-6 text-sm text-gray-700 space-y-1">
-              <p className="font-semibold">Estos son los datos disponibles</p>
-              <p>Clicks: <strong>{formatNumberEs(Math.round(latestPostClicksSnapshot.clicks))}</strong></p>
-              <p>Usuarios enganchados: <strong>{formatNumberEs(Math.round(latestPostClicksSnapshot.engaged))}</strong></p>
-              <p className="text-xs text-gray-500">Necesitás al menos 2 snapshots en fechas distintas para ver tendencia.</p>
-            </div>
-          ) : (
-            <ResponsiveContainer width="100%" height={320}>
-              <LineChart data={postClicksTrend}>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                <XAxis dataKey="date" tick={{ fontSize: 12 }} />
-                <YAxis tick={{ fontSize: 12 }} />
-                <Tooltip />
-                <Line type="monotone" dataKey="clicks" stroke="#dc2626" strokeWidth={2.5} dot={false} isAnimationActive={false} />
-                <Line type="monotone" dataKey="engagement" stroke="#f59e0b" strokeWidth={2.5} dot={false} isAnimationActive={false} />
-                <Line type="monotone" dataKey="vistas" stroke="#2563eb" strokeWidth={2.5} dot={false} isAnimationActive={false} />
-              </LineChart>
-            </ResponsiveContainer>
-          )}
-        </ChartCard>
+      <Section title="3) Tendencias de posts (5 apartados)">
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+          <PostTrendChartCard
+            title="Tendencia · Reacciones"
+            data={trendByPostDate}
+            dataKey="reactions"
+            stroke="#dc2626"
+          />
+          <PostTrendChartCard
+            title="Tendencia · Comentarios"
+            data={trendByPostDate}
+            dataKey="comments"
+            stroke="#f59e0b"
+          />
+          <PostTrendChartCard
+            title="Tendencia · Compartidos"
+            data={trendByPostDate}
+            dataKey="shares"
+            stroke="#7c3aed"
+          />
+          <PostTrendChartCard
+            title="Tendencia · Clicks"
+            data={trendByPostDate}
+            dataKey="clicks"
+            stroke="#2563eb"
+          />
+          <PostTrendChartCard
+            title="Tendencia · Vistas"
+            data={trendByPostDate}
+            dataKey="views"
+            stroke="#059669"
+          />
+        </div>
       </Section>
 
       {errors.length > 0 ? (
@@ -294,5 +328,72 @@ export function MetaPagesHub() {
         </div>
       ) : null}
     </div>
+  );
+}
+
+function TopPostsListCard({
+  title,
+  posts,
+  getMetric,
+}: {
+  title: string;
+  posts: EnrichedPost[];
+  getMetric: (post: EnrichedPost) => number;
+}) {
+  return (
+    <ChartCard title={title} icon={<FileText size={16} className="text-red-600" />}>
+      {posts.length === 0 ? (
+        <div className="rounded-xl border border-dashed border-gray-200 bg-gray-50 px-4 py-6 text-sm text-gray-500">
+          No hay publicaciones para este rango.
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {posts.map((post, index) => (
+            <article key={`${title}-${post.id}`} className="rounded-xl border border-gray-200 bg-gray-50 px-3 py-2.5">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">#{index + 1}</p>
+                  <p className="text-sm font-semibold text-gray-800 truncate">{post.page_name ?? post.page_id}</p>
+                  <p className="text-xs text-gray-600 line-clamp-2">{post.message ?? 'Sin texto en publicación'}</p>
+                </div>
+                <p className="text-sm font-extrabold text-gray-900">{formatNumberEs(getMetric(post))}</p>
+              </div>
+            </article>
+          ))}
+        </div>
+      )}
+    </ChartCard>
+  );
+}
+
+function PostTrendChartCard({
+  title,
+  data,
+  dataKey,
+  stroke,
+}: {
+  title: string;
+  data: PostMetricTrendPoint[];
+  dataKey: 'reactions' | 'comments' | 'shares' | 'clicks' | 'views';
+  stroke: string;
+}) {
+  return (
+    <ChartCard title={title} icon={<BarChart3 size={16} className="text-red-600" />}>
+      {data.length === 0 ? (
+        <div className="rounded-xl border border-dashed border-gray-200 bg-gray-50 px-4 py-6 text-sm text-gray-500">
+          Sin datos para graficar en este rango.
+        </div>
+      ) : (
+        <ResponsiveContainer width="100%" height={300}>
+          <LineChart data={data}>
+            <CartesianGrid strokeDasharray="3 3" vertical={false} />
+            <XAxis dataKey="date" tick={{ fontSize: 12 }} />
+            <YAxis tick={{ fontSize: 12 }} />
+            <Tooltip {...chartTooltipStyle} />
+            <Line type="monotone" dataKey={dataKey} stroke={stroke} strokeWidth={2.5} dot={false} isAnimationActive={false} />
+          </LineChart>
+        </ResponsiveContainer>
+      )}
+    </ChartCard>
   );
 }
