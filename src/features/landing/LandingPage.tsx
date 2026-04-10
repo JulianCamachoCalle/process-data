@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowRight,
   BadgeCheck,
@@ -86,6 +86,21 @@ const testimonials = [
 
 const isoCodes = ['ISO 9001', 'ISO 14001', 'ISO 45001', 'ISO 27001', 'ISO 28000', 'ISO 50001'];
 
+const heroSlides = [
+  {
+    image: '/hero/slide-01.jpg',
+    objectPosition: 'center 38%',
+  },
+  {
+    image: '/hero/slide-02.jpg',
+    objectPosition: 'center 42%',
+  },
+  {
+    image: '/hero/slide-03.jpg',
+    objectPosition: 'center 34%',
+  },
+] as const;
+
 function joinClasses(...values: Array<string | false | null | undefined>) {
   return values.filter(Boolean).join(' ');
 }
@@ -149,10 +164,48 @@ function Header({ isNight, isAnimating, onToggleTheme }: { isNight: boolean; isA
 export function LandingPage() {
   const [isNight, setIsNight] = useState(true);
   const [isThemeAnimating, setIsThemeAnimating] = useState(false);
+  const [heroProgress, setHeroProgress] = useState(0);
+  const heroSectionRef = useRef<HTMLElement | null>(null);
   const softBorderClass = isNight ? 'border-white/10' : 'border-black/10';
   const sectionAltClass = isNight ? 'bg-white/[0.02]' : 'bg-black/[0.02]';
   const mutedTextClass = isNight ? 'text-white/75' : 'text-gray-600';
   const cardClass = isNight ? 'bg-black/30' : 'bg-white';
+  const heroSlidesCount = heroSlides.length;
+
+  const heroSectionMinHeight = useMemo(
+    () => `calc(${Math.max(1, heroSlidesCount)} * 100svh)`,
+    [heroSlidesCount],
+  );
+
+  const currentHeroSlide = useMemo(() => {
+    if (heroSlidesCount <= 1) return 0;
+    return Math.min(heroSlidesCount - 1, Math.floor(heroProgress * heroSlidesCount));
+  }, [heroProgress, heroSlidesCount]);
+
+  useEffect(() => {
+    const onScroll = () => {
+      const section = heroSectionRef.current;
+      if (!section) return;
+
+      const rect = section.getBoundingClientRect();
+      const sectionTop = window.scrollY + rect.top;
+      const sectionHeight = section.offsetHeight;
+      const viewportHeight = window.innerHeight;
+      const travel = Math.max(1, sectionHeight - viewportHeight);
+      const raw = (window.scrollY - sectionTop) / travel;
+      const clamped = Math.max(0, Math.min(1, raw));
+      setHeroProgress(clamped);
+    };
+
+    onScroll();
+    window.addEventListener('scroll', onScroll, { passive: true });
+    window.addEventListener('resize', onScroll);
+
+    return () => {
+      window.removeEventListener('scroll', onScroll);
+      window.removeEventListener('resize', onScroll);
+    };
+  }, []);
 
   const handleToggleTheme = () => {
     setIsThemeAnimating(true);
@@ -174,13 +227,51 @@ export function LandingPage() {
       <Header isNight={isNight} isAnimating={isThemeAnimating} onToggleTheme={handleToggleTheme} />
 
       <main>
-        <section id="inicio" className={joinClasses('relative overflow-hidden border-b min-h-[72svh]', softBorderClass)}>
+        <section
+          id="inicio"
+          ref={heroSectionRef}
+          className={joinClasses('relative overflow-hidden border-b', softBorderClass)}
+          style={{ minHeight: heroSectionMinHeight }}
+        >
           <div className={joinClasses('landing-noise absolute inset-0', isNight ? 'opacity-35' : 'opacity-10')} />
           <div className={joinClasses('landing-grid absolute inset-0', isNight ? 'opacity-15' : 'opacity-10')} />
-          <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-            <h1 className={joinClasses('text-[26vw] font-black uppercase leading-[0.84] tracking-[0.14em] md:text-[18vw]', isNight ? 'text-white/[0.08]' : 'text-black/[0.08]')}>
-              DINSIDES
-            </h1>
+
+          <div className="sticky top-0 h-[100svh] overflow-hidden">
+            {heroSlides.map((slide, index) => (
+              <div
+                key={slide.image}
+                className={joinClasses(
+                  'absolute inset-0 transition-all duration-[1400ms] ease-out',
+                  index === currentHeroSlide ? 'opacity-100' : 'opacity-0',
+                  index === currentHeroSlide ? 'scale-100 translate-y-0' : 'scale-105 translate-y-2',
+                )}
+              >
+                <img
+                  src={slide.image}
+                  alt={`Slide ${index + 1}`}
+                  className={joinClasses(
+                    'absolute inset-0 h-full w-full object-cover object-center transition-transform duration-[1800ms] ease-out',
+                    index === currentHeroSlide ? 'scale-100' : 'scale-110',
+                  )}
+                  style={{ objectPosition: slide.objectPosition }}
+                />
+                <div
+                  className={joinClasses(
+                    'absolute inset-0',
+                    isNight
+                      ? 'bg-[linear-gradient(96deg,rgba(0,0,0,0.80)_0%,rgba(0,0,0,0.48)_38%,rgba(0,0,0,0.62)_100%)]'
+                      : 'bg-[linear-gradient(96deg,rgba(255,255,255,0.84)_0%,rgba(255,255,255,0.48)_38%,rgba(10,10,10,0.34)_100%)]',
+                  )}
+                />
+              </div>
+            ))}
+
+            <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+              <h1 className={joinClasses('text-[26vw] font-black uppercase leading-[0.84] tracking-[0.14em] md:text-[18vw]', isNight ? 'text-white/[0.08]' : 'text-black/[0.08]')}>
+                DINSIDES
+              </h1>
+            </div>
+
           </div>
         </section>
 
