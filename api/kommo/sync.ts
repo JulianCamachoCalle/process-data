@@ -173,6 +173,13 @@ function parseEnviosProbeLimit(value: string | undefined, fallback = 10, max = 2
   return Math.min(parsed, max);
 }
 
+function parseNonNegativeInt(value: string | undefined, fallback = 0, max = 1_000_000) {
+  if (!value) return fallback;
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isFinite(parsed) || parsed < 0) return fallback;
+  return Math.min(parsed, max);
+}
+
 function extractSetCookieValuesFromResponse(response: Response) {
   const headers = response.headers as Headers & { getSetCookie?: () => string[] };
 
@@ -1625,6 +1632,7 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
       const limitBusinesses = parseEnviosProbeLimit(asSingleQueryParam(req.query.limit_businesses), 30, 300);
       const limitRows = parseEnviosProbeLimit(asSingleQueryParam(req.query.limit_rows), 1000, 10000);
       const sampleRows = parseEnviosProbeLimit(asSingleQueryParam(req.query.sample_rows), 1200, 10000);
+      const offsetRows = parseNonNegativeInt(asSingleQueryParam(req.query.offset_rows), 0, 1_000_000);
       const singleBusiness = asSingleQueryParam(req.query.search_negocio)?.trim();
       const singleSearchTipo = asSingleQueryParam(req.query.search_tipo)?.trim();
       const debug = ['1', 'true', 'yes'].includes((asSingleQueryParam(req.query.debug) ?? '').toLowerCase());
@@ -1648,6 +1656,8 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
         errors: [] as string[],
         tried_businesses: [] as Array<{ name: string; variants: string[]; rows: number }>,
       };
+
+      const targetCollectionSize = offsetRows + limitRows;
 
       for (const businessName of businessNames) {
         const variants = buildBusinessSearchVariants(businessName);
@@ -1738,12 +1748,12 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
           });
         }
 
-        if (dedupe.size >= limitRows) {
+        if (dedupe.size >= targetCollectionSize) {
           break;
         }
       }
 
-      const finalRows = Array.from(dedupe.values()).slice(0, limitRows);
+      const finalRows = Array.from(dedupe.values()).slice(offsetRows, offsetRows + limitRows);
 
       const persist = ['1', 'true', 'yes'].includes((asSingleQueryParam(req.query.persist) ?? '').toLowerCase());
       if (persist) {
@@ -1777,19 +1787,39 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
           throw new Error(`No se pudieron leer resultados para persistir envíos: ${resultadosResult.error.message}`);
         }
 
+        const tarifasResult = await supabase
+          .from('tarifas' as never)
+          .select('id_destino,cobro_entrega,pago_moto' as never)
+          .limit(5000);
+
+        if (tarifasResult.error) {
+          throw new Error(`No se pudieron leer tarifas para persistir envíos: ${tarifasResult.error.message}`);
+        }
+
         const leadsRows = (leadsResult.data ?? []) as Array<{ business_id: number; tienda_nombre_snapshot: string | null }>;
         const destinoRows = (destinosResult.data ?? []) as Array<{ business_id: number; destino: string | null }>;
         const resultadoRows = (resultadosResult.data ?? []) as Array<{ business_id: number; resultado: string | null }>;
+        const tarifaRows = (tarifasResult.data ?? []) as Array<{ id_destino: number | null; cobro_entrega: number | null; pago_moto: number | null }>;
 
         const leadByBusinessName = mapByNormalizedLabel(leadsRows, (row) => row.tienda_nombre_snapshot);
         const destinoByName = mapByNormalizedLabel(destinoRows, (row) => row.destino);
         const resultadoByName = mapByNormalizedLabel(resultadoRows, (row) => row.resultado);
+        const tarifaByDestinoId = new Map<number, { cobroEntrega: number; pagoMoto: number }>();
+        for (const tarifa of tarifaRows) {
+          const idDestino = Number(tarifa.id_destino ?? 0);
+          if (!Number.isFinite(idDestino) || idDestino <= 0) continue;
+          tarifaByDestinoId.set(idDestino, {
+            cobroEntrega: parseNumeric(tarifa.cobro_entrega),
+            pagoMoto: parseNumeric(tarifa.pago_moto),
+          });
+        }
         const fallbackResultadoEntregado = resultadoRows.find((row) => normalizeLookupKey(row.resultado).includes('entregado'));
         const fallbackResultadoId = Number(fallbackResultadoEntregado?.business_id ?? 1);
 
         const rowsToUpsert: Array<Record<string, unknown>> = [];
         let skippedMissingLead = 0;
         let skippedMissingDestino = 0;
+        let skippedMissingTarifa = 0;
         let skippedByEstado = 0;
         let skippedExisting = 0;
 
@@ -1854,11 +1884,14 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
           }
 
           const idResultado = resultadoByName.get(seguimiento) ?? fallbackResultadoId;
-          const pagoMoto = parseNumeric(row.costo_service);
-          const tarifaDistrito = parseNumeric(row.tarifa_distrito);
-          const montoCobrar = parseNumeric(row.monto_cobrar);
-          const cobroBruto = tarifaDistrito > 0 ? tarifaDistrito : montoCobrar;
-          const cobroEntrega = cobroBruto > 0 ? Number((cobroBruto / 1.18).toFixed(2)) : 0;
+          const tarifa = tarifaByDestinoId.get(idDestino);
+          if (!tarifa) {
+            skippedMissingTarifa += 1;
+            continue;
+          }
+
+          const pagoMoto = Number((tarifa.pagoMoto ?? 0).toFixed(2));
+          const cobroEntrega = Number((tarifa.cobroEntrega ?? 0).toFixed(2));
           const fechaEnvio = parseDateOnlyFromUnknown(row.fecha_entrega) ?? parseDateOnlyFromUnknown(row.fecha_pedido);
 
           rowsToUpsert.push({
@@ -1893,12 +1926,15 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
           success: true,
           mode,
           only_remaining: onlyRemaining,
+          offset_rows: offsetRows,
+          limit_rows: limitRows,
           pulled: finalRows.length,
           upserted: rowsToUpsert.length,
           skipped_existing: skippedExisting,
           skipped_by_estado: skippedByEstado,
           skipped_missing_lead: skippedMissingLead,
           skipped_missing_destino: skippedMissingDestino,
+          skipped_missing_tarifa: skippedMissingTarifa,
         });
       }
 
@@ -1906,6 +1942,8 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
         return res.status(200).json({
           success: true,
           mode,
+          offset_rows: offsetRows,
+          limit_rows: limitRows,
           rows: finalRows,
           diagnostics,
         });
