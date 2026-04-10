@@ -237,14 +237,33 @@ async function loginDinsidesAndGetCookieHeader() {
   return { cookieHeader, loginRole };
 }
 
-async function fetchDinsidesEnviosRows(cookieHeader: string) {
+async function fetchDinsidesEnviosRows(args: {
+  cookieHeader: string;
+  searchNegocio?: string;
+  searchTelefono?: string;
+  searchIdPedido?: string;
+}) {
+  const form = new URLSearchParams({
+    SearchIdPedido: args.searchIdPedido ?? '',
+    SearchBuscadorDate: '',
+    SearchTelefono: args.searchTelefono ?? '',
+    searchMotorizado: '',
+    searchNegocio: args.searchNegocio ?? '',
+    searchTipo: '',
+    selectEstadoPunto: '',
+    selectEstadoSeguimiento: '',
+  });
+
   const response = await fetch(DINSIDES_ENVIOS_URL, {
-    method: 'GET',
+    method: 'POST',
     headers: {
-      Cookie: cookieHeader,
+      Cookie: args.cookieHeader,
+      'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
       'X-Requested-With': 'XMLHttpRequest',
+      Origin: DINSIDES_BASE_URL,
       Referer: `${DINSIDES_BASE_URL}/admin/listado`,
     },
+    body: form.toString(),
   });
 
   const rawText = await response.text();
@@ -274,9 +293,9 @@ async function fetchDinsidesEnviosRows(cookieHeader: string) {
       }
     }
 
-    const keys = Object.keys(candidate).slice(0, 12);
-    throw new Error(`La respuesta de envíos llegó como objeto y no se encontró array en claves comunes. keys=${keys.join(',') || 'none'}`);
-  }
+      const keys = Object.keys(candidate).slice(0, 12);
+      throw new Error(`La respuesta de envíos llegó como objeto y no se encontró array en claves comunes. keys=${keys.join(',') || 'none'}`);
+    }
 
   throw new Error('La respuesta de envíos no es un array ni objeto JSON reconocido.');
 }
@@ -1414,14 +1433,27 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
     const mode = asSingleQueryParam(req.query.mode)?.trim();
     if (mode === 'dinsides_envios_probe') {
       const limit = parseEnviosProbeLimit(asSingleQueryParam(req.query.limit), 10, 2000);
+      const searchNegocio = asSingleQueryParam(req.query.search_negocio)?.trim();
+      const searchTelefono = asSingleQueryParam(req.query.search_telefono)?.trim();
+      const searchIdPedido = asSingleQueryParam(req.query.search_id_pedido)?.trim();
       const { cookieHeader, loginRole } = await loginDinsidesAndGetCookieHeader();
-      const rows = await fetchDinsidesEnviosRows(cookieHeader);
+      const rows = await fetchDinsidesEnviosRows({
+        cookieHeader,
+        searchNegocio,
+        searchTelefono,
+        searchIdPedido,
+      });
 
       return res.status(200).json({
         success: true,
         mode,
         source: 'dinsidescourier.com/Admin/getlistadoBuscadorActualiza',
         login_role: loginRole,
+        filters: {
+          search_negocio: searchNegocio ?? '',
+          search_telefono: searchTelefono ?? '',
+          search_id_pedido: searchIdPedido ?? '',
+        },
         total_rows: rows.length,
         returned_rows: Math.min(rows.length, limit),
         rows: rows.slice(0, limit),
