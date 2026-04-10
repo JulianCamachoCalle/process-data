@@ -305,6 +305,22 @@ function normalizeBusinessName(value: unknown) {
   return value.replace(/\s+/g, ' ').trim();
 }
 
+function removeDiacritics(value: string) {
+  return value.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+}
+
+function buildBusinessSearchVariants(name: string) {
+  const base = normalizeBusinessName(name);
+  if (!base) return [] as string[];
+
+  const variants = new Set<string>();
+  variants.add(base);
+  variants.add(base.toUpperCase());
+  variants.add(removeDiacritics(base));
+  variants.add(removeDiacritics(base).toUpperCase());
+  return Array.from(variants).filter((item) => item.trim().length > 0);
+}
+
 function buildDedupeKeyFromEnvioRow(row: Record<string, unknown>) {
   const idPedido = row.id_pedido;
   if (typeof idPedido === 'string' && idPedido.trim()) {
@@ -328,6 +344,8 @@ async function getDistinctBusinessNamesFromLeads(args: {
   const { data, error } = await args.supabase
     .from('leads_ganados' as never)
     .select('tienda_nombre_snapshot' as never)
+    .not('tienda_nombre_snapshot' as never, 'is' as never, null as never)
+    .neq('tienda_nombre_snapshot' as never, '' as never)
     .limit(args.sampleRows);
 
   if (error) {
@@ -1470,6 +1488,10 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
     return res.status(405).json({ error: 'Método no permitido' });
   }
 
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Expires', '0');
+
   try {
     const secretAuthorized = isSecretAuthorized(req, SYNC_SECRET_ENV, SYNC_SECRET_HEADER);
     const cronAuthorized = isVercelCronAuthorized(req);
@@ -1514,27 +1536,37 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
       const limitBusinesses = parseEnviosProbeLimit(asSingleQueryParam(req.query.limit_businesses), 30, 300);
       const limitRows = parseEnviosProbeLimit(asSingleQueryParam(req.query.limit_rows), 1000, 10000);
       const sampleRows = parseEnviosProbeLimit(asSingleQueryParam(req.query.sample_rows), 1200, 10000);
+      const singleBusiness = asSingleQueryParam(req.query.search_negocio)?.trim();
 
       const supabase = getSupabaseAdminClient();
-      const businessNames = await getDistinctBusinessNamesFromLeads({
-        supabase,
-        limitBusinesses,
-        sampleRows,
-      });
+      const businessNames = singleBusiness
+        ? [singleBusiness]
+        : await getDistinctBusinessNamesFromLeads({
+          supabase,
+          limitBusinesses,
+          sampleRows,
+        });
 
       const { cookieHeader } = await loginDinsidesAndGetCookieHeader();
 
       const dedupe = new Map<string, Record<string, unknown>>();
       for (const businessName of businessNames) {
-        const rows = await fetchDinsidesEnviosRows({
-          cookieHeader,
-          searchNegocio: businessName,
-        });
+        const variants = buildBusinessSearchVariants(businessName);
+        for (const variant of variants) {
+          const rows = await fetchDinsidesEnviosRows({
+            cookieHeader,
+            searchNegocio: variant,
+          });
 
-        for (const row of rows) {
-          const key = buildDedupeKeyFromEnvioRow(row);
-          if (!dedupe.has(key)) {
-            dedupe.set(key, row);
+          for (const row of rows) {
+            const key = buildDedupeKeyFromEnvioRow(row);
+            if (!dedupe.has(key)) {
+              dedupe.set(key, row);
+            }
+          }
+
+          if (rows.length > 0) {
+            break;
           }
         }
 
