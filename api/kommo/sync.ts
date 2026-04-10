@@ -259,11 +259,26 @@ async function fetchDinsidesEnviosRows(cookieHeader: string) {
     throw new Error(`La respuesta de envíos no es JSON válido: ${rawText.slice(0, 220)}`);
   }
 
-  if (!Array.isArray(payload)) {
-    throw new Error('La respuesta de envíos no es un array.');
+  if (Array.isArray(payload)) {
+    return payload as Array<Record<string, unknown>>;
   }
 
-  return payload as Array<Record<string, unknown>>;
+  if (payload && typeof payload === 'object') {
+    const candidate = payload as Record<string, unknown>;
+    const possibleArrayKeys = ['data', 'rows', 'result', 'results', 'listado', 'aaData'];
+
+    for (const key of possibleArrayKeys) {
+      const value = candidate[key];
+      if (Array.isArray(value)) {
+        return value as Array<Record<string, unknown>>;
+      }
+    }
+
+    const keys = Object.keys(candidate).slice(0, 12);
+    throw new Error(`La respuesta de envíos llegó como objeto y no se encontró array en claves comunes. keys=${keys.join(',') || 'none'}`);
+  }
+
+  throw new Error('La respuesta de envíos no es un array ni objeto JSON reconocido.');
 }
 
 function getNestedQueryValue(
