@@ -1747,6 +1747,7 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
 
       const persist = ['1', 'true', 'yes'].includes((asSingleQueryParam(req.query.persist) ?? '').toLowerCase());
       if (persist) {
+        const onlyRemaining = ['1', 'true', 'yes'].includes((asSingleQueryParam(req.query.only_remaining) ?? '').toLowerCase());
         const leadsResult = await supabase
           .from('leads_ganados' as never)
           .select('business_id,tienda_nombre_snapshot' as never)
@@ -1790,10 +1791,43 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
         let skippedMissingLead = 0;
         let skippedMissingDestino = 0;
         let skippedByEstado = 0;
+        let skippedExisting = 0;
+
+        const existingStableIds = new Set<string>();
+        if (onlyRemaining && finalRows.length > 0) {
+          const stableIds = finalRows
+            .map((row) => String(row.id_pedido ?? '').trim())
+            .filter((id) => id.length > 0)
+            .map((id) => `envio-dinsides-${id}`);
+
+          const chunkSize = 300;
+          for (let index = 0; index < stableIds.length; index += chunkSize) {
+            const chunk = stableIds.slice(index, index + chunkSize);
+            const { data: existingRows, error: existingError } = await supabase
+              .from('envios' as never)
+              .select('stable_id' as never)
+              .in('stable_id' as never, chunk as never);
+
+            if (existingError) {
+              throw new Error(`No se pudieron leer envíos existentes para only_remaining: ${existingError.message}`);
+            }
+
+            for (const row of ((existingRows ?? []) as Array<{ stable_id?: string | null }>)) {
+              const stableId = String(row.stable_id ?? '').trim();
+              if (stableId) existingStableIds.add(stableId);
+            }
+          }
+        }
 
         for (const row of finalRows) {
           const idPedido = String(row.id_pedido ?? '').trim();
           if (!idPedido) continue;
+          const stableId = `envio-dinsides-${idPedido}`;
+
+          if (onlyRemaining && existingStableIds.has(stableId)) {
+            skippedExisting += 1;
+            continue;
+          }
 
           const negocio = normalizeLookupKey(row.nombre_negocio);
           const distrito = normalizeLookupKey(row.nombre_distrito);
@@ -1828,7 +1862,7 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
           const fechaEnvio = parseDateOnlyFromUnknown(row.fecha_entrega) ?? parseDateOnlyFromUnknown(row.fecha_pedido);
 
           rowsToUpsert.push({
-            stable_id: `envio-dinsides-${idPedido}`,
+            stable_id: stableId,
             fecha_envio: fechaEnvio,
             id_lead_ganado: idLeadGanado,
             id_destino: idDestino,
@@ -1858,8 +1892,10 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
         return res.status(200).json({
           success: true,
           mode,
+          only_remaining: onlyRemaining,
           pulled: finalRows.length,
           upserted: rowsToUpsert.length,
+          skipped_existing: skippedExisting,
           skipped_by_estado: skippedByEstado,
           skipped_missing_lead: skippedMissingLead,
           skipped_missing_destino: skippedMissingDestino,
