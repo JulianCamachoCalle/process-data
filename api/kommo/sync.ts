@@ -20,6 +20,10 @@ const CHAT_CHANNEL_SECRET_ENV = 'KOMMO_CHAT_CHANNEL_SECRET';
 const DEFAULT_CHAT_CONVERSATIONS_LIMIT = 20;
 const DEFAULT_CHAT_PAGE_SIZE = 50;
 const DEFAULT_CHAT_MAX_PAGES = 10;
+const DINSIDES_BASE_URL = 'https://dinsidescourier.com';
+const DINSIDES_LOGIN_VALIDATE_URL = `${DINSIDES_BASE_URL}/login/validar`;
+const DINSIDES_ENVIOS_URL = `${DINSIDES_BASE_URL}/Admin/getlistadoBuscadorActualiza`;
+const DINSIDES_CLIENTES_LOOKUP_URL = `${DINSIDES_BASE_URL}/admin/datosclientenombre`;
 type StandardCustomFieldEntityType = typeof STANDARD_CUSTOM_FIELD_ENTITY_TYPES[number];
 type CustomFieldEntityType = typeof CUSTOM_FIELD_ENTITY_TYPES[number];
 type LinkEntityType = typeof LINK_ENTITY_TYPES[number];
@@ -160,6 +164,304 @@ function asArrayQueryParam(value: string | string[] | undefined) {
   if (value === undefined) return [];
   const values = Array.isArray(value) ? value : [value];
   return values.map((v) => v.trim()).filter(Boolean);
+}
+
+function parseEnviosProbeLimit(value: string | undefined, fallback = 10, max = 2000) {
+  if (!value) return fallback;
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
+  return Math.min(parsed, max);
+}
+
+function parseNonNegativeInt(value: string | undefined, fallback = 0, max = 1_000_000) {
+  if (!value) return fallback;
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isFinite(parsed) || parsed < 0) return fallback;
+  return Math.min(parsed, max);
+}
+
+function extractSetCookieValuesFromResponse(response: Response) {
+  const headers = response.headers as Headers & { getSetCookie?: () => string[] };
+
+  if (typeof headers.getSetCookie === 'function') {
+    return headers.getSetCookie();
+  }
+
+  const fallback = response.headers.get('set-cookie');
+  if (!fallback) return [];
+  return fallback.split(/,(?=\s*[A-Za-z0-9_\-]+=)/g);
+}
+
+function toCookieHeader(rawSetCookieValues: string[]) {
+  return rawSetCookieValues
+    .map((item) => item.split(';')[0]?.trim())
+    .filter(Boolean)
+    .join('; ');
+}
+
+async function loginDinsidesAndGetCookieHeader() {
+  const tlf = process.env.DINSIDES_ADMIN_TLF?.trim();
+  const clave = process.env.DINSIDES_ADMIN_CLAVE?.trim();
+
+  if (!tlf || !clave) {
+    throw new Error('Faltan DINSIDES_ADMIN_TLF y/o DINSIDES_ADMIN_CLAVE en el entorno.');
+  }
+
+  const body = new URLSearchParams({ tlf, clave });
+
+  const loginResponse = await fetch(DINSIDES_LOGIN_VALIDATE_URL, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+      'X-Requested-With': 'XMLHttpRequest',
+      Origin: DINSIDES_BASE_URL,
+      Referer: `${DINSIDES_BASE_URL}/login`,
+    },
+    body: body.toString(),
+  });
+
+  const rawText = await loginResponse.text();
+
+  let loginRole: number | null = null;
+  try {
+    const parsed = JSON.parse(rawText) as unknown;
+    if (typeof parsed === 'number') {
+      loginRole = parsed;
+    }
+  } catch {
+    // noop
+  }
+
+  if (!loginResponse.ok || !loginRole || loginRole <= 0) {
+    throw new Error(`Login Dinsides inválido. status=${loginResponse.status}, body=${rawText.slice(0, 180)}`);
+  }
+
+  const setCookieValues = extractSetCookieValuesFromResponse(loginResponse);
+  const cookieHeader = toCookieHeader(setCookieValues);
+  if (!cookieHeader) {
+    throw new Error('Login exitoso pero no se recibió cookie de sesión.');
+  }
+
+  return { cookieHeader, loginRole };
+}
+
+async function fetchDinsidesEnviosRows(args: {
+  cookieHeader: string;
+  searchNegocio?: string;
+  searchTipo?: string;
+  searchTelefono?: string;
+  searchIdPedido?: string;
+}) {
+  const form = new URLSearchParams({
+    SearchIdPedido: args.searchIdPedido ?? '',
+    SearchBuscadorDate: '',
+    SearchTelefono: args.searchTelefono ?? '',
+    searchMotorizado: '',
+    searchNegocio: args.searchNegocio ?? '',
+    searchTipo: args.searchTipo ?? '',
+    selectEstadoPunto: '',
+    selectEstadoSeguimiento: '',
+  });
+
+  const response = await fetch(DINSIDES_ENVIOS_URL, {
+    method: 'POST',
+    headers: {
+      Cookie: args.cookieHeader,
+      'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+      'X-Requested-With': 'XMLHttpRequest',
+      Origin: DINSIDES_BASE_URL,
+      Referer: `${DINSIDES_BASE_URL}/admin/listado`,
+    },
+    body: form.toString(),
+  });
+
+  const rawText = await response.text();
+  if (!response.ok) {
+    throw new Error(`Error al leer envíos. status=${response.status}, body=${rawText.slice(0, 180)}`);
+  }
+
+  let payload: unknown;
+  try {
+    payload = JSON.parse(rawText);
+  } catch {
+    throw new Error(`La respuesta de envíos no es JSON válido: ${rawText.slice(0, 220)}`);
+  }
+
+  if (Array.isArray(payload)) {
+    return payload as Array<Record<string, unknown>>;
+  }
+
+  if (payload && typeof payload === 'object') {
+    const candidate = payload as Record<string, unknown>;
+    const possibleArrayKeys = ['data', 'rows', 'result', 'results', 'listado', 'aaData'];
+
+    for (const key of possibleArrayKeys) {
+      const value = candidate[key];
+      if (Array.isArray(value)) {
+        return value as Array<Record<string, unknown>>;
+      }
+    }
+
+      const keys = Object.keys(candidate).slice(0, 12);
+      throw new Error(`La respuesta de envíos llegó como objeto y no se encontró array en claves comunes. keys=${keys.join(',') || 'none'}`);
+    }
+
+  throw new Error('La respuesta de envíos no es un array ni objeto JSON reconocido.');
+}
+
+async function lookupDinsidesClientIds(args: { cookieHeader: string; businessName: string }) {
+  const form = new URLSearchParams({
+    datos: args.businessName,
+    super_admin: '0',
+  });
+
+  const response = await fetch(DINSIDES_CLIENTES_LOOKUP_URL, {
+    method: 'POST',
+    headers: {
+      Cookie: args.cookieHeader,
+      'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+      'X-Requested-With': 'XMLHttpRequest',
+      Origin: DINSIDES_BASE_URL,
+      Referer: `${DINSIDES_BASE_URL}/admin/clientes_new`,
+      Accept: 'text/html, */*; q=0.01',
+    },
+    body: form.toString(),
+  });
+
+  const rawText = await response.text();
+  if (!response.ok) {
+    return [] as string[];
+  }
+
+  const ids = new Set<string>();
+  const lines = rawText.split(/\r?\n/);
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    const match = trimmed.match(/^(\d{3,})\b/);
+    if (match?.[1]) {
+      ids.add(match[1]);
+    }
+  }
+
+  if (ids.size === 0) {
+    const fallbackMatches = rawText.match(/\b\d{4,}\b/g) ?? [];
+    for (const candidate of fallbackMatches) {
+      ids.add(candidate);
+      if (ids.size >= 10) break;
+    }
+  }
+
+  return Array.from(ids);
+}
+
+function normalizeBusinessName(value: unknown) {
+  if (typeof value !== 'string') return '';
+  return value.replace(/\s+/g, ' ').trim();
+}
+
+function removeDiacritics(value: string) {
+  return value.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+}
+
+function buildBusinessSearchVariants(name: string) {
+  const base = normalizeBusinessName(name);
+  if (!base) return [] as string[];
+
+  const variants = new Set<string>();
+  variants.add(base);
+  variants.add(base.toUpperCase());
+  variants.add(removeDiacritics(base));
+  variants.add(removeDiacritics(base).toUpperCase());
+  return Array.from(variants).filter((item) => item.trim().length > 0);
+}
+
+function buildDedupeKeyFromEnvioRow(row: Record<string, unknown>) {
+  const idPedido = row.id_pedido;
+  if (typeof idPedido === 'string' && idPedido.trim()) {
+    return `id_pedido:${idPedido.trim()}`;
+  }
+
+  const fallback = [
+    typeof row.nombre_negocio === 'string' ? row.nombre_negocio : '',
+    typeof row.nombre_destinataio === 'string' ? row.nombre_destinataio : '',
+    typeof row.fecha_pedido === 'string' ? row.fecha_pedido : '',
+  ].join('|');
+
+  return `fallback:${fallback}`;
+}
+
+function parseNumeric(value: unknown) {
+  const normalized = String(value ?? '').replace(',', '.').trim();
+  if (!normalized) return 0;
+  const parsed = Number.parseFloat(normalized);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function parseDateOnlyFromUnknown(value: unknown) {
+  const raw = String(value ?? '').trim();
+  if (!raw) return null;
+  const parsed = new Date(raw.replace(' ', 'T'));
+  if (Number.isNaN(parsed.getTime())) {
+    return raw.slice(0, 10) || null;
+  }
+  return parsed.toISOString().slice(0, 10);
+}
+
+function normalizeLookupKey(value: unknown) {
+  return removeDiacritics(String(value ?? '').trim().toLowerCase());
+}
+
+function mapByNormalizedLabel<T extends { business_id?: unknown }>(
+  rows: T[],
+  getLabel: (row: T) => unknown,
+) {
+  const map = new Map<string, number>();
+  for (const row of rows) {
+    const key = normalizeLookupKey(getLabel(row));
+    const id = Number(row.business_id ?? 0);
+    if (!key || !Number.isFinite(id) || id <= 0) continue;
+    if (!map.has(key)) {
+      map.set(key, id);
+    }
+  }
+  return map;
+}
+
+async function getDistinctBusinessNamesFromLeads(args: {
+  supabase: ReturnType<typeof getSupabaseAdminClient>;
+  limitBusinesses: number;
+  sampleRows: number;
+}) {
+  const { data, error } = await args.supabase
+    .from('leads_ganados' as never)
+    .select('tienda_nombre_snapshot' as never)
+    .not('tienda_nombre_snapshot' as never, 'is' as never, null as never)
+    .neq('tienda_nombre_snapshot' as never, '' as never)
+    .not('tienda_nombre_snapshot' as never, 'ilike' as never, 'Lead #%' as never)
+    .not('tienda_nombre_snapshot' as never, 'ilike' as never, 'Lead sin nombre' as never)
+    .limit(args.sampleRows);
+
+  if (error) {
+    throw new Error(`No se pudieron leer nombres de negocio desde leads_ganados: ${error.message}`);
+  }
+
+  const rows = (data ?? []) as Array<{ tienda_nombre_snapshot?: unknown }>;
+  const dedupe = new Map<string, string>();
+
+  for (const row of rows) {
+    const normalized = normalizeBusinessName(row.tienda_nombre_snapshot);
+    if (!normalized) continue;
+    if (/^lead\s*#\s*\d+/i.test(normalized)) continue;
+    if (/^lead\s+sin\s+nombre$/i.test(normalized)) continue;
+
+    const key = normalized.toLocaleLowerCase('es');
+    if (!dedupe.has(key)) {
+      dedupe.set(key, normalized);
+    }
+  }
+
+  return Array.from(dedupe.values()).slice(0, args.limitBusinesses);
 }
 
 function getNestedQueryValue(
@@ -1282,6 +1584,10 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
     return res.status(405).json({ error: 'Método no permitido' });
   }
 
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Expires', '0');
+
   try {
     const secretAuthorized = isSecretAuthorized(req, SYNC_SECRET_ENV, SYNC_SECRET_HEADER);
     const cronAuthorized = isVercelCronAuthorized(req);
@@ -1290,6 +1596,406 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
       if (!auth.ok) {
         return res.status(auth.status).json({ error: auth.error ?? 'No autorizado' });
       }
+    }
+
+    const mode = asSingleQueryParam(req.query.mode)?.trim();
+    if (mode === 'dinsides_envios_probe') {
+      const limit = parseEnviosProbeLimit(asSingleQueryParam(req.query.limit), 10, 2000);
+      const searchNegocio = asSingleQueryParam(req.query.search_negocio)?.trim();
+      const searchTelefono = asSingleQueryParam(req.query.search_telefono)?.trim();
+      const searchIdPedido = asSingleQueryParam(req.query.search_id_pedido)?.trim();
+      const { cookieHeader, loginRole } = await loginDinsidesAndGetCookieHeader();
+      const rows = await fetchDinsidesEnviosRows({
+        cookieHeader,
+        searchNegocio,
+        searchTelefono,
+        searchIdPedido,
+      });
+
+      return res.status(200).json({
+        success: true,
+        mode,
+        source: 'dinsidescourier.com/Admin/getlistadoBuscadorActualiza',
+        login_role: loginRole,
+        filters: {
+          search_negocio: searchNegocio ?? '',
+          search_telefono: searchTelefono ?? '',
+          search_id_pedido: searchIdPedido ?? '',
+        },
+        total_rows: rows.length,
+        returned_rows: Math.min(rows.length, limit),
+        rows: rows.slice(0, limit),
+      });
+    }
+
+    if (mode === 'dinsides_envios_sync_from_leads') {
+      const limitBusinesses = parseEnviosProbeLimit(asSingleQueryParam(req.query.limit_businesses), 30, 300);
+      const limitRows = parseEnviosProbeLimit(asSingleQueryParam(req.query.limit_rows), 1000, 10000);
+      const sampleRows = parseEnviosProbeLimit(asSingleQueryParam(req.query.sample_rows), 1200, 10000);
+      const offsetRows = parseNonNegativeInt(asSingleQueryParam(req.query.offset_rows), 0, 1_000_000);
+      const singleBusiness = asSingleQueryParam(req.query.search_negocio)?.trim();
+      const singleSearchTipo = asSingleQueryParam(req.query.search_tipo)?.trim();
+      const debug = ['1', 'true', 'yes'].includes((asSingleQueryParam(req.query.debug) ?? '').toLowerCase());
+
+      const supabase = getSupabaseAdminClient();
+      const businessNames = singleBusiness
+        ? [singleBusiness]
+        : await getDistinctBusinessNamesFromLeads({
+          supabase,
+          limitBusinesses,
+          sampleRows,
+        });
+
+      const { cookieHeader } = await loginDinsidesAndGetCookieHeader();
+
+      const dedupe = new Map<string, Record<string, unknown>>();
+      const diagnostics = {
+        businesses_total: businessNames.length,
+        businesses_with_rows: 0,
+        attempts: 0,
+        errors: [] as string[],
+        tried_businesses: [] as Array<{ name: string; variants: string[]; rows: number }>,
+      };
+
+      const targetCollectionSize = offsetRows + limitRows;
+
+      for (const businessName of businessNames) {
+        const variants = buildBusinessSearchVariants(businessName);
+        let matchedAny = false;
+        let rowsForBusiness = 0;
+
+        try {
+          for (const variant of variants) {
+            diagnostics.attempts += 1;
+            const rows = await fetchDinsidesEnviosRows({
+              cookieHeader,
+              searchNegocio: variant,
+              searchTipo: singleSearchTipo,
+            });
+
+            rowsForBusiness += rows.length;
+            for (const row of rows) {
+              const key = buildDedupeKeyFromEnvioRow(row);
+              if (!dedupe.has(key)) {
+                dedupe.set(key, row);
+              }
+            }
+
+            if (rows.length > 0) {
+              matchedAny = true;
+              break;
+            }
+          }
+
+          if (!matchedAny) {
+            const clientIds = await lookupDinsidesClientIds({
+              cookieHeader,
+              businessName,
+            });
+
+            for (const clientId of clientIds) {
+              const attempts = [
+                { searchNegocio: clientId, searchTipo: '' },
+                { searchNegocio: '', searchTipo: clientId },
+                { searchNegocio: clientId, searchTipo: clientId },
+              ];
+
+              let foundForClient = false;
+              for (const attempt of attempts) {
+                diagnostics.attempts += 1;
+                const rows = await fetchDinsidesEnviosRows({
+                  cookieHeader,
+                  searchNegocio: attempt.searchNegocio,
+                  searchTipo: attempt.searchTipo,
+                });
+
+                rowsForBusiness += rows.length;
+                for (const row of rows) {
+                  const key = buildDedupeKeyFromEnvioRow(row);
+                  if (!dedupe.has(key)) {
+                    dedupe.set(key, row);
+                  }
+                }
+
+                if (rows.length > 0) {
+                  foundForClient = true;
+                  matchedAny = true;
+                  break;
+                }
+              }
+
+              if (foundForClient) {
+                break;
+              }
+            }
+          }
+        } catch (error: unknown) {
+          if (diagnostics.errors.length < 25) {
+            const message = error instanceof Error ? error.message : String(error);
+            diagnostics.errors.push(`${businessName}: ${message}`);
+          }
+        }
+
+        if (matchedAny) {
+          diagnostics.businesses_with_rows += 1;
+        }
+
+        if (debug && diagnostics.tried_businesses.length < 40) {
+          diagnostics.tried_businesses.push({
+            name: businessName,
+            variants,
+            rows: rowsForBusiness,
+          });
+        }
+
+        if (dedupe.size >= targetCollectionSize) {
+          break;
+        }
+      }
+
+      const finalRows = Array.from(dedupe.values()).slice(offsetRows, offsetRows + limitRows);
+
+      const persist = ['1', 'true', 'yes'].includes((asSingleQueryParam(req.query.persist) ?? '').toLowerCase());
+      if (persist) {
+        const onlyRemaining = ['1', 'true', 'yes'].includes((asSingleQueryParam(req.query.only_remaining) ?? '').toLowerCase());
+        const leadsResult = await supabase
+          .from('leads_ganados' as never)
+          .select('business_id,tienda_nombre_snapshot' as never)
+          .not('tienda_nombre_snapshot' as never, 'is' as never, null as never)
+          .neq('tienda_nombre_snapshot' as never, '' as never)
+          .limit(10000);
+
+        if (leadsResult.error) {
+          throw new Error(`No se pudieron leer leads_ganados para persistir envíos: ${leadsResult.error.message}`);
+        }
+
+        const destinosResult = await supabase
+          .from('destinos' as never)
+          .select('business_id,destino' as never)
+          .limit(1000);
+
+        if (destinosResult.error) {
+          throw new Error(`No se pudieron leer destinos para persistir envíos: ${destinosResult.error.message}`);
+        }
+
+        const resultadosResult = await supabase
+          .from('resultados' as never)
+          .select('business_id,resultado' as never)
+          .limit(1000);
+
+        if (resultadosResult.error) {
+          throw new Error(`No se pudieron leer resultados para persistir envíos: ${resultadosResult.error.message}`);
+        }
+
+        const tarifasResult = await supabase
+          .from('tarifas' as never)
+          .select('id_destino,cobro_entrega,pago_moto' as never)
+          .limit(5000);
+
+        if (tarifasResult.error) {
+          throw new Error(`No se pudieron leer tarifas para persistir envíos: ${tarifasResult.error.message}`);
+        }
+
+        const leadsRows = (leadsResult.data ?? []) as Array<{ business_id: number; tienda_nombre_snapshot: string | null }>;
+        const destinoRows = (destinosResult.data ?? []) as Array<{ business_id: number; destino: string | null }>;
+        const resultadoRows = (resultadosResult.data ?? []) as Array<{ business_id: number; resultado: string | null }>;
+        const tarifaRows = (tarifasResult.data ?? []) as Array<{ id_destino: number | null; cobro_entrega: number | null; pago_moto: number | null }>;
+
+        const leadByBusinessName = mapByNormalizedLabel(leadsRows, (row) => row.tienda_nombre_snapshot);
+        const destinoByName = mapByNormalizedLabel(destinoRows, (row) => row.destino);
+        const resultadoByName = mapByNormalizedLabel(resultadoRows, (row) => row.resultado);
+        const tarifaByDestinoId = new Map<number, { cobroEntrega: number; pagoMoto: number }>();
+        for (const tarifa of tarifaRows) {
+          const idDestino = Number(tarifa.id_destino ?? 0);
+          if (!Number.isFinite(idDestino) || idDestino <= 0) continue;
+          tarifaByDestinoId.set(idDestino, {
+            cobroEntrega: parseNumeric(tarifa.cobro_entrega),
+            pagoMoto: parseNumeric(tarifa.pago_moto),
+          });
+        }
+        const fallbackResultadoEntregado = resultadoRows.find((row) => normalizeLookupKey(row.resultado).includes('entregado'));
+        const fallbackResultadoId = Number(fallbackResultadoEntregado?.business_id ?? 1);
+
+        const rowsToUpsert: Array<Record<string, unknown>> = [];
+        let skippedMissingLead = 0;
+        let skippedMissingDestino = 0;
+        let skippedMissingTarifa = 0;
+        let skippedByEstado = 0;
+        let skippedExisting = 0;
+
+        const existingStableIds = new Set<string>();
+        if (onlyRemaining && finalRows.length > 0) {
+          const stableIds = finalRows
+            .map((row) => String(row.id_pedido ?? '').trim())
+            .filter((id) => id.length > 0)
+            .map((id) => `envio-dinsides-${id}`);
+
+          const chunkSize = 300;
+          for (let index = 0; index < stableIds.length; index += chunkSize) {
+            const chunk = stableIds.slice(index, index + chunkSize);
+            const { data: existingRows, error: existingError } = await supabase
+              .from('envios' as never)
+              .select('stable_id' as never)
+              .in('stable_id' as never, chunk as never);
+
+            if (existingError) {
+              throw new Error(`No se pudieron leer envíos existentes para only_remaining: ${existingError.message}`);
+            }
+
+            for (const row of ((existingRows ?? []) as Array<{ stable_id?: string | null }>)) {
+              const stableId = String(row.stable_id ?? '').trim();
+              if (stableId) existingStableIds.add(stableId);
+            }
+          }
+        }
+
+        for (const row of finalRows) {
+          const idPedido = String(row.id_pedido ?? '').trim();
+          if (!idPedido) continue;
+          const stableId = `envio-dinsides-${idPedido}`;
+
+          if (onlyRemaining && existingStableIds.has(stableId)) {
+            skippedExisting += 1;
+            continue;
+          }
+
+          const negocio = normalizeLookupKey(row.nombre_negocio);
+          const distrito = normalizeLookupKey(row.nombre_distrito);
+          const seguimiento = normalizeLookupKey(row.seguimiento);
+
+          const isEstadoPermitido =
+            seguimiento === 'entregado'
+            || seguimiento === 'rechazado por cliente en punto';
+          if (!isEstadoPermitido) {
+            skippedByEstado += 1;
+            continue;
+          }
+
+          const idLeadGanado = leadByBusinessName.get(negocio);
+          if (!idLeadGanado) {
+            skippedMissingLead += 1;
+            continue;
+          }
+
+          const idDestino = destinoByName.get(distrito);
+          if (!idDestino) {
+            skippedMissingDestino += 1;
+            continue;
+          }
+
+          const idResultado = resultadoByName.get(seguimiento) ?? fallbackResultadoId;
+          const tarifa = tarifaByDestinoId.get(idDestino);
+          if (!tarifa) {
+            skippedMissingTarifa += 1;
+            continue;
+          }
+
+          const pagoMoto = Number((tarifa.pagoMoto ?? 0).toFixed(2));
+          const cobroEntrega = Number((tarifa.cobroEntrega ?? 0).toFixed(2));
+          const fechaEnvio = parseDateOnlyFromUnknown(row.fecha_entrega) ?? parseDateOnlyFromUnknown(row.fecha_pedido);
+
+          rowsToUpsert.push({
+            stable_id: stableId,
+            fecha_envio: fechaEnvio,
+            id_lead_ganado: idLeadGanado,
+            id_destino: idDestino,
+            id_resultado: idResultado,
+            cobro_entrega: cobroEntrega,
+            pago_moto: pagoMoto,
+            excedente_pagado_moto: 0,
+            ingreso_total_fila: cobroEntrega,
+            costo_total_fila: pagoMoto,
+            observaciones: String(row.observacion ?? '').trim() || null,
+            id_tipo_punto: 1,
+            extra_punto_moto: 0,
+            extra_punto_empresa: 0,
+          });
+        }
+
+        if (rowsToUpsert.length > 0) {
+          const { error: upsertError } = await supabase
+            .from('envios' as never)
+            .upsert(rowsToUpsert as never, { onConflict: 'stable_id' as never });
+
+          if (upsertError) {
+            throw new Error(`No se pudieron upsertar envíos desde Dinsides: ${upsertError.message}`);
+          }
+        }
+
+        return res.status(200).json({
+          success: true,
+          mode,
+          only_remaining: onlyRemaining,
+          offset_rows: offsetRows,
+          limit_rows: limitRows,
+          pulled: finalRows.length,
+          upserted: rowsToUpsert.length,
+          skipped_existing: skippedExisting,
+          skipped_by_estado: skippedByEstado,
+          skipped_missing_lead: skippedMissingLead,
+          skipped_missing_destino: skippedMissingDestino,
+          skipped_missing_tarifa: skippedMissingTarifa,
+        });
+      }
+
+      if (debug) {
+        return res.status(200).json({
+          success: true,
+          mode,
+          offset_rows: offsetRows,
+          limit_rows: limitRows,
+          rows: finalRows,
+          diagnostics,
+        });
+      }
+
+      return res.status(200).json(finalRows);
+    }
+
+    if (mode === 'cleanup_placeholder_leads_ganados') {
+      const supabase = getSupabaseAdminClient();
+
+      const { data: rowsRaw, error: listError } = await supabase
+        .from('leads_ganados' as never)
+        .select('kommo_lead_id,tienda_nombre_snapshot' as never)
+        .limit(5000);
+
+      if (listError) {
+        throw new Error(`No se pudieron listar placeholders en leads_ganados: ${listError.message}`);
+      }
+
+      const rowsToDelete = ((rowsRaw ?? []) as Array<{ kommo_lead_id: number | null; tienda_nombre_snapshot: string | null }>)
+        .filter((row) => {
+          const name = String(row.tienda_nombre_snapshot ?? '').trim();
+          return /^Lead\s*#\s*\d+/i.test(name) || /^Lead\s+sin\s+nombre$/i.test(name);
+        });
+      const leadIds = rowsToDelete
+        .map((row) => Number(row.kommo_lead_id ?? 0))
+        .filter((id) => Number.isFinite(id) && id > 0);
+
+      if (leadIds.length === 0) {
+        return res.status(200).json({
+          success: true,
+          mode,
+          deleted: 0,
+          message: 'No se encontraron registros placeholder para eliminar.',
+        });
+      }
+
+      const { error: deleteError } = await supabase
+        .from('leads_ganados' as never)
+        .delete()
+        .in('kommo_lead_id', leadIds);
+
+      if (deleteError) {
+        throw new Error(`No se pudieron eliminar placeholders de leads_ganados: ${deleteError.message}`);
+      }
+
+      return res.status(200).json({
+        success: true,
+        mode,
+        deleted: leadIds.length,
+      });
     }
 
     const baseUrlRaw = asSingleQueryParam(req.query.base_url) ?? asSingleQueryParam(req.query.baseUrl);
@@ -1303,7 +2009,6 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
 
     const freshConnection = await ensureFreshConnection(connection);
     const supabase = getSupabaseAdminClient();
-    const mode = asSingleQueryParam(req.query.mode)?.trim();
 
     if (mode === 'chat_history') {
       const chatSync = await runChatHistorySyncMode({ req, supabase });

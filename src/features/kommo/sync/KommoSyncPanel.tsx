@@ -21,7 +21,6 @@ const GROUP_SECTION_TITLES = {
 
 export function KommoSyncPanel({ onClose }: KommoSyncPanelProps) {
   const [resources, setResources] = useState<Record<string, SyncResource>>({});
-  const [secret, setSecret] = useState('');
 
   const groupedResources = useMemo(() => getGroupedKommoResources(), []);
   const allResources = useMemo(
@@ -30,25 +29,13 @@ export function KommoSyncPanel({ onClose }: KommoSyncPanelProps) {
   );
 
   const runSync = async (resource: string, opts?: { autoProcessEvents?: boolean }) => {
-    if (!secret) {
-      setResources((prev) => ({
-        ...prev,
-        [resource]: { name: resource, status: 'error', message: 'Falta el secret' },
-      }));
-      return;
-    }
-
     setResources((prev) => ({
       ...prev,
       [resource]: { name: resource, status: 'running', message: 'Sincronizando...' },
     }));
 
     try {
-      const res = await fetch(`/api/kommo/sync?resource=${resource}`, {
-        headers: {
-          'x-kommo-sync-secret': secret,
-        },
-      });
+      const res = await fetch(`/api/kommo/sync?resource=${resource}`);
 
       const data = await res.json();
 
@@ -63,7 +50,7 @@ export function KommoSyncPanel({ onClose }: KommoSyncPanelProps) {
         }));
 
         if (opts?.autoProcessEvents !== false) {
-          await runProcessEvents(secret);
+          await runProcessEvents();
         }
       } else {
         setResources((prev) => ({
@@ -79,13 +66,9 @@ export function KommoSyncPanel({ onClose }: KommoSyncPanelProps) {
     }
   };
 
-  const runProcessEvents = async (secretKey: string) => {
+  const runProcessEvents = async () => {
     try {
-      await fetch('/api/kommo/process-events', {
-        headers: {
-          'x-kommo-process-secret': secretKey,
-        },
-      });
+      await fetch('/api/kommo/process-events');
     } catch (e) {
       console.error('Process events failed:', e);
     }
@@ -97,7 +80,7 @@ export function KommoSyncPanel({ onClose }: KommoSyncPanelProps) {
       await new Promise((resolve) => setTimeout(resolve, 500));
     }
 
-    await runProcessEvents(secret);
+    await runProcessEvents();
   };
 
   return (
@@ -118,30 +101,17 @@ export function KommoSyncPanel({ onClose }: KommoSyncPanelProps) {
           </button>
         </div>
 
-        <div className="px-6 py-4 border-b border-gray-200">
-          <label className="block text-xs font-medium text-gray-700 mb-2">Sync Secret (env var)</label>
-          <input
-            type="password"
-            value={secret}
-            onChange={(e) => setSecret(e.target.value)}
-            placeholder="Ingresa el secret para los endpoints"
-            className="w-full px-4 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
-          />
-        </div>
-
         <div className="px-6 py-3 bg-gray-50 border-b border-gray-200 flex gap-3">
           <button
             onClick={runAllSync}
-            disabled={!secret}
-            className="flex items-center gap-2 px-4 py-2 bg-orange-600 text-white rounded-lg text-sm font-medium hover:bg-orange-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            className="flex items-center gap-2 px-4 py-2 bg-orange-600 text-white rounded-lg text-sm font-medium hover:bg-orange-700 transition-colors"
           >
             <Play className="w-4 h-4" />
             Sync All
           </button>
           <button
-            onClick={() => runProcessEvents(secret)}
-            disabled={!secret}
-            className="flex items-center gap-2 px-4 py-2 bg-gray-600 text-white rounded-lg text-sm font-medium hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            onClick={runProcessEvents}
+            className="flex items-center gap-2 px-4 py-2 bg-gray-600 text-white rounded-lg text-sm font-medium hover:bg-gray-700 transition-colors"
           >
             <RefreshCw className="w-4 h-4" />
             Process Events
@@ -163,11 +133,11 @@ export function KommoSyncPanel({ onClose }: KommoSyncPanelProps) {
 
                   return (
                     <button
-                      key={resource}
-                      onClick={() => runSync(resource)}
-                      disabled={state.status === 'running' || !secret}
-                      className={`
-                        relative flex items-start gap-3 px-4 py-3 rounded-lg border text-left transition-all
+                     key={resource}
+                       onClick={() => runSync(resource)}
+                       disabled={state.status === 'running'}
+                       className={`
+                         relative flex items-start gap-3 px-4 py-3 rounded-lg border text-left transition-all
                         ${state.status === 'idle' ? 'border-gray-200 hover:border-orange-400 hover:bg-orange-50' : ''}
                         ${state.status === 'running' ? 'border-orange-300 bg-orange-50' : ''}
                         ${state.status === 'success' ? 'border-green-300 bg-green-50' : ''}

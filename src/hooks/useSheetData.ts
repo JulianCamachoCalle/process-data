@@ -231,6 +231,33 @@ let cachedSupabaseSessionAvailable = false;
 
 export const SHEET_QUERY_STALE_TIME_MS = 60 * 1000;
 export const SHEET_QUERY_REFETCH_INTERVAL_MS = 5 * 60 * 1000;
+const SUPABASE_PAGE_SIZE = 1000;
+
+async function fetchAllRowsPaged<T>(
+  fetchPage: (from: number, to: number) => { data: T[] | null; error: { message?: string } | null } | Promise<{ data: T[] | null; error: { message?: string } | null }>,
+) {
+  const rows: T[] = [];
+  let from = 0;
+
+  while (true) {
+    const to = from + SUPABASE_PAGE_SIZE - 1;
+    const { data, error } = await fetchPage(from, to);
+    if (error) {
+      throw new Error(error.message || 'No se pudieron cargar filas desde Supabase');
+    }
+
+    const batch = data ?? [];
+    rows.push(...batch);
+
+    if (batch.length < SUPABASE_PAGE_SIZE) {
+      break;
+    }
+
+    from += SUPABASE_PAGE_SIZE;
+  }
+
+  return rows;
+}
 
 export function getSheetQueryKey(sheetName: string) {
   return ['sheet', sheetName] as const;
@@ -620,16 +647,21 @@ async function fetchBaseSheetFromSupabase(sheetName: string): Promise<SheetData>
     throw new Error(`La hoja ${sheetName} no está configurada para Supabase`);
   }
 
+  const client = supabase;
+  if (!client) throw new Error('Supabase no está configurado');
+
   await requireSupabaseSession();
 
-  const { data, error } = await supabase
-    .from(config.table)
-    .select(`stable_id,business_id,${config.dbTextField}`)
-    .order('business_id', { ascending: true });
+  const data = await fetchAllRowsPaged<BaseSupabaseRecordRaw>(async (from, to) => {
+    const response = await client
+      .from(config.table)
+      .select(`stable_id,business_id,${config.dbTextField}`)
+      .order('business_id', { ascending: true })
+      .order('stable_id', { ascending: true })
+      .range(from, to);
 
-  if (error) {
-    throw new Error(error.message || `No se pudieron cargar datos de ${sheetName} desde Supabase`);
-  }
+    return { data: (response.data ?? []) as unknown as BaseSupabaseRecordRaw[], error: response.error };
+  });
 
   return mapBaseRowsToSheetData(asBaseSupabaseRecordRawArray(data ?? []), config);
 }
@@ -638,15 +670,17 @@ async function getDestinoMapById() {
   if (!supabase) {
     throw new Error('Supabase no está configurado');
   }
+  const client = supabase;
 
-  const { data, error } = await supabase
-    .from('destinos')
-    .select('business_id,destino')
-    .order('business_id', { ascending: true });
+  const data = await fetchAllRowsPaged<{ business_id: number; destino: string }>(async (from, to) => {
+    const response = await client
+      .from('destinos')
+      .select('business_id,destino')
+      .order('business_id', { ascending: true })
+      .range(from, to);
 
-  if (error) {
-    throw new Error(error.message || 'No se pudieron cargar destinos para la tabla TARIFAS');
-  }
+    return { data: (response.data ?? []) as Array<{ business_id: number; destino: string }>, error: response.error };
+  });
 
   const map = new Map<number, string>();
   for (const row of (data ?? []) as Array<{ business_id: number; destino: string }>) {
@@ -660,25 +694,27 @@ async function fetchTarifasFromSupabase(): Promise<SheetData> {
   if (!supabase) {
     throw new Error('Supabase no está configurado');
   }
+  const client = supabase;
 
   await requireSupabaseSession();
 
-  const [destinoMapById, tarifasResponse] = await Promise.all([
+  const [destinoMapById, tarifasRows] = await Promise.all([
     getDestinoMapById(),
-    supabase
-      .from('tarifas')
-      .select('stable_id,business_id,id_destino,cobro_entrega,pago_moto,notas')
-      .order('business_id', { ascending: true }),
-  ]);
+    fetchAllRowsPaged<TarifaRecord>(async (from, to) => {
+      const response = await client
+        .from('tarifas')
+        .select('stable_id,business_id,id_destino,cobro_entrega,pago_moto,notas')
+        .order('business_id', { ascending: true })
+        .order('stable_id', { ascending: true })
+        .range(from, to);
 
-  const { data, error } = tarifasResponse;
-  if (error) {
-    throw new Error(error.message || 'No se pudieron cargar TARIFAS desde Supabase');
-  }
+      return { data: (response.data ?? []) as TarifaRecord[], error: response.error };
+    }),
+  ]);
 
   return {
     columns: [...TARIFAS_COLUMNS],
-    rows: ((data ?? []) as TarifaRecord[]).map((record) => toTarifaSheetRow(record, destinoMapById)),
+    rows: tarifasRows.map((record) => toTarifaSheetRow(record, destinoMapById)),
   };
 }
 
