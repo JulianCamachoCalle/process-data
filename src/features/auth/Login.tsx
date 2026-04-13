@@ -1,17 +1,35 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { LockKeyhole, ShieldCheck, Sparkles } from 'lucide-react';
+import { AtSign, LockKeyhole, ShieldCheck, Sparkles } from 'lucide-react';
 import { isSupabaseConfigured, supabase } from '../../lib/supabase';
 
+const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
 export function Login() {
+  const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const navigate = useNavigate();
 
+  const normalizedEmail = email.trim().toLowerCase();
+  const emailIsValid = emailRegex.test(normalizedEmail);
+  const passwordIsValid = password.length >= 8;
+
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
+
+    if (!emailIsValid) {
+      setError('Ingresá un email válido');
+      return;
+    }
+
+    if (!passwordIsValid) {
+      setError('La contraseña debe tener al menos 8 caracteres');
+      return;
+    }
+
     setIsLoading(true);
 
     try {
@@ -29,18 +47,18 @@ export function Login() {
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ password }),
+        body: JSON.stringify({ email: normalizedEmail, password }),
         credentials: 'include',
       });
 
-      const data: { success?: boolean; error?: string } = await response.json().catch(() => ({}));
+      const data: { success?: boolean; error?: string; role?: 'admin' | 'user' } = await response.json().catch(() => ({}));
 
       if (!response.ok || !data.success) {
         setError(data.error || 'No se pudo iniciar sesión');
         return;
       }
 
-      navigate('/');
+      navigate(data.role === 'user' ? '/meta/ads/dashboard' : '/');
     } catch {
       setError('No se pudo conectar con el servidor');
     } finally {
@@ -73,6 +91,25 @@ export function Login() {
 
           <form className="space-y-6" onSubmit={handleLogin}>
             <div>
+              <label className="block text-sm font-semibold text-gray-700 mb-2">Email</label>
+              <div className="mt-1">
+                <div className="flex items-center gap-2 rounded-xl border border-gray-300 bg-white px-3 shadow-sm focus-within:border-red-400 focus-within:ring-2 focus-within:ring-red-200 transition-all">
+                  <AtSign size={16} className="text-gray-400" />
+                  <input
+                    type="email"
+                    required
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    className="appearance-none block w-full px-1 py-3 outline-none placeholder-gray-400 sm:text-sm"
+                    placeholder="admin@empresa.com"
+                    autoComplete="email"
+                  />
+                </div>
+              </div>
+              {email.length > 0 && !emailIsValid ? <p className="mt-2 text-xs text-red-600">Ingresá un email válido</p> : null}
+            </div>
+
+            <div>
               <label className="block text-sm font-semibold text-gray-700 mb-2">
                 Contraseña
               </label>
@@ -86,9 +123,13 @@ export function Login() {
                     onChange={(e) => setPassword(e.target.value)}
                     className="appearance-none block w-full px-1 py-3 outline-none placeholder-gray-400 sm:text-sm"
                     placeholder="Ingresá tu contraseña"
+                    autoComplete="current-password"
                   />
                 </div>
               </div>
+              {password.length > 0 && !passwordIsValid ? (
+                <p className="mt-2 text-xs text-red-600">Debe tener al menos 8 caracteres</p>
+              ) : null}
             </div>
 
             {error && <div className="text-red-600 text-sm rounded-lg border border-red-200 bg-red-50 px-3 py-2">{error}</div>}
@@ -96,7 +137,7 @@ export function Login() {
             <div>
               <button
                 type="submit"
-                disabled={isLoading}
+                disabled={isLoading || !emailIsValid || !passwordIsValid}
                 className="w-full flex justify-center py-3 px-4 border border-red-500/70 rounded-xl shadow-[0_18px_30px_-18px_rgba(230,0,0,0.75)] text-sm font-semibold text-white bg-gradient-to-r from-red-600 to-red-500 hover:from-red-700 hover:to-red-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 transition-all disabled:opacity-70 disabled:cursor-not-allowed"
               >
                 {isLoading ? 'Ingresando...' : 'Ingresar'}

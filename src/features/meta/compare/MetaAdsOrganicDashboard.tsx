@@ -1,0 +1,435 @@
+import { useMemo, useState } from 'react';
+import { Activity, BarChart3, Eye, LineChart as LineChartIcon, MessageSquare, MousePointerClick, Share2, SplitSquareHorizontal, Target, ThumbsUp } from 'lucide-react';
+import { Bar, BarChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
+import { formatNumberEs } from '../../../lib/tableHelpers';
+import { ChartCard, KpiCard, KpiGrid, MetaAdsFiltersPanel, MetaAdsPageHero, Section } from '../ads/metaAdsShared';
+import { useMetaAdsReporting } from '../ads/useMetaAdsReporting';
+import { useMetaPagesData } from '../pages/useMetaPagesData';
+
+type ComparePoint = {
+  date: string;
+  ads_clicks: number;
+  organic_clicks: number;
+  ads_impressions: number;
+  organic_impressions: number;
+  ads_reactions: number;
+  organic_reactions: number;
+  ads_comments: number;
+  organic_comments: number;
+  ads_shares: number;
+  organic_shares: number;
+  ads_video_views: number;
+  organic_video_views: number;
+};
+
+const chartTooltipStyle = {
+  contentStyle: {
+    borderRadius: '10px',
+    border: '1px solid #d1d5db',
+    backgroundColor: '#f9fafb',
+    boxShadow: '0 8px 16px -12px rgba(15,23,42,0.35)',
+    padding: '6px 8px',
+  },
+  labelStyle: {
+    color: '#374151',
+    fontWeight: 600,
+    fontSize: 12,
+  },
+  itemStyle: {
+    color: '#374151',
+    fontWeight: 500,
+    fontSize: 12,
+  },
+  cursor: {
+    fill: 'rgba(107,114,128,0.08)',
+  },
+} as const;
+
+export function MetaAdsOrganicDashboard() {
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
+  const [draftDateFrom, setDraftDateFrom] = useState('');
+  const [draftDateTo, setDraftDateTo] = useState('');
+
+  const adsQuery = useMetaAdsReporting({
+    accountId: '',
+    campaignId: '',
+    adId: '',
+    dateFrom,
+    dateTo,
+  });
+  const organicQuery = useMetaPagesData({
+    since: dateFrom,
+    until: dateTo,
+  });
+
+  const isFiltersDirty = dateFrom !== draftDateFrom || dateTo !== draftDateTo;
+
+  const compareByDate = useMemo<ComparePoint[]>(() => {
+    const adsRows = adsQuery.data?.rows ?? [];
+    const organicPosts = organicQuery.data?.posts ?? [];
+    const snapshots = organicQuery.data?.post_insights_snapshots ?? [];
+
+    const latestByPostMetric = new Map<string, number>();
+    for (const snapshot of snapshots) {
+      const key = `${snapshot.post_id}:${snapshot.metric}`;
+      const current = latestByPostMetric.get(key) ?? 0;
+      if (snapshot.value > current) {
+        latestByPostMetric.set(key, snapshot.value);
+      }
+    }
+
+    const byDate = new Map<string, ComparePoint>();
+
+    for (const row of adsRows) {
+      const date = row.date_start;
+      if (!date) continue;
+      const current = byDate.get(date) ?? {
+        date,
+        ads_clicks: 0,
+        organic_clicks: 0,
+        ads_impressions: 0,
+        organic_impressions: 0,
+        ads_reactions: 0,
+        organic_reactions: 0,
+        ads_comments: 0,
+        organic_comments: 0,
+        ads_shares: 0,
+        organic_shares: 0,
+        ads_video_views: 0,
+        organic_video_views: 0,
+      };
+      current.ads_clicks += Number(row.clicks ?? 0);
+      current.ads_impressions += Number(row.impressions ?? 0);
+      current.ads_reactions += Number(row.reactions ?? 0);
+      current.ads_comments += Number(row.comments ?? 0);
+      current.ads_shares += Number(row.shares ?? 0);
+      current.ads_video_views += Number(row.video_views ?? 0);
+      byDate.set(date, current);
+    }
+
+    for (const post of organicPosts) {
+      const date = (post.created_time ?? '').slice(0, 10);
+      if (!date) continue;
+      const current = byDate.get(date) ?? {
+        date,
+        ads_clicks: 0,
+        organic_clicks: 0,
+        ads_impressions: 0,
+        organic_impressions: 0,
+        ads_reactions: 0,
+        organic_reactions: 0,
+        ads_comments: 0,
+        organic_comments: 0,
+        ads_shares: 0,
+        organic_shares: 0,
+        ads_video_views: 0,
+        organic_video_views: 0,
+      };
+      current.organic_clicks += latestByPostMetric.get(`${post.id}:post_clicks`) ?? 0;
+      current.organic_impressions += latestByPostMetric.get(`${post.id}:post_impressions`) ?? 0;
+      current.organic_video_views += latestByPostMetric.get(`${post.id}:post_video_views`) ?? 0;
+      current.organic_reactions += Number(post.reactions ?? 0);
+      current.organic_comments += Number(post.comments ?? 0);
+      current.organic_shares += Number(post.shares ?? 0);
+      byDate.set(date, current);
+    }
+
+    return Array.from(byDate.values()).sort((a, b) => a.date.localeCompare(b.date));
+  }, [adsQuery.data?.rows, organicQuery.data?.post_insights_snapshots, organicQuery.data?.posts]);
+
+  const totals = useMemo(() => {
+    return compareByDate.reduce(
+      (acc, row) => ({
+        adsClicks: acc.adsClicks + row.ads_clicks,
+        organicClicks: acc.organicClicks + row.organic_clicks,
+        adsImpressions: acc.adsImpressions + row.ads_impressions,
+        organicImpressions: acc.organicImpressions + row.organic_impressions,
+        adsReactions: acc.adsReactions + row.ads_reactions,
+        organicReactions: acc.organicReactions + row.organic_reactions,
+        adsComments: acc.adsComments + row.ads_comments,
+        organicComments: acc.organicComments + row.organic_comments,
+        adsShares: acc.adsShares + row.ads_shares,
+        organicShares: acc.organicShares + row.organic_shares,
+        adsVideoViews: acc.adsVideoViews + row.ads_video_views,
+        organicVideoViews: acc.organicVideoViews + row.organic_video_views,
+      }),
+      {
+        adsClicks: 0,
+        organicClicks: 0,
+        adsImpressions: 0,
+        organicImpressions: 0,
+        adsReactions: 0,
+        organicReactions: 0,
+        adsComments: 0,
+        organicComments: 0,
+        adsShares: 0,
+        organicShares: 0,
+        adsVideoViews: 0,
+        organicVideoViews: 0,
+      },
+    );
+  }, [compareByDate]);
+
+  const retention = useMemo(() => ({
+    ads: totals.adsImpressions > 0 ? (totals.adsVideoViews * 100) / totals.adsImpressions : 0,
+    organic: totals.organicImpressions > 0 ? (totals.organicVideoViews * 100) / totals.organicImpressions : 0,
+  }), [totals.adsImpressions, totals.adsVideoViews, totals.organicImpressions, totals.organicVideoViews]);
+
+  const retentionByDate = useMemo(() => {
+    return compareByDate.map((row) => ({
+      date: row.date,
+      ads_retention: row.ads_impressions > 0 ? (row.ads_video_views * 100) / row.ads_impressions : 0,
+      organic_retention: row.organic_impressions > 0 ? (row.organic_video_views * 100) / row.organic_impressions : 0,
+    }));
+  }, [compareByDate]);
+
+  const isLoading = adsQuery.isLoading || organicQuery.isLoading;
+  const error = adsQuery.error ?? organicQuery.error;
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center h-full text-gray-500 bg-white rounded-2xl border border-gray-200 shadow-sm p-6">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-red-600 mr-3"></div>
+        Cargando comparativo Ads vs Orgánico...
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="flex flex-col items-center justify-center h-full text-red-500 space-y-4">
+        <Activity size={48} />
+        <p className="text-lg font-medium">Error al cargar Ads vs Orgánico</p>
+        <p className="text-sm text-red-400 max-w-xl text-center">
+          {error instanceof Error ? error.message : 'Error desconocido'}
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      <MetaAdsPageHero
+        title="Ads vs Orgánico"
+        description="Comparativa diaria entre rendimiento de Ads y publicaciones orgánicas."
+        icon={<SplitSquareHorizontal className="text-red-600" size={24} />}
+      />
+
+      <MetaAdsFiltersPanel
+        draftDateFrom={draftDateFrom}
+        draftDateTo={draftDateTo}
+        onDraftDateFromChange={setDraftDateFrom}
+        onDraftDateToChange={setDraftDateTo}
+        onApply={() => {
+          setDateFrom(draftDateFrom);
+          setDateTo(draftDateTo);
+        }}
+        onClear={() => {
+          setDateFrom('');
+          setDateTo('');
+          setDraftDateFrom('');
+          setDraftDateTo('');
+        }}
+        isApplyDisabled={!isFiltersDirty}
+      />
+
+      <Section title="KPI comparativos">
+        <KpiGrid>
+          <KpiCard title="Clicks Ads" value={formatNumberEs(Math.round(totals.adsClicks))} helper="Total del periodo" icon={<MousePointerClick className="text-red-600" size={18} />} />
+          <KpiCard title="Clicks Orgánico" value={formatNumberEs(Math.round(totals.organicClicks))} helper="Total del periodo" icon={<MousePointerClick className="text-red-600" size={18} />} />
+          <KpiCard title="Impresiones Ads" value={formatNumberEs(Math.round(totals.adsImpressions))} helper="Total del periodo" icon={<BarChart3 className="text-red-600" size={18} />} />
+          <KpiCard title="Impresiones Orgánico" value={formatNumberEs(Math.round(totals.organicImpressions))} helper="Total del periodo" icon={<LineChartIcon className="text-red-600" size={18} />} />
+          <KpiCard title="Reacciones Ads" value={formatNumberEs(Math.round(totals.adsReactions))} helper="Total del periodo" icon={<ThumbsUp className="text-red-600" size={18} />} />
+          <KpiCard title="Reacciones Orgánico" value={formatNumberEs(Math.round(totals.organicReactions))} helper="Total del periodo" icon={<ThumbsUp className="text-red-600" size={18} />} />
+          <KpiCard title="Comentarios Ads" value={formatNumberEs(Math.round(totals.adsComments))} helper="Total del periodo" icon={<MessageSquare className="text-red-600" size={18} />} />
+          <KpiCard title="Comentarios Orgánico" value={formatNumberEs(Math.round(totals.organicComments))} helper="Total del periodo" icon={<MessageSquare className="text-red-600" size={18} />} />
+          <KpiCard title="Compartidos Ads" value={formatNumberEs(Math.round(totals.adsShares))} helper="Total del periodo" icon={<Share2 className="text-red-600" size={18} />} />
+          <KpiCard title="Compartidos Orgánico" value={formatNumberEs(Math.round(totals.organicShares))} helper="Total del periodo" icon={<Share2 className="text-red-600" size={18} />} />
+          <KpiCard title="Video Views Ads" value={formatNumberEs(Math.round(totals.adsVideoViews))} helper="Total del periodo" icon={<Eye className="text-red-600" size={18} />} />
+          <KpiCard title="Video Views Orgánico" value={formatNumberEs(Math.round(totals.organicVideoViews))} helper="Total del periodo" icon={<Eye className="text-red-600" size={18} />} />
+          <KpiCard title="Retención Ads" value={`${retention.ads.toFixed(2)}%`} helper="Video views / impresiones" icon={<Target className="text-red-600" size={18} />} />
+          <KpiCard title="Retención Orgánico" value={`${retention.organic.toFixed(2)}%`} helper="Video views / impresiones" icon={<Target className="text-red-600" size={18} />} />
+        </KpiGrid>
+      </Section>
+
+      <Section title="1) Clicks por día (líneas)">
+        <ChartCard title="Ads vs Orgánico · Clicks" icon={<LineChartIcon size={16} className="text-red-600" />}>
+          {compareByDate.length === 0 ? (
+            <div className="rounded-xl border border-dashed border-gray-200 bg-gray-50 px-4 py-6 text-sm text-gray-500">
+              Sin datos para este rango.
+            </div>
+          ) : (
+            <ResponsiveContainer width="100%" height={320}>
+              <LineChart data={compareByDate}>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                <XAxis dataKey="date" tick={{ fontSize: 12 }} />
+                <YAxis tick={{ fontSize: 12 }} />
+                <Tooltip {...chartTooltipStyle} />
+                <Line type="monotone" dataKey="ads_clicks" name="Clicks Ads" stroke="#dc2626" strokeWidth={2.5} dot={false} isAnimationActive={false} />
+                <Line type="monotone" dataKey="organic_clicks" name="Clicks Orgánico" stroke="#2563eb" strokeWidth={2.5} dot={false} isAnimationActive={false} />
+              </LineChart>
+            </ResponsiveContainer>
+          )}
+        </ChartCard>
+      </Section>
+
+      <Section title="2) Impresiones Ads vs Impresiones Orgánico por día (líneas)">
+        <ChartCard title="Ads vs Orgánico · Impresiones" icon={<BarChart3 size={16} className="text-red-600" />}>
+          {compareByDate.length === 0 ? (
+            <div className="rounded-xl border border-dashed border-gray-200 bg-gray-50 px-4 py-6 text-sm text-gray-500">
+              Sin datos para este rango.
+            </div>
+          ) : (
+            <ResponsiveContainer width="100%" height={320}>
+              <LineChart data={compareByDate}>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                <XAxis dataKey="date" tick={{ fontSize: 12 }} />
+                <YAxis tick={{ fontSize: 12 }} />
+                <Tooltip {...chartTooltipStyle} />
+                <Line type="monotone" dataKey="ads_impressions" name="Impresiones Ads" stroke="#dc2626" strokeWidth={2.5} dot={false} isAnimationActive={false} />
+                <Line type="monotone" dataKey="organic_impressions" name="Impresiones Orgánico" stroke="#059669" strokeWidth={2.5} dot={false} isAnimationActive={false} />
+              </LineChart>
+            </ResponsiveContainer>
+          )}
+        </ChartCard>
+      </Section>
+
+      <Section title="3) Reacciones, comentarios y compartidos por día (líneas)">
+        <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
+          <ChartCard title="Reacciones · Ads vs Orgánico" icon={<ThumbsUp size={16} className="text-red-600" />}>
+            {compareByDate.length === 0 ? (
+              <div className="rounded-xl border border-dashed border-gray-200 bg-gray-50 px-4 py-6 text-sm text-gray-500">
+                Sin datos para este rango.
+              </div>
+            ) : (
+              <ResponsiveContainer width="100%" height={300}>
+                <LineChart data={compareByDate}>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                  <XAxis dataKey="date" tick={{ fontSize: 12 }} />
+                  <YAxis tick={{ fontSize: 12 }} />
+                  <Tooltip {...chartTooltipStyle} />
+                  <Line type="monotone" dataKey="ads_reactions" name="Reacciones Ads" stroke="#dc2626" strokeWidth={2.4} dot={false} isAnimationActive={false} />
+                  <Line type="monotone" dataKey="organic_reactions" name="Reacciones Orgánico" stroke="#2563eb" strokeWidth={2.4} dot={false} isAnimationActive={false} />
+                </LineChart>
+              </ResponsiveContainer>
+            )}
+          </ChartCard>
+
+          <ChartCard title="Comentarios · Ads vs Orgánico" icon={<MessageSquare size={16} className="text-red-600" />}>
+            {compareByDate.length === 0 ? (
+              <div className="rounded-xl border border-dashed border-gray-200 bg-gray-50 px-4 py-6 text-sm text-gray-500">
+                Sin datos para este rango.
+              </div>
+            ) : (
+              <ResponsiveContainer width="100%" height={300}>
+                <LineChart data={compareByDate}>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                  <XAxis dataKey="date" tick={{ fontSize: 12 }} />
+                  <YAxis tick={{ fontSize: 12 }} />
+                  <Tooltip {...chartTooltipStyle} />
+                  <Line type="monotone" dataKey="ads_comments" name="Comentarios Ads" stroke="#dc2626" strokeWidth={2.4} dot={false} isAnimationActive={false} />
+                  <Line type="monotone" dataKey="organic_comments" name="Comentarios Orgánico" stroke="#2563eb" strokeWidth={2.4} dot={false} isAnimationActive={false} />
+                </LineChart>
+              </ResponsiveContainer>
+            )}
+          </ChartCard>
+
+          <ChartCard title="Compartidos · Ads vs Orgánico" icon={<Share2 size={16} className="text-red-600" />}>
+            {compareByDate.length === 0 ? (
+              <div className="rounded-xl border border-dashed border-gray-200 bg-gray-50 px-4 py-6 text-sm text-gray-500">
+                Sin datos para este rango.
+              </div>
+            ) : (
+              <ResponsiveContainer width="100%" height={300}>
+                <LineChart data={compareByDate}>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                  <XAxis dataKey="date" tick={{ fontSize: 12 }} />
+                  <YAxis tick={{ fontSize: 12 }} />
+                  <Tooltip {...chartTooltipStyle} />
+                  <Line type="monotone" dataKey="ads_shares" name="Compartidos Ads" stroke="#dc2626" strokeWidth={2.4} dot={false} isAnimationActive={false} />
+                  <Line type="monotone" dataKey="organic_shares" name="Compartidos Orgánico" stroke="#2563eb" strokeWidth={2.4} dot={false} isAnimationActive={false} />
+                </LineChart>
+              </ResponsiveContainer>
+            )}
+          </ChartCard>
+        </div>
+      </Section>
+
+      <Section title="4) Video views y retención (líneas)">
+        <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+          <ChartCard title="Video Views · Ads vs Orgánico" icon={<Eye size={16} className="text-red-600" />}>
+            {compareByDate.length === 0 ? (
+              <div className="rounded-xl border border-dashed border-gray-200 bg-gray-50 px-4 py-6 text-sm text-gray-500">
+                Sin datos para este rango.
+              </div>
+            ) : (
+              <ResponsiveContainer width="100%" height={300}>
+                <LineChart data={compareByDate}>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                  <XAxis dataKey="date" tick={{ fontSize: 12 }} />
+                  <YAxis tick={{ fontSize: 12 }} />
+                  <Tooltip {...chartTooltipStyle} />
+                  <Line type="monotone" dataKey="ads_video_views" name="Video Views Ads" stroke="#dc2626" strokeWidth={2.4} dot={false} isAnimationActive={false} />
+                  <Line type="monotone" dataKey="organic_video_views" name="Video Views Orgánico" stroke="#2563eb" strokeWidth={2.4} dot={false} isAnimationActive={false} />
+                </LineChart>
+              </ResponsiveContainer>
+            )}
+          </ChartCard>
+
+          <ChartCard title="Retención · Ads vs Orgánico" icon={<Target size={16} className="text-red-600" />}>
+            {retentionByDate.length === 0 ? (
+              <div className="rounded-xl border border-dashed border-gray-200 bg-gray-50 px-4 py-6 text-sm text-gray-500">
+                Sin datos para este rango.
+              </div>
+            ) : (
+              <ResponsiveContainer width="100%" height={300}>
+                <LineChart data={retentionByDate}>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                  <XAxis dataKey="date" tick={{ fontSize: 12 }} />
+                  <YAxis tick={{ fontSize: 12 }} tickFormatter={(value) => `${Number(value).toFixed(1)}%`} />
+                  <Tooltip
+                    {...chartTooltipStyle}
+                    formatter={(value) => `${Number(value ?? 0).toFixed(2)}%`}
+                  />
+                  <Line type="monotone" dataKey="ads_retention" name="Retención Ads" stroke="#dc2626" strokeWidth={2.4} dot={false} isAnimationActive={false} />
+                  <Line type="monotone" dataKey="organic_retention" name="Retención Orgánico" stroke="#2563eb" strokeWidth={2.4} dot={false} isAnimationActive={false} />
+                </LineChart>
+              </ResponsiveContainer>
+            )}
+          </ChartCard>
+        </div>
+      </Section>
+
+      <Section title="5) Comparativa total (barras)">
+        <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+          <ChartCard title="Total Clicks · Ads vs Orgánico" icon={<BarChart3 size={16} className="text-red-600" />}>
+            <ResponsiveContainer width="100%" height={280}>
+              <BarChart data={[{ label: 'Clicks', ads: totals.adsClicks, organico: totals.organicClicks }]}> 
+                <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                <XAxis dataKey="label" tick={{ fontSize: 12 }} />
+                <YAxis tick={{ fontSize: 12 }} />
+                <Tooltip {...chartTooltipStyle} />
+                <Bar dataKey="ads" name="Ads" fill="#dc2626" radius={[8, 8, 0, 0]} />
+                <Bar dataKey="organico" name="Orgánico" fill="#2563eb" radius={[8, 8, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </ChartCard>
+
+          <ChartCard title="Total Impresiones · Ads vs Orgánico" icon={<BarChart3 size={16} className="text-red-600" />}>
+            <ResponsiveContainer width="100%" height={280}>
+              <BarChart data={[{ label: 'Impresiones', ads: totals.adsImpressions, organico: totals.organicImpressions }]}> 
+                <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                <XAxis dataKey="label" tick={{ fontSize: 12 }} />
+                <YAxis tick={{ fontSize: 12 }} />
+                <Tooltip {...chartTooltipStyle} />
+                <Bar dataKey="ads" name="Ads" fill="#dc2626" radius={[8, 8, 0, 0]} />
+                <Bar dataKey="organico" name="Orgánico" fill="#059669" radius={[8, 8, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </ChartCard>
+        </div>
+      </Section>
+    </div>
+  );
+}

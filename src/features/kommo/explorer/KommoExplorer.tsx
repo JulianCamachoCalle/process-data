@@ -9,6 +9,7 @@ import {
   ArrowDownWideNarrow,
   ArrowUpWideNarrow,
   Eye,
+  LayoutGrid,
   X,
 } from 'lucide-react';
 import {
@@ -132,7 +133,7 @@ function DetailValueContent({
             const itemKeys = Object.keys(itemObj).sort((a, b) => a.localeCompare(b, 'es'));
 
             return (
-              <div key={`obj-item-${index}`} className="rounded-lg border border-gray-200 bg-gray-50/70 overflow-hidden">
+              <div key={`obj-item-${index}`} className="overflow-hidden rounded-2xl border border-gray-200 bg-white">
                 <div className="px-3 py-2 border-b border-gray-200 text-xs font-semibold text-gray-500 uppercase tracking-wide">
                   Ítem {index + 1}
                 </div>
@@ -168,7 +169,7 @@ function DetailValueContent({
     const nestedKeys = Object.keys(value).sort((a, b) => a.localeCompare(b, 'es'));
 
     return (
-      <details className="rounded-lg border border-gray-200 bg-gray-50/80" open={depth === 0}>
+      <details className="rounded-2xl border border-gray-200 bg-gray-50" open={depth === 0}>
         <summary className="cursor-pointer px-3 py-2 text-xs font-semibold uppercase tracking-wide text-gray-600">
           Ver campos ({nestedKeys.length})
         </summary>
@@ -197,6 +198,7 @@ export function KommoExplorer() {
 }
 
 function KommoExplorerView({ resource }: { resource: KommoResourceKey }) {
+  const PAGE_SIZE = 10;
   const navigate = useNavigate();
   const uiConfig = useMemo(() => getKommoResource(resource) ?? KOMMO_RESOURCES[0], [resource]);
   const groupedResources = useMemo(() => getGroupedKommoResources(), []);
@@ -205,7 +207,6 @@ function KommoExplorerView({ resource }: { resource: KommoResourceKey }) {
   const [q, setQ] = useState('');
   const [sort, setSort] = useState(() => uiConfig.defaultSort);
   const [order, setOrder] = useState<'asc' | 'desc'>('desc');
-  const [pageSize, setPageSize] = useState(50);
   const [page, setPage] = useState(1);
 
   useEffect(() => {
@@ -217,13 +218,13 @@ function KommoExplorerView({ resource }: { resource: KommoResourceKey }) {
   }, [searchInput]);
 
   const listQuery = useQuery({
-    queryKey: ['kommo-data', resource, page, pageSize, sort, order, q],
+    queryKey: ['kommo-data', resource, page, PAGE_SIZE, sort, order, q],
     queryFn: async (): Promise<ApiResponse> => {
       const params = new URLSearchParams();
       params.set('name', 'KOMMO');
       params.set('resource', resource);
       params.set('page', String(page));
-      params.set('pageSize', String(pageSize));
+      params.set('pageSize', String(PAGE_SIZE));
       params.set('sort', sort);
       params.set('order', order);
       if (q) params.set('q', q);
@@ -242,7 +243,7 @@ function KommoExplorerView({ resource }: { resource: KommoResourceKey }) {
   });
 
   const total = listQuery.data?.total ?? 0;
-  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const safePage = Math.min(page, totalPages);
   const rows = listQuery.data?.rows ?? [];
   const columns = listQuery.data?.columns ?? [];
@@ -285,34 +286,40 @@ function KommoExplorerView({ resource }: { resource: KommoResourceKey }) {
 
   return (
     <div className="space-y-6">
-      <div className="rounded-2xl border border-gray-200 bg-white shadow-[0_24px_50px_-36px_rgba(15,23,42,0.8)] overflow-hidden">
-        <div className="px-6 py-5 border-b border-gray-200 bg-gradient-to-r from-gray-50 to-white">
+      <div className="overflow-hidden rounded-[28px] border border-gray-200 bg-white shadow-[0_24px_50px_-36px_rgba(15,23,42,0.8)]">
+        <div className="border-b border-gray-200 px-6 py-6">
           <div className="flex items-start justify-between gap-4 flex-wrap">
             <div className="flex items-center gap-3">
-              <div className="h-11 w-11 rounded-xl bg-red-600/10 border border-red-500/25 flex items-center justify-center">
+              <div className="flex h-11 w-11 items-center justify-center rounded-2xl border border-red-100 bg-red-50">
                 <Database className="text-red-600" size={20} />
               </div>
               <div>
-                <h1 className="text-base font-semibold text-gray-900">Kommo Data Explorer</h1>
-                <p className="text-xs text-gray-500">Exploración de recursos Kommo (paginación server-side)</p>
+                <h1 className="text-xl font-extrabold uppercase tracking-[0.08em] text-gray-900">Kommo Explorer</h1>
+                <p className="mt-1 text-sm text-gray-500">Exploración operativa de recursos Kommo con paginación server-side y detalle expandido.</p>
               </div>
             </div>
 
-            <div className="text-xs text-gray-500">
-              {listQuery.isFetching ? 'Actualizando…' : `Total: ${total.toLocaleString('es-PE')}`}
+            <div className="flex flex-wrap items-center gap-2 text-xs font-semibold uppercase tracking-[0.18em] text-gray-500">
+              <span className="inline-flex items-center gap-2 rounded-full border border-gray-200 bg-gray-50 px-3 py-1.5">
+                <LayoutGrid size={13} className="text-red-600" />
+                {uiConfig.label}
+              </span>
+              <span className="inline-flex items-center rounded-full border border-gray-200 bg-white px-3 py-1.5">
+                {listQuery.isFetching ? 'Actualizando…' : `Total ${total.toLocaleString('es-PE')}`}
+              </span>
             </div>
           </div>
 
-          <div className="mt-4 grid grid-cols-1 lg:grid-cols-12 gap-3">
-            <label className="lg:col-span-3 rounded-xl border border-gray-200 bg-white px-3 py-2 inline-flex items-center gap-2 text-sm text-gray-700">
-              <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Recurso</span>
+          <div className="mt-5 grid grid-cols-1 gap-3 lg:grid-cols-12">
+            <label className="inline-flex items-center gap-2 rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-700 lg:col-span-3">
+              <span className="text-xs font-semibold uppercase tracking-[0.18em] text-gray-500">Recurso</span>
               <select
                 value={resource}
                 onChange={(e) => {
                   const next = e.target.value as KommoResourceKey;
                   navigate(next === 'leads' ? '/kommo' : `/kommo/${next}`);
                 }}
-                className="ml-auto bg-transparent outline-none text-sm"
+                className="ml-auto bg-transparent text-sm outline-none"
                 aria-label="Seleccionar recurso"
               >
                 {groupedResources.map((section) => (
@@ -327,7 +334,7 @@ function KommoExplorerView({ resource }: { resource: KommoResourceKey }) {
               </select>
             </label>
 
-            <label className="lg:col-span-4 rounded-xl border border-gray-200 bg-white px-3 py-2 inline-flex items-center gap-2 text-sm text-gray-600">
+            <label className="inline-flex items-center gap-2 rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-600 lg:col-span-4">
               <Search size={15} className="text-gray-400" />
               <input
                 value={searchInput}
@@ -337,15 +344,15 @@ function KommoExplorerView({ resource }: { resource: KommoResourceKey }) {
               />
             </label>
 
-            <label className="lg:col-span-3 rounded-xl border border-gray-200 bg-white px-3 py-2 inline-flex items-center gap-2 text-sm text-gray-700">
-              <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Ordenar</span>
+            <label className="inline-flex items-center gap-2 rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-700 lg:col-span-3">
+              <span className="text-xs font-semibold uppercase tracking-[0.18em] text-gray-500">Ordenar</span>
               <select
                 value={sort}
                 onChange={(e) => {
                   setSort(e.target.value);
                   setPage(1);
                 }}
-                className="ml-auto bg-transparent outline-none text-sm"
+                className="ml-auto bg-transparent text-sm outline-none"
                 aria-label="Ordenar por"
               >
                 {uiConfig.sortColumns.map((col) => (
@@ -359,7 +366,7 @@ function KommoExplorerView({ resource }: { resource: KommoResourceKey }) {
             <div className="lg:col-span-2 flex items-center gap-2">
               <button
                 onClick={() => setOrder((prev) => (prev === 'desc' ? 'asc' : 'desc'))}
-                className="flex-1 inline-flex items-center justify-center gap-2 px-3 py-2 rounded-xl border border-gray-200 bg-white hover:bg-gray-50 text-sm font-semibold text-gray-700"
+                className="inline-flex w-full flex-1 items-center justify-center gap-2 rounded-2xl border border-gray-200 bg-white px-3 py-3 text-sm font-semibold text-gray-700 transition hover:border-gray-300 hover:bg-gray-50"
               >
                 {order === 'desc' ? <ArrowDownWideNarrow size={16} /> : <ArrowUpWideNarrow size={16} />}
                 {order.toUpperCase()}
@@ -370,7 +377,7 @@ function KommoExplorerView({ resource }: { resource: KommoResourceKey }) {
 
         <div className="overflow-x-auto">
           <table className="min-w-full divide-y divide-gray-200">
-            <thead className="bg-gray-50/90">
+            <thead className="bg-gray-50">
               <tr>
                 <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider whitespace-nowrap w-36">
                   Acciones
@@ -413,14 +420,15 @@ function KommoExplorerView({ resource }: { resource: KommoResourceKey }) {
                       : `${resource}-${page}-${idx}`;
 
                   return (
-                    <tr key={rowKey} className="hover:bg-red-50/40 transition-colors">
+                    <tr key={rowKey} className="transition-colors hover:bg-gray-50">
                       <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
                         <button
                           onClick={() => openDetail(row)}
-                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-red-200 bg-red-50 text-red-700 hover:bg-red-100 transition-colors text-xs font-semibold"
+                          className="inline-flex h-8 w-8 items-center justify-center rounded-xl border border-gray-200 bg-white text-gray-700 transition-colors hover:border-red-200 hover:bg-red-50 hover:text-red-700"
+                          title="Ver detalle"
+                          aria-label="Ver detalle"
                         >
                           <Eye size={13} />
-                          Ver detalle
                         </button>
                       </td>
                       {columns.map((col) => {
@@ -444,30 +452,18 @@ function KommoExplorerView({ resource }: { resource: KommoResourceKey }) {
           </table>
         </div>
 
-        <div className="px-6 py-4 border-t border-gray-200 bg-white flex items-center justify-between gap-4 flex-wrap">
+        <div className="flex flex-wrap items-center justify-between gap-4 border-t border-gray-200 bg-white px-6 py-4">
           <div className="inline-flex items-center gap-2 text-sm text-gray-600">
             <span>Filas por página:</span>
-            <select
-              value={pageSize}
-              onChange={(e) => {
-                setPageSize(Number(e.target.value));
-                setPage(1);
-              }}
-              className="px-2 py-1 rounded-lg border border-gray-300 bg-white text-sm"
-            >
-              <option value={25}>25</option>
-              <option value={50}>50</option>
-              <option value={100}>100</option>
-              <option value={200}>200</option>
-            </select>
+            <span className="inline-flex items-center rounded-xl border border-gray-300 bg-gray-50 px-3 py-2 text-sm font-semibold text-gray-700">10</span>
           </div>
 
           <div className="inline-flex items-center gap-2">
             <button
               onClick={() => setPage((prev) => Math.max(1, Math.min(prev, totalPages) - 1))}
               disabled={safePage === 1}
-              className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg border border-gray-300 bg-white text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
-            >
+               className="inline-flex items-center gap-1 rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+             >
               <ChevronLeft size={15} />
               Anterior
             </button>
@@ -477,8 +473,8 @@ function KommoExplorerView({ resource }: { resource: KommoResourceKey }) {
             <button
               onClick={() => setPage((prev) => Math.min(totalPages, Math.min(prev, totalPages) + 1))}
               disabled={safePage >= totalPages}
-              className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg border border-gray-300 bg-white text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
-            >
+               className="inline-flex items-center gap-1 rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+             >
               Siguiente
               <ChevronRight size={15} />
             </button>
@@ -487,19 +483,19 @@ function KommoExplorerView({ resource }: { resource: KommoResourceKey }) {
       </div>
 
       {detailOpen && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
-            <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 bg-gray-50">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/45 p-4">
+          <div className="flex max-h-[90vh] w-full max-w-4xl flex-col overflow-hidden rounded-[28px] border border-gray-200 bg-white shadow-[0_36px_80px_-38px_rgba(15,23,42,0.7)]">
+            <div className="flex items-center justify-between border-b border-gray-200 bg-white px-6 py-5">
               <div>
-                <p className="text-xs text-gray-500 uppercase tracking-[0.16em] font-semibold">{uiConfig.label}</p>
-                <h2 className="font-semibold text-gray-900">Detalle</h2>
+                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-gray-500">{uiConfig.label}</p>
+                <h2 className="mt-1 text-lg font-bold text-gray-900">Detalle del registro</h2>
               </div>
               <button
                 onClick={() => {
                   setDetailOpen(false);
                   setDetailId(null);
                 }}
-                className="p-2 hover:bg-gray-200 rounded-lg transition-colors"
+                className="rounded-xl p-2 transition-colors hover:bg-gray-100"
               >
                 <X className="w-5 h-5 text-gray-500" />
               </button>
@@ -525,7 +521,7 @@ function KommoExplorerView({ resource }: { resource: KommoResourceKey }) {
                   const orderedKeys = getOrderedKeys(detail, detailPreferredKeys);
 
                   return (
-                    <div className="rounded-xl border border-gray-200 bg-white overflow-hidden">
+                      <div className="overflow-hidden rounded-2xl border border-gray-200 bg-white">
                       <div className="divide-y divide-gray-100">
                         {orderedKeys.map((key) => (
                           <div key={key} className="grid grid-cols-1 md:grid-cols-[240px_minmax(0,1fr)] gap-3 px-4 py-3">

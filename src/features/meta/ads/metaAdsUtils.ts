@@ -1,0 +1,499 @@
+import { formatCurrencyPen, formatNumberEs } from '../../../lib/tableHelpers';
+import type { MetaAdsReportingRow, MetaSyncRunResourceSummary } from './types';
+
+export type MetaDailyTrendPoint = {
+  date_start: string;
+  spend: number;
+  clicks: number;
+  impressions: number;
+};
+
+export type MetaLeaderboardEntry = {
+  id: string;
+  title: string;
+  subtitle: string;
+  spend: number;
+  clicks: number;
+  impressions: number;
+  ctr: number;
+  cpc: number;
+};
+
+export type MetaPerformanceEntry = MetaLeaderboardEntry & {
+  reach: number;
+  creativeName: string;
+  labels: string[];
+};
+
+export type MetaComparisonMetric = {
+  label: string;
+  format: 'currency' | 'number' | 'percent';
+  better: 'higher' | 'lower';
+  leftValue: number;
+  rightValue: number;
+  winner: 'left' | 'right' | 'tie';
+};
+
+export type MetaDecisionSignal = {
+  title: string;
+  helper: string;
+  entry: MetaPerformanceEntry | null;
+  tone: 'positive' | 'warning' | 'neutral';
+  metricLabel: string;
+  metricValue: number;
+  metricFormat: 'currency' | 'number' | 'percent';
+};
+
+export type MetaRecommendationBucketKey = 'escalar' | 'iterar' | 'revisar';
+
+export type MetaRecommendationBucket = {
+  key: MetaRecommendationBucketKey;
+  title: 'Escalar' | 'Iterar' | 'Revisar';
+  description: string;
+  helper: string;
+  tone: 'positive' | 'warning' | 'neutral';
+  entries: MetaPerformanceEntry[];
+};
+
+export type MetaBreakdownPoint = {
+  name: string;
+  value: number;
+};
+
+export function safeDivide(numerator: number, denominator: number) {
+  if (!denominator) return 0;
+  return numerator / denominator;
+}
+
+export function sumBy<T>(rows: T[], selector: (row: T) => number | null) {
+  return rows.reduce((acc, row) => acc + (selector(row) ?? 0), 0);
+}
+
+export function formatPercent(value: number) {
+  return `${new Intl.NumberFormat('es-PE', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(value)}%`;
+}
+
+export function formatStatus(value: string | null) {
+  if (!value) return 'N/D';
+  return value.replaceAll('_', ' ');
+}
+
+export function formatDateRangeLabel(dateFrom: string, dateTo: string) {
+  if (!dateFrom && !dateTo) return 'Todo el histórico disponible';
+  return `${dateFrom || '...'} → ${dateTo || '...'}`;
+}
+
+export function formatDateTime(value: string | null) {
+  if (!value) return 'N/D';
+
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return value;
+
+  return new Intl.DateTimeFormat('es-PE', {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+  }).format(parsed);
+}
+
+export function formatDurationMs(value: number | null) {
+  if (value === null || value < 0) return 'N/D';
+  if (value < 1000) return `${value} ms`;
+
+  return `${new Intl.NumberFormat('es-PE', {
+    minimumFractionDigits: value < 10_000 ? 2 : 1,
+    maximumFractionDigits: value < 10_000 ? 2 : 1,
+  }).format(value / 1000)} s`;
+}
+
+export function formatSyncResourceSummary(summary: MetaSyncRunResourceSummary | undefined) {
+  if (!summary) return 'Sin data';
+
+  return `${formatNumberEs(summary.upserted ?? 0)} upsertados · ${formatNumberEs(summary.pulled ?? 0)} traídos`;
+}
+
+export function aggregateTrendRows(rows: MetaAdsReportingRow[]): MetaDailyTrendPoint[] {
+  const map = new Map<string, MetaDailyTrendPoint>();
+
+  for (const row of rows) {
+    const key = row.date_start;
+    const current = map.get(key) ?? { date_start: key, spend: 0, clicks: 0, impressions: 0 };
+    current.spend += row.spend ?? 0;
+    current.clicks += row.clicks ?? 0;
+    current.impressions += row.impressions ?? 0;
+    map.set(key, current);
+  }
+
+  return Array.from(map.values()).sort((left, right) => left.date_start.localeCompare(right.date_start));
+}
+
+export function aggregateLeaderboard(
+  rows: MetaAdsReportingRow[],
+  options: {
+    getId: (row: MetaAdsReportingRow) => string | null;
+    getTitle: (row: MetaAdsReportingRow) => string | null;
+    getSubtitle: (row: MetaAdsReportingRow) => string | null;
+  },
+) {
+  const grouped = new Map<string, MetaLeaderboardEntry>();
+
+  for (const row of rows) {
+    const id = options.getId(row);
+    if (!id) continue;
+
+    const current = grouped.get(id) ?? {
+      id,
+      title: options.getTitle(row) ?? id,
+      subtitle: options.getSubtitle(row) ?? 'N/D',
+      spend: 0,
+      clicks: 0,
+      impressions: 0,
+      ctr: 0,
+      cpc: 0,
+    };
+
+    current.spend += row.spend ?? 0;
+    current.clicks += row.clicks ?? 0;
+    current.impressions += row.impressions ?? 0;
+    current.ctr = safeDivide(current.clicks * 100, current.impressions);
+    current.cpc = safeDivide(current.spend, current.clicks);
+    grouped.set(id, current);
+  }
+
+  return Array.from(grouped.values()).sort((left, right) => right.spend - left.spend);
+}
+
+export function aggregatePerformanceEntries(
+  rows: MetaAdsReportingRow[],
+  options: {
+    getId: (row: MetaAdsReportingRow) => string | null;
+    getTitle: (row: MetaAdsReportingRow) => string | null;
+    getSubtitle: (row: MetaAdsReportingRow) => string | null;
+    getCreativeName?: (row: MetaAdsReportingRow) => string | null;
+  },
+) {
+  const grouped = new Map<string, MetaPerformanceEntry>();
+
+  for (const row of rows) {
+    const id = options.getId(row);
+    if (!id) continue;
+
+    const current = grouped.get(id) ?? {
+      id,
+      title: options.getTitle(row) ?? id,
+      subtitle: options.getSubtitle(row) ?? 'N/D',
+      creativeName: options.getCreativeName?.(row) ?? row.creative_name ?? 'Sin creative',
+      spend: 0,
+      clicks: 0,
+      impressions: 0,
+      reach: 0,
+      ctr: 0,
+      cpc: 0,
+      labels: [],
+    };
+
+    current.spend += row.spend ?? 0;
+    current.clicks += row.clicks ?? 0;
+    current.impressions += row.impressions ?? 0;
+    current.reach += row.reach ?? 0;
+    current.ctr = safeDivide(current.clicks * 100, current.impressions);
+    current.cpc = safeDivide(current.spend, current.clicks);
+
+    if (!current.creativeName || current.creativeName === 'Sin creative') {
+      current.creativeName = options.getCreativeName?.(row) ?? row.creative_name ?? 'Sin creative';
+    }
+
+    grouped.set(id, current);
+  }
+
+  const entries = Array.from(grouped.values());
+  const averages = {
+    spend: safeDivide(sumBy(entries, (entry) => entry.spend), entries.length),
+    clicks: safeDivide(sumBy(entries, (entry) => entry.clicks), entries.length),
+    ctr: safeDivide(sumBy(entries, (entry) => entry.ctr), entries.length),
+    cpc: safeDivide(sumBy(entries, (entry) => entry.cpc), entries.length),
+  };
+
+  return entries
+    .map((entry) => ({
+      ...entry,
+      labels: buildHeuristicLabels(entry, averages),
+    }))
+    .sort((left, right) => right.spend - left.spend);
+}
+
+export function pickComparisonPair(entries: MetaPerformanceEntry[]) {
+  return entries.slice(0, 2);
+}
+
+export function buildComparisonMetrics(left?: MetaPerformanceEntry, right?: MetaPerformanceEntry): MetaComparisonMetric[] {
+  if (!left || !right) return [];
+
+  return [
+    createComparisonMetric('Gasto', left.spend, right.spend, 'currency', 'lower'),
+    createComparisonMetric('Clicks', left.clicks, right.clicks, 'number', 'higher'),
+    createComparisonMetric('CTR', left.ctr, right.ctr, 'percent', 'higher'),
+    createComparisonMetric('CPC', left.cpc, right.cpc, 'currency', 'lower'),
+  ];
+}
+
+export function buildDecisionSignals(entries: MetaPerformanceEntry[]): MetaDecisionSignal[] {
+  const significant = entries.filter((entry) => entry.impressions >= 1000 && entry.clicks >= 5);
+  const pool = significant.length > 0 ? significant : entries;
+  const weakest = getWeakPerformers(entries)[0] ?? null;
+
+  const bestCtr = [...pool].sort((left, right) => right.ctr - left.ctr)[0] ?? null;
+  const bestCpc = [...pool].filter((entry) => entry.clicks > 0).sort((left, right) => left.cpc - right.cpc)[0] ?? null;
+  const mostClicks = [...entries].sort((left, right) => right.clicks - left.clicks)[0] ?? null;
+  const highestSpend = [...entries].sort((left, right) => right.spend - left.spend)[0] ?? null;
+
+  return [
+    {
+      title: 'Mejor CTR',
+      helper: 'La pieza que mejor convierte impresiones en clicks.',
+      entry: bestCtr,
+      tone: 'positive',
+      metricLabel: 'CTR',
+      metricValue: bestCtr?.ctr ?? 0,
+      metricFormat: 'percent',
+    },
+    {
+      title: 'Mejor CPC',
+      helper: 'El activo que consigue clicks más baratos.',
+      entry: bestCpc,
+      tone: 'positive',
+      metricLabel: 'CPC',
+      metricValue: bestCpc?.cpc ?? 0,
+      metricFormat: 'currency',
+    },
+    {
+      title: 'Más clicks',
+      helper: 'La unidad que más tráfico aportó al negocio.',
+      entry: mostClicks,
+      tone: 'neutral',
+      metricLabel: 'Clicks',
+      metricValue: mostClicks?.clicks ?? 0,
+      metricFormat: 'number',
+    },
+    {
+      title: 'Mayor gasto',
+      helper: 'Donde hoy está concentrada la inversión.',
+      entry: highestSpend,
+      tone: 'neutral',
+      metricLabel: 'Gasto',
+      metricValue: highestSpend?.spend ?? 0,
+      metricFormat: 'currency',
+    },
+    {
+      title: 'Alto gasto, baja eficiencia',
+      helper: 'Prioridad para revisar mensaje, segmentación o pieza.',
+      entry: weakest,
+      tone: 'warning',
+      metricLabel: 'CPC',
+      metricValue: weakest?.cpc ?? 0,
+      metricFormat: 'currency',
+    },
+  ];
+}
+
+export function buildRecommendationBuckets(entries: MetaPerformanceEntry[]): MetaRecommendationBucket[] {
+  if (entries.length === 0) {
+    return [
+      {
+        key: 'escalar',
+        title: 'Escalar',
+        description: 'Piezas con eficiencia sana y volumen suficiente para defender más presupuesto.',
+        helper: 'No hay ads con data suficiente para sugerir escalado.',
+        tone: 'positive',
+        entries: [],
+      },
+      {
+        key: 'iterar',
+        title: 'Iterar',
+        description: 'Piezas con señales de respuesta, pero todavía necesitan mejorar costo o volumen.',
+        helper: 'No hay ads en zona de iteración con los filtros actuales.',
+        tone: 'neutral',
+        entries: [],
+      },
+      {
+        key: 'revisar',
+        title: 'Revisar',
+        description: 'Piezas donde el gasto ya exige una corrección de mensaje, segmentación o creative.',
+        helper: 'No hay ads prioritarios para revisar con los filtros actuales.',
+        tone: 'warning',
+        entries: [],
+      },
+    ];
+  }
+
+  const averages = {
+    spend: safeDivide(sumBy(entries, (entry) => entry.spend), entries.length),
+    clicks: safeDivide(sumBy(entries, (entry) => entry.clicks), entries.length),
+    impressions: safeDivide(sumBy(entries, (entry) => entry.impressions), entries.length),
+    ctr: safeDivide(sumBy(entries, (entry) => entry.ctr), entries.length),
+    cpc: safeDivide(sumBy(entries, (entry) => entry.cpc), entries.filter((entry) => entry.clicks > 0).length),
+  };
+
+  const buckets: Record<MetaRecommendationBucketKey, MetaPerformanceEntry[]> = {
+    escalar: [],
+    iterar: [],
+    revisar: [],
+  };
+
+  for (const entry of entries) {
+    const hasClicks = entry.clicks > 0;
+    const ctrHealthy = entry.ctr >= averages.ctr;
+    const cpcHealthy = hasClicks && averages.cpc > 0 ? entry.cpc <= averages.cpc : hasClicks;
+    const strongVolume = entry.impressions >= Math.max(averages.impressions * 0.7, 1000) || entry.clicks >= Math.max(averages.clicks * 0.7, 8);
+    const spendHeavy = entry.spend >= Math.max(averages.spend, 1);
+    const weakCtr = entry.ctr < averages.ctr * 0.85;
+    const expensiveClicks = hasClicks && averages.cpc > 0 ? entry.cpc > averages.cpc * 1.15 : entry.spend > 0;
+
+    if (spendHeavy && (!hasClicks || weakCtr || expensiveClicks)) {
+      buckets.revisar.push(entry);
+      continue;
+    }
+
+    if (hasClicks && ctrHealthy && cpcHealthy && strongVolume) {
+      buckets.escalar.push(entry);
+      continue;
+    }
+
+    if (hasClicks || entry.impressions > 0 || entry.reach > 0) {
+      buckets.iterar.push(entry);
+    }
+  }
+
+  return [
+    {
+      key: 'escalar',
+      title: 'Escalar',
+      description: 'Eficiencia sana con volumen defendible para empujar inversión gradualmente.',
+      helper: 'Subí presupuesto de forma gradual y vigilá que CTR/CPC no se deterioren.',
+      tone: 'positive',
+      entries: buckets.escalar.sort((left, right) => {
+        if (right.clicks !== left.clicks) return right.clicks - left.clicks;
+        if (left.cpc !== right.cpc) return left.cpc - right.cpc;
+        return right.ctr - left.ctr;
+      }),
+    },
+    {
+      key: 'iterar',
+      title: 'Iterar',
+      description: 'Hay respuesta, pero todavía falta consolidar costo o tracción.',
+      helper: 'Probá ajustes en creative, copy o segmentación antes de escalar fuerte.',
+      tone: 'neutral',
+      entries: buckets.iterar.sort((left, right) => {
+        if (right.ctr !== left.ctr) return right.ctr - left.ctr;
+        if (right.clicks !== left.clicks) return right.clicks - left.clicks;
+        return left.cpc - right.cpc;
+      }),
+    },
+    {
+      key: 'revisar',
+      title: 'Revisar',
+      description: 'El gasto ya está expuesto y la eficiencia no acompaña.',
+      helper: 'Revisá primero mensaje, segmentación o pieza antes de seguir empujando presupuesto.',
+      tone: 'warning',
+      entries: buckets.revisar.sort((left, right) => {
+        if (right.spend !== left.spend) return right.spend - left.spend;
+        if (right.cpc !== left.cpc) return right.cpc - left.cpc;
+        return left.ctr - right.ctr;
+      }),
+    },
+  ];
+}
+
+export function getWeakPerformers(entries: MetaPerformanceEntry[]) {
+  if (entries.length === 0) return [];
+
+  const avgSpend = safeDivide(sumBy(entries, (entry) => entry.spend), entries.length);
+  const spendHeavy = entries.filter((entry) => entry.spend >= avgSpend && entry.clicks > 0);
+  const pool = spendHeavy.length > 0 ? spendHeavy : entries.filter((entry) => entry.clicks > 0);
+
+  return [...pool].sort((left, right) => {
+    if (right.cpc !== left.cpc) return right.cpc - left.cpc;
+    if (left.ctr !== right.ctr) return left.ctr - right.ctr;
+    return right.spend - left.spend;
+  });
+}
+
+export function getCreativeInsightEntries(entries: MetaPerformanceEntry[], limit = 4) {
+  return [...entries]
+    .filter((entry) => entry.clicks > 0 || entry.impressions > 0)
+    .sort((left, right) => {
+      if (right.clicks !== left.clicks) return right.clicks - left.clicks;
+      if (right.ctr !== left.ctr) return right.ctr - left.ctr;
+      return right.spend - left.spend;
+    })
+    .slice(0, limit);
+}
+
+export function aggregateBreakdown(
+  rows: MetaAdsReportingRow[],
+  selector: (row: MetaAdsReportingRow) => string | null,
+) {
+  const grouped = new Map<string, number>();
+
+  for (const row of rows) {
+    const label = selector(row) ?? 'Sin dato';
+    grouped.set(label, (grouped.get(label) ?? 0) + (row.spend ?? 0));
+  }
+
+  return Array.from(grouped.entries())
+    .map(([name, value]) => ({ name, value }))
+    .sort((left, right) => right.value - left.value);
+}
+
+export function formatCompactMetric(value: number, type: 'currency' | 'number' | 'percent') {
+  if (type === 'currency') return formatCurrencyPen(value);
+  if (type === 'percent') return formatPercent(value);
+  return formatNumberEs(value);
+}
+
+function createComparisonMetric(
+  label: string,
+  leftValue: number,
+  rightValue: number,
+  format: MetaComparisonMetric['format'],
+  better: MetaComparisonMetric['better'],
+): MetaComparisonMetric {
+  let winner: MetaComparisonMetric['winner'] = 'tie';
+
+  if (leftValue !== rightValue) {
+    const leftWins = better === 'higher' ? leftValue > rightValue : leftValue < rightValue;
+    winner = leftWins ? 'left' : 'right';
+  }
+
+  return {
+    label,
+    format,
+    better,
+    leftValue,
+    rightValue,
+    winner,
+  };
+}
+
+function buildHeuristicLabels(
+  entry: MetaPerformanceEntry,
+  averages: { spend: number; clicks: number; ctr: number; cpc: number },
+) {
+  const labels: string[] = [];
+
+  if (entry.ctr >= averages.ctr && entry.cpc > 0 && entry.cpc <= averages.cpc) {
+    labels.push('Ganador en eficiencia');
+  }
+
+  if (entry.spend >= averages.spend && (entry.ctr < averages.ctr || entry.cpc > averages.cpc)) {
+    labels.push('Alto gasto, baja eficiencia');
+  }
+
+  if (entry.clicks >= averages.clicks && entry.ctr >= averages.ctr) {
+    labels.push('Mensaje que atrae clicks');
+  }
+
+  return labels.slice(0, 2);
+}

@@ -1,17 +1,18 @@
 import type { VercelRequest } from '@vercel/node';
 import { createClient } from '@supabase/supabase-js';
 import { createRequire } from 'node:module';
+import {
+  getJwtSecretOrThrow,
+  verifySession as verifySessionBase,
+  verifyAdminSession as verifyAdminSessionBase,
+  type AppRole,
+  type AuthResult,
+} from '../_auth.js';
 
 const require = createRequire(import.meta.url);
 const jwt = require('jsonwebtoken') as typeof import('jsonwebtoken');
 
 let cachedSupabaseAdminClient: ReturnType<typeof createClient> | null = null;
-
-export interface AuthResult {
-  ok: boolean;
-  status: number;
-  error?: string;
-}
 
 export interface KommoTokenResponse {
   token_type: string;
@@ -46,40 +47,12 @@ interface KommoOauthState {
   exp?: number;
 }
 
-function parseCookies(cookieHeader: string | undefined) {
-  if (!cookieHeader) return {} as Record<string, string>;
-
-  return cookieHeader.split(';').reduce<Record<string, string>>((acc, part) => {
-    const [rawKey, ...rawValue] = part.trim().split('=');
-    if (!rawKey) return acc;
-
-    acc[rawKey] = decodeURIComponent(rawValue.join('='));
-    return acc;
-  }, {});
-}
-
-export function getAuthTokenFromRequest(req: VercelRequest) {
-  const cookieToken = parseCookies(req.headers.cookie).auth_token;
-  return typeof cookieToken === 'string' && cookieToken.trim() ? cookieToken : null;
-}
-
 export function verifyAdminSession(req: VercelRequest): AuthResult {
-  const jwtSecret = process.env.JWT_SECRET;
-  if (!jwtSecret) {
-    return { ok: false, status: 500, error: 'Falta JWT_SECRET' };
-  }
+  return verifyAdminSessionBase(req);
+}
 
-  const token = getAuthTokenFromRequest(req);
-  if (!token) {
-    return { ok: false, status: 401, error: 'No autorizado: falta auth_token' };
-  }
-
-  try {
-    jwt.verify(token, jwtSecret);
-    return { ok: true, status: 200 };
-  } catch {
-    return { ok: false, status: 401, error: 'No autorizado: auth_token inválida o expirada' };
-  }
+export function verifySession(req: VercelRequest, allowedRoles?: AppRole[]): AuthResult {
+  return verifySessionBase(req, allowedRoles);
 }
 
 export function isSecretAuthorized(
@@ -176,12 +149,7 @@ function getKommoOauthEnv(): KommoOauthEnv {
 }
 
 function getJwtSecret() {
-  const jwtSecret = process.env.JWT_SECRET;
-  if (!jwtSecret) {
-    throw new Error('Falta JWT_SECRET');
-  }
-
-  return jwtSecret;
+  return getJwtSecretOrThrow();
 }
 
 export function createKommoOauthState(baseUrl: string, nonce: string) {

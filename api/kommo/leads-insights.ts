@@ -3,11 +3,19 @@ import {
   getSupabaseAdminClient,
   isSecretAuthorized,
   isVercelCronAuthorized,
-  verifyAdminSession,
+  verifySession,
 } from './_shared.js';
 
 const INSIGHTS_SECRET_HEADER = 'x-kommo-insights-secret';
 const INSIGHTS_SECRET_ENV = 'KOMMO_INSIGHTS_SECRET';
+const INSIGHTS_CACHE_TTL_MS = 60 * 1000;
+
+type InsightsCacheEntry = {
+  expiresAt: number;
+  payload: Record<string, unknown>;
+};
+
+const insightsCache = new Map<string, InsightsCacheEntry>();
 
 type LeadRow = {
   pipeline_id: number | null;
@@ -17,6 +25,13 @@ type LeadRow = {
   closed_at: string | null;
   created_at: string | null;
   responsible_user_id: number | null;
+};
+
+type LeadGanadoRow = {
+  fecha_lead_ganado: string | null;
+  vendedor_nombre_snapshot: string | null;
+  pipeline_id_snapshot: number | null;
+  kommo_lead_id: number | null;
 };
 
 type PipelineRow = {
@@ -70,42 +85,65 @@ type OwnerInsight = {
   total_leads: number;
 };
 
+type CreatedPipelineSnapshotInsight = {
+  group_key: string;
+  pipeline_id: number | null;
+  pipeline_name: string;
+  total_leads: number;
+  open_leads: number;
+  closed_leads: number;
+  lost_leads: number;
+  avg_price: number | null;
+};
+
+type WonPipelineInsight = {
+  pipeline_id: number | null;
+  pipeline_name: string;
+  total_won: number;
+};
+
+type WonSellerInsight = {
+  seller_name: string;
+  total_won: number;
+};
+
 type LeadsInsightsResponse = {
-  pipelines: PipelineInsight[];
-  statuses: StatusInsight[];
-  statusesByName: StatusByNameInsight[];
-  hourlyIncoming: HourlyIncomingInsight[];
-  owners: OwnerInsight[];
   filters: {
     start_date: string | null;
     end_date: string | null;
   };
-  pipelinePerformance: Array<{
-    pipeline_id: number | null;
-    pipeline_name: string;
-    total_leads: number;
-    open_leads: number;
-    closed_leads: number;
-    won_leads: number;
-    lost_leads: number;
-    avg_price: number | null;
-  }>;
-  summary: {
-    total_leads: number;
-    total_open: number;
-    total_closed: number;
-    total_won: number;
-    total_lost: number;
-    total_deleted: number;
-    avg_price: number | null;
-    top_pipeline: PipelineInsight | null;
+  created: {
+    summary: {
+      total_leads: number;
+      total_open: number;
+      total_closed: number;
+      total_lost: number;
+      total_deleted: number;
+      total_incoming: number;
+      avg_price: number | null;
+      top_pipeline: PipelineInsight | null;
+      top_owner: OwnerInsight | null;
+    };
+    pipeline_volume: PipelineInsight[];
+    owner_volume: OwnerInsight[];
+    status_volume: StatusInsight[];
+    status_volume_by_name: StatusByNameInsight[];
+    pipeline_current_state: CreatedPipelineSnapshotInsight[];
+    hourly_incoming: HourlyIncomingInsight[];
+    insights: {
+      busiest_hour: HourlyIncomingInsight | null;
+      top_status: StatusInsight | null;
+      orphan_pipeline_leads: number;
+    };
   };
-  insights: {
-    busiest_hour: HourlyIncomingInsight | null;
-    top_status: StatusInsight | null;
-    won_rate_over_closed: number | null;
-    orphan_pipeline_leads: number;
-    top_owner: OwnerInsight | null;
+  won: {
+    summary: {
+      total_won: number;
+      top_pipeline: WonPipelineInsight | null;
+      top_seller: WonSellerInsight | null;
+    };
+    pipelines: WonPipelineInsight[];
+    sellers: WonSellerInsight[];
   };
 };
 
@@ -160,19 +198,40 @@ function isLikelyLostStatus(statusName: string) {
 async function safeSelectPaginated<T extends Record<string, unknown>>(
   table: string,
   columns: string,
-  batchSize = 1000,
+  options?: {
+    batchSize?: number;
+    dateFilter?: {
+      column: string;
+      startDate: string | null;
+      endDate: string | null;
+      widenByOneDay?: boolean;
+    };
+  },
 ): Promise<T[]> {
   try {
     const supabase = getSupabaseAdminClient();
     const rows: T[] = [];
     let from = 0;
+    const batchSize = options?.batchSize ?? 1000;
 
     while (true) {
       const to = from + batchSize - 1;
-      const { data, error } = await supabase
+      let query = supabase
         .from(table as never)
         .select(columns as never)
         .range(from, to);
+
+      if (options?.dateFilter) {
+        query = applyDateRangeQuery(
+          query,
+          options.dateFilter.column,
+          options.dateFilter.startDate,
+          options.dateFilter.endDate,
+          { widenByOneDay: options.dateFilter.widenByOneDay },
+        );
+      }
+
+      const { data, error } = await query;
 
       if (error || !Array.isArray(data)) {
         return [];
@@ -246,6 +305,50 @@ function parseDateInput(value: string | undefined) {
   return value;
 }
 
+function shiftIsoDate(isoDate: string, deltaDays: number) {
+  const [yearRaw, monthRaw, dayRaw] = isoDate.split('-');
+  const date = new Date(Date.UTC(Number(yearRaw), Number(monthRaw) - 1, Number(dayRaw)));
+  if (Number.isNaN(date.getTime())) return isoDate;
+  date.setUTCDate(date.getUTCDate() + deltaDays);
+  return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}-${String(date.getUTCDate()).padStart(2, '0')}`;
+}
+
+function buildInsightsCacheKey(startDate: string | null, endDate: string | null) {
+  return `${startDate ?? 'null'}::${endDate ?? 'null'}`;
+}
+
+function applyDateRangeQuery<T extends { gte: (column: string, value: string) => T; lte: (column: string, value: string) => T }>(
+  query: T,
+  column: string,
+  startDate: string | null,
+  endDate: string | null,
+  options?: { widenByOneDay?: boolean },
+): T {
+  let next = query;
+
+  const normalizedStart = startDate
+    ? options?.widenByOneDay
+      ? shiftIsoDate(startDate, -1)
+      : startDate
+    : null;
+
+  const normalizedEnd = endDate
+    ? options?.widenByOneDay
+      ? shiftIsoDate(endDate, 1)
+      : endDate
+    : null;
+
+  if (normalizedStart) {
+    next = next.gte(column, normalizedStart);
+  }
+
+  if (normalizedEnd) {
+    next = next.lte(column, normalizedEnd);
+  }
+
+  return next;
+}
+
 function toLimaDateString(dateLike: string) {
   const parsedDate = new Date(dateLike);
   if (Number.isNaN(parsedDate.getTime())) return null;
@@ -270,6 +373,38 @@ function isDateWithinRange(dateLike: string | null, startDate: string | null, en
   return true;
 }
 
+function toComparableDateString(dateLike: string | null) {
+  if (!dateLike) return null;
+
+  const trimmedValue = dateLike.trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(trimmedValue)) {
+    return trimmedValue;
+  }
+
+  return toLimaDateString(trimmedValue);
+}
+
+function isComparableDateWithinRange(dateLike: string | null, startDate: string | null, endDate: string | null) {
+  if (!startDate && !endDate) return true;
+
+  const comparableDate = toComparableDateString(dateLike);
+  if (!comparableDate) return false;
+
+  if (startDate && comparableDate < startDate) return false;
+  if (endDate && comparableDate > endDate) return false;
+  return true;
+}
+
+function buildPerformanceGroupKey(pipelineId: number | null, pipelineName: string) {
+  const trimmedName = pipelineName.trim();
+
+  if (pipelineId !== null) {
+    return trimmedName ? `pipeline:${pipelineId}:${normalizeText(trimmedName)}` : `pipeline:${pipelineId}`;
+  }
+
+  return trimmedName ? `name:${normalizeText(trimmedName)}` : 'name:sin-pipeline';
+}
+
 export default async function kommoLeadsInsightsHandler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'GET') {
     return res.status(405).json({ error: 'Método no permitido' });
@@ -279,7 +414,7 @@ export default async function kommoLeadsInsightsHandler(req: VercelRequest, res:
     const secretAuthorized = isSecretAuthorized(req, INSIGHTS_SECRET_ENV, INSIGHTS_SECRET_HEADER);
     const cronAuthorized = isVercelCronAuthorized(req);
     if (!secretAuthorized && !cronAuthorized) {
-      const auth = verifyAdminSession(req);
+      const auth = verifySession(req, ['admin', 'user']);
       if (!auth.ok) {
         return res.status(auth.status).json({ error: auth.error ?? 'No autorizado' });
       }
@@ -315,21 +450,36 @@ export default async function kommoLeadsInsightsHandler(req: VercelRequest, res:
       });
     }
 
+    const cacheKey = buildInsightsCacheKey(startDate, endDate);
+    const cached = insightsCache.get(cacheKey);
+    if (cached && cached.expiresAt > Date.now()) {
+      return res.status(200).json(cached.payload);
+    }
+
     const [
       leads,
+      wonLeads,
       pipelines,
       statuses,
       unsortedLeads,
       users,
     ] = await Promise.all([
-      safeSelectPaginated<LeadRow>('kommo_leads', 'pipeline_id,status_id,price,is_deleted,closed_at,created_at,responsible_user_id'),
+      safeSelectPaginated<LeadRow>('kommo_leads', 'pipeline_id,status_id,price,is_deleted,closed_at,created_at,responsible_user_id', {
+        dateFilter: { column: 'created_at', startDate, endDate, widenByOneDay: true },
+      }),
+      safeSelectPaginated<LeadGanadoRow>('leads_ganados', 'fecha_lead_ganado,vendedor_nombre_snapshot,pipeline_id_snapshot,kommo_lead_id', {
+        dateFilter: { column: 'fecha_lead_ganado', startDate, endDate },
+      }),
       safeSelectPaginated<PipelineRow>('kommo_pipelines', 'business_id,name'),
       safeSelectPaginated<PipelineStatusRow>('kommo_pipeline_statuses', 'business_id,pipeline_id,name,type'),
-      safeSelectPaginated<UnsortedLeadRow>('kommo_unsorted_leads', 'created_at'),
+      safeSelectPaginated<UnsortedLeadRow>('kommo_unsorted_leads', 'created_at', {
+        dateFilter: { column: 'created_at', startDate, endDate, widenByOneDay: true },
+      }),
       safeSelectPaginated<UserRow>('kommo_users', 'business_id,name'),
     ]);
 
     const filteredLeads = leads.filter((lead) => isDateWithinRange(lead.created_at, startDate, endDate));
+    const filteredWonLeads = wonLeads.filter((lead) => isComparableDateWithinRange(lead.fecha_lead_ganado, startDate, endDate));
     const filteredUnsortedLeads = unsortedLeads.filter((lead) => isDateWithinRange(lead.created_at, startDate, endDate));
 
     const pipelineNameById = new Map<number, string>();
@@ -356,21 +506,23 @@ export default async function kommoLeadsInsightsHandler(req: VercelRequest, res:
 
     let totalDeleted = 0;
     let totalClosed = 0;
-    let totalWon = 0;
     let totalLost = 0;
     let orphanPipelineLeads = 0;
     const validPrices: number[] = [];
+    const totalIncoming = filteredUnsortedLeads.length;
 
-    const pipelinePerformanceMap = new Map<string, {
+    const createdPipelineStateMap = new Map<string, {
+      group_key: string;
       pipeline_id: number | null;
       pipeline_name: string;
       total_leads: number;
       open_leads: number;
       closed_leads: number;
-      won_leads: number;
       lost_leads: number;
       prices: number[];
     }>();
+    const wonPipelineMap = new Map<string, WonPipelineInsight>();
+    const wonSellerMap = new Map<string, WonSellerInsight>();
 
     for (const lead of filteredLeads) {
       const pipelineId = typeof lead.pipeline_id === 'number' ? lead.pipeline_id : null;
@@ -425,20 +577,19 @@ export default async function kommoLeadsInsightsHandler(req: VercelRequest, res:
       const isWon = statusType === 1 || isLikelyWonStatus(statusName);
       const isLost = statusType === 2 || isLikelyLostStatus(statusName);
       const isClosed = Boolean(lead.closed_at) || isWon || isLost;
-      const isOpen = !isClosed && !Boolean(lead.is_deleted);
+      const isOpen = !isClosed && !lead.is_deleted;
 
       if (isClosed) totalClosed += 1;
-      if (isWon) totalWon += 1;
       if (isLost) totalLost += 1;
 
-      const performanceKey = String(pipelineId ?? 'null');
-      const pipelinePerformance = pipelinePerformanceMap.get(performanceKey) ?? {
+      const performanceKey = buildPerformanceGroupKey(pipelineId, pipelineName);
+      const pipelinePerformance = createdPipelineStateMap.get(performanceKey) ?? {
+        group_key: performanceKey,
         pipeline_id: pipelineId,
         pipeline_name: pipelineName,
         total_leads: 0,
         open_leads: 0,
         closed_leads: 0,
-        won_leads: 0,
         lost_leads: 0,
         prices: [],
       };
@@ -446,7 +597,6 @@ export default async function kommoLeadsInsightsHandler(req: VercelRequest, res:
       pipelinePerformance.total_leads += 1;
       if (isOpen) pipelinePerformance.open_leads += 1;
       if (isClosed) pipelinePerformance.closed_leads += 1;
-      if (isWon) pipelinePerformance.won_leads += 1;
       if (isLost) pipelinePerformance.lost_leads += 1;
 
       if (typeof lead.price === 'number' && Number.isFinite(lead.price) && lead.price > 0) {
@@ -454,7 +604,35 @@ export default async function kommoLeadsInsightsHandler(req: VercelRequest, res:
         pipelinePerformance.prices.push(lead.price);
       }
 
-      pipelinePerformanceMap.set(performanceKey, pipelinePerformance);
+      createdPipelineStateMap.set(performanceKey, pipelinePerformance);
+    }
+
+    for (const wonLead of filteredWonLeads) {
+      const pipelineId = typeof wonLead.pipeline_id_snapshot === 'number' ? wonLead.pipeline_id_snapshot : null;
+      const pipelineName = pipelineId !== null
+        ? (pipelineNameById.get(pipelineId) || `Pipeline ${pipelineId}`)
+        : 'Sin pipeline';
+      const sellerName = typeof wonLead.vendedor_nombre_snapshot === 'string' && wonLead.vendedor_nombre_snapshot.trim()
+        ? wonLead.vendedor_nombre_snapshot.trim()
+        : 'Sin vendedor snapshot';
+
+      const pipelineKey = buildPerformanceGroupKey(pipelineId, pipelineName);
+      const pipelinePerformance = wonPipelineMap.get(pipelineKey) ?? {
+        pipeline_id: pipelineId,
+        pipeline_name: pipelineName,
+        total_won: 0,
+      };
+
+      pipelinePerformance.total_won += 1;
+      wonPipelineMap.set(pipelineKey, pipelinePerformance);
+
+      const sellerPerformance = wonSellerMap.get(sellerName) ?? {
+        seller_name: sellerName,
+        total_won: 0,
+      };
+
+      sellerPerformance.total_won += 1;
+      wonSellerMap.set(sellerName, sellerPerformance);
     }
 
     const hourlyCounter = new Map<number, number>();
@@ -487,18 +665,20 @@ export default async function kommoLeadsInsightsHandler(req: VercelRequest, res:
     }
     const statusesByNameResult = Array.from(statusesByNameMap.values()).sort((a, b) => b.total_leads - a.total_leads);
     const ownersResult = Array.from(ownerCounter.values()).sort((a, b) => b.total_leads - a.total_leads);
-    const pipelinePerformanceResult = Array.from(pipelinePerformanceMap.values())
+    const createdPipelineStateResult = Array.from(createdPipelineStateMap.values())
       .map((entry) => ({
+        group_key: entry.group_key,
         pipeline_id: entry.pipeline_id,
         pipeline_name: entry.pipeline_name,
         total_leads: entry.total_leads,
         open_leads: entry.open_leads,
         closed_leads: entry.closed_leads,
-        won_leads: entry.won_leads,
         lost_leads: entry.lost_leads,
         avg_price: toNumericAverage(entry.prices),
       }))
-      .sort((a, b) => b.total_leads - a.total_leads);
+      .sort((a, b) => (b.total_leads - a.total_leads) || (b.closed_leads - a.closed_leads));
+    const wonPipelineResult = Array.from(wonPipelineMap.values()).sort((a, b) => b.total_won - a.total_won);
+    const wonSellerResult = Array.from(wonSellerMap.values()).sort((a, b) => b.total_won - a.total_won);
     const hourlyIncomingResult: HourlyIncomingInsight[] = Array.from(hourlyCounter.entries())
       .map(([hour, totalIncoming]) => ({ hour, total_incoming: totalIncoming }))
       .sort((a, b) => a.hour - b.hour);
@@ -517,74 +697,103 @@ export default async function kommoLeadsInsightsHandler(req: VercelRequest, res:
       }
       : null;
     const topOwner = ownersResult[0] ?? null;
-    const wonRateOverClosed = totalClosed > 0 ? Number(((totalWon / totalClosed) * 100).toFixed(2)) : null;
+    const totalWon = filteredWonLeads.length;
+    const topWonPipeline = wonPipelineResult[0] ?? null;
+    const topWonSeller = wonSellerResult[0] ?? null;
 
     const response: LeadsInsightsResponse = {
-      pipelines: pipelinesResult,
-      statuses: statusesResult,
-      statusesByName: statusesByNameResult,
-      hourlyIncoming: hourlyIncomingResult,
-      owners: ownersResult,
       filters: {
         start_date: startDate,
         end_date: endDate,
       },
-      pipelinePerformance: pipelinePerformanceResult,
-      summary: {
-        total_leads: totalLeads,
-        total_open: totalOpen,
-        total_closed: totalClosed,
-        total_won: totalWon,
-        total_lost: totalLost,
-        total_deleted: totalDeleted,
-        avg_price: avgPrice,
-        top_pipeline: topPipeline,
+      created: {
+        summary: {
+          total_leads: totalLeads,
+          total_open: totalOpen,
+          total_closed: totalClosed,
+          total_lost: totalLost,
+          total_deleted: totalDeleted,
+          total_incoming: totalIncoming,
+          avg_price: avgPrice,
+          top_pipeline: topPipeline,
+          top_owner: topOwner,
+        },
+        pipeline_volume: pipelinesResult,
+        owner_volume: ownersResult,
+        status_volume: statusesResult,
+        status_volume_by_name: statusesByNameResult,
+        pipeline_current_state: createdPipelineStateResult,
+        hourly_incoming: hourlyIncomingResult,
+        insights: {
+          busiest_hour: busiestHour,
+          top_status: topStatus,
+          orphan_pipeline_leads: orphanPipelineLeads,
+        },
       },
-      insights: {
-        busiest_hour: busiestHour,
-        top_status: topStatus,
-        won_rate_over_closed: wonRateOverClosed,
-        orphan_pipeline_leads: orphanPipelineLeads,
-        top_owner: topOwner,
+      won: {
+        summary: {
+          total_won: totalWon,
+          top_pipeline: topWonPipeline,
+          top_seller: topWonSeller,
+        },
+        pipelines: wonPipelineResult,
+        sellers: wonSellerResult,
       },
     };
 
-    return res.status(200).json({
+    const successPayload = {
       success: true,
       timezone: 'America/Lima',
       ...response,
+    };
+
+    insightsCache.set(cacheKey, {
+      expiresAt: Date.now() + INSIGHTS_CACHE_TTL_MS,
+      payload: successPayload,
     });
+
+    return res.status(200).json(successPayload);
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : 'Error interno del servidor';
     return res.status(500).json({
       success: false,
       error: message,
-      pipelines: [],
-      statuses: [],
-      statusesByName: [],
-      hourlyIncoming: [],
-      owners: [],
       filters: {
         start_date: null,
         end_date: null,
       },
-      pipelinePerformance: [],
-      summary: {
-        total_leads: 0,
-        total_open: 0,
-        total_closed: 0,
-        total_won: 0,
-        total_lost: 0,
-        total_deleted: 0,
-        avg_price: null,
-        top_pipeline: null,
+      created: {
+        summary: {
+          total_leads: 0,
+          total_open: 0,
+          total_closed: 0,
+          total_lost: 0,
+          total_deleted: 0,
+          total_incoming: 0,
+          avg_price: null,
+          top_pipeline: null,
+          top_owner: null,
+        },
+        pipeline_volume: [],
+        owner_volume: [],
+        status_volume: [],
+        status_volume_by_name: [],
+        pipeline_current_state: [],
+        hourly_incoming: [],
+        insights: {
+          busiest_hour: null,
+          top_status: null,
+          orphan_pipeline_leads: 0,
+        },
       },
-      insights: {
-        busiest_hour: null,
-        top_status: null,
-        won_rate_over_closed: null,
-        orphan_pipeline_leads: 0,
-        top_owner: null,
+      won: {
+        summary: {
+          total_won: 0,
+          top_pipeline: null,
+          top_seller: null,
+        },
+        pipelines: [],
+        sellers: [],
       },
     });
   }

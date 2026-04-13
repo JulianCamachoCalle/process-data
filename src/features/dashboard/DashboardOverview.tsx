@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
-import { Activity, AlertCircle, ChartColumnBig } from 'lucide-react';
+import { Activity, AlertCircle, Filter } from 'lucide-react';
+import { DateRangePicker } from '../../components/DateRangePicker';
 import { useSheetData } from '../../hooks/useSheetData';
 import { formatCurrencyPen, formatNumberEs, normalizeText, parseDateValue, parseNumericValue } from '../../lib/tableHelpers';
 
@@ -57,26 +58,33 @@ function safeDivide(numerator: number, denominator: number) {
   return numerator / denominator;
 }
 
-// Función para encontrar el valor más frecuente en un array de strings, ignorando mayúsculas, espacios y caracteres especiales. Devuelve una cadena vacía si no hay valores válidos.
-function getMostFrequent(values: string[]) {
-  const count = new Map<string, number>();
+function getMostFrequentNormalized(values: string[]) {
+  const countByNormalized = new Map<string, number>();
+  const displayByNormalized = new Map<string, string>();
 
-  for (const value of values) {
-    const key = value.trim();
-    if (!key) continue;
-    count.set(key, (count.get(key) ?? 0) + 1);
-  }
+  for (const raw of values) {
+    const value = String(raw ?? '').trim();
+    if (!value) continue;
 
-  let winner = '';
-  let winnerCount = 0;
-  for (const [value, currentCount] of count) {
-    if (currentCount > winnerCount) {
-      winner = value;
-      winnerCount = currentCount;
+    const normalized = normalizeText(value);
+    if (!normalized) continue;
+
+    countByNormalized.set(normalized, (countByNormalized.get(normalized) ?? 0) + 1);
+    if (!displayByNormalized.has(normalized)) {
+      displayByNormalized.set(normalized, value);
     }
   }
 
-  return winner;
+  let winnerNormalized = '';
+  let winnerCount = 0;
+  for (const [normalized, count] of countByNormalized.entries()) {
+    if (count > winnerCount) {
+      winnerNormalized = normalized;
+      winnerCount = count;
+    }
+  }
+
+  return winnerNormalized ? displayByNormalized.get(winnerNormalized) ?? '' : '';
 }
 
 // Función para encontrar el ID de negocio de tipo de recojo basado en etiquetas candidatas, buscando en las filas de la hoja de "TIPO DE RECOJO". Devuelve null si no encuentra una coincidencia o si no puede determinar las columnas relevantes.
@@ -128,9 +136,9 @@ export function DashboardOverview() {
     const leadsRows = (leadsQuery.data?.rows ?? []) as Row[];
     const tipoRecojoRows = (tipoRecojoQuery.data?.rows ?? []) as Row[];
 
-    const enviosDateColumn = getColumnByCandidates(enviosColumns, ['Mes', 'mes', 'Fecha', 'Fecha de envio', 'Fecha envío']);
-    const recojosDateColumn = getColumnByCandidates(recojosColumns, ['Mes', 'mes', 'Fecha', 'Fecha de recojo']);
-    const leadsDateColumn = getColumnByCandidates(leadsColumns, ['Fecha Lead Ganado', 'fecha_lead_ganado', 'Fecha registro lead']);
+    const enviosDateColumn = getColumnByCandidates(enviosColumns, ['Fecha envio', 'Fecha envío', 'fecha_envio', 'Mes', 'mes', 'Fecha']);
+    const recojosDateColumn = getColumnByCandidates(recojosColumns, ['Fecha', 'fecha', 'Fecha de recojo', 'Mes', 'mes']);
+    const leadsDateColumn = getColumnByCandidates(leadsColumns, ['Fecha Lead Ganado', 'fecha_lead_ganado']);
 
     const enviosInRange = filterRowsByRange(enviosRows, enviosDateColumn, dateFrom, dateTo);
     const recojosInRange = filterRowsByRange(recojosRows, recojosDateColumn, dateFrom, dateTo);
@@ -149,7 +157,8 @@ export function DashboardOverview() {
       leadsInRange.map((row) => normalizeText(getStringValue(row, tiendaLeadCol))).filter(Boolean),
     ).size;
 
-    const leadsGanados = leadsInRange.length;
+    const leadsGanados = leadsRows.length;
+    const leadsGanadosDelPeriodo = leadsInRange.length;
 
     const enviosTotales = enviosInRange.length;
     const promedioTE = safeDivide(enviosTotales, tiendasRegistradas);
@@ -175,14 +184,14 @@ export function DashboardOverview() {
 
     const margenTotalOperativo = ingresoTotalOperativo - costoTotalOperativo;
     const ticketPromedioMes = safeDivide(ingresoTotalOperativo, enviosTotales);
-    const costoOperativoPorLeadGanado = safeDivide(costoTotalOperativo, leadsGanados);
-    const ingresoPorLeadGanado = safeDivide(ingresoTotalOperativo, leadsGanados);
+    const costoOperativoPorLeadGanado = safeDivide(costoTotalOperativo, leadsGanadosDelPeriodo);
+    const ingresoPorLeadGanado = safeDivide(ingresoTotalOperativo, leadsGanadosDelPeriodo);
 
     const recojoCobradoId = findTipoRecojoBusinessId(tipoRecojoRows, ['cobrado', 'recojo cobrado']) ?? 1;
     const recojoGratisId = findTipoRecojoBusinessId(tipoRecojoRows, ['gratis', 'recojo gratis']) ?? 2;
 
     const idTipoRecojoColumn = getColumnByCandidates(recojosColumns, ['idTipoRecojo', 'id tipo recojo']);
-    const tipoRecojoColumn = getColumnByCandidates(recojosColumns, ['Tipo de Recojo', 'tipo de recojo']);
+    const tipoRecojoColumn = getColumnByCandidates(recojosColumns, ['Tipo de cobro', 'tipo de cobro', 'Tipo de Recojo', 'tipo de recojo']);
     const vecesRecojoColumn = getColumnByCandidates(recojosColumns, ['Veces', 'veces']);
 
     const recojoRowsByType = recojosInRange.map((row) => {
@@ -210,7 +219,9 @@ export function DashboardOverview() {
       0,
     );
 
-    const distritoLeadGanadoFrecuente = getMostFrequent(leadsInRange.map((row) => getStringValue(row, distritoLeadCol)).filter(Boolean));
+    const distritoLeadGanadoFrecuente = getMostFrequentNormalized(
+      leadsInRange.map((row) => getStringValue(row, distritoLeadCol)).filter(Boolean),
+    );
 
     return {
       periodo: dateFrom || dateTo ? `${dateFrom || '...'} → ${dateTo || '...'}` : 'Sin filtro (todo el periodo)',
@@ -259,49 +270,40 @@ export function DashboardOverview() {
   }
 
   return (
-    <div className="space-y-6">
-      <div className="rounded-2xl border border-gray-200 bg-white/90 shadow-[0_24px_44px_-30px_rgba(15,23,42,0.65)] px-6 py-5 backdrop-blur-sm flex items-center justify-between gap-4 flex-wrap">
+    <div className="space-y-4">
+      <div className="rounded-2xl border border-gray-200 bg-white/90 shadow-[0_24px_44px_-30px_rgba(15,23,42,0.65)] px-4 py-5 backdrop-blur-sm flex items-center justify-between gap-4 flex-wrap">
         <div>
-          <h1 className="text-2xl font-extrabold text-gray-900 inline-flex items-center gap-2">
+          <h1 className="text-2xl font-extrabold text-gray-900 uppercase tracking-[0.10em] inline-flex items-center gap-2">
             <Activity className="text-red-600" size={24} />
             Resumen General
           </h1>
-          <p className="text-sm text-gray-500 mt-1">KPI del periodo y métricas operativas.</p>
-        </div>
-        <div className="hidden md:inline-flex items-center gap-2 rounded-full border border-red-200 bg-red-50 px-3 py-1 text-xs font-semibold text-red-700">
-          <ChartColumnBig size={14} />
-          Vista ejecutiva
+          <p className="text-xs text-gray-500 font-semibold uppercase tracking-[0.10em] mt-1 italic">KPI del periodo y métricas operativas.</p>
         </div>
       </div>
 
       <div className="rounded-2xl border border-gray-200 bg-white p-4">
-        <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Filtro de periodo</p>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 items-end">
-          <label className="text-sm text-gray-600">
-            Fecha inicio
-            <input
-              type="date"
-              value={dateFrom}
-              onChange={(event) => setDateFrom(event.target.value)}
-              className="mt-1 w-full rounded-xl border border-gray-300 px-3 py-2"
-            />
-          </label>
-          <label className="text-sm text-gray-600">
-            Fecha fin
-            <input
-              type="date"
-              value={dateTo}
-              onChange={(event) => setDateTo(event.target.value)}
-              className="mt-1 w-full rounded-xl border border-gray-300 px-3 py-2"
-            />
-          </label>
-          <div className="text-sm text-gray-500">Periodo: <span className="font-semibold text-gray-800">{metrics.periodo}</span></div>
+        <p className="inline-flex items-center gap-2 text-xs font-semibold text-gray-500 uppercase tracking-[0.22em]">
+          <Filter size={14} />
+          Filtros
+        </p>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 items-end mt-2">
+          <DateRangePicker
+            startDate={dateFrom}
+            endDate={dateTo}
+            onStartDateChange={setDateFrom}
+            onEndDateChange={setDateTo}
+            className="md:col-span-2"
+            layoutClassName="grid-cols-1 gap-3 md:grid-cols-2"
+            fieldClassName="rounded-none border-0 bg-transparent px-0 py-0 text-xs font-semibold uppercase tracking-[0.22em] text-gray-500 shadow-none"
+            labelClassName="text-xs font-semibold uppercase tracking-[0.22em] text-gray-500"
+            inputWrapperClassName="mt-1 rounded-xl border border-gray-300 px-3 py-2"
+            inputClassName="text-sm"
+          />
         </div>
       </div>
 
       <Section title="KPIS DEL PERIODO">
         <KpiGrid>
-          <KpiCard title="Tiendas Registradas" value={formatNumberEs(metrics.tiendasRegistradas)} />
           <KpiCard title="Leads Ganados" value={formatNumberEs(metrics.leadsGanados)} />
           <KpiCard title="Envíos Totales" value={formatNumberEs(metrics.enviosTotales)} />
           <KpiCard title="Promedio T. E." value={formatNumberEs(metrics.promedioTE)} />
@@ -339,7 +341,7 @@ export function DashboardOverview() {
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <div className="space-y-3">
-      <h2 className="text-sm font-extrabold tracking-wide text-gray-700 uppercase">{title}</h2>
+      <h2 className="text-xs font-bold text-gray-700 uppercase tracking-[0.22em]">{title}</h2>
       {children}
     </div>
   );
@@ -354,7 +356,7 @@ function KpiGrid({ children }: { children: React.ReactNode }) {
 function KpiCard({ title, value }: { title: string; value: string }) {
   return (
     <div className="bg-white p-4 rounded-2xl shadow-[0_20px_42px_-34px_rgba(15,23,42,0.9)] border border-gray-200">
-      <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">{title}</p>
+      <p className="text-xs font-semibold text-gray-500 uppercase tracking-[0.22em]">{title}</p>
       <p className="text-2xl font-bold text-gray-900 mt-1">{value}</p>
     </div>
   );

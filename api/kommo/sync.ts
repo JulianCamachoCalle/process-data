@@ -1,5 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { createHash } from 'node:crypto';
+import { createHash, createHmac } from 'node:crypto';
 import {
   ensureFreshConnection,
   getActiveKommoConnection,
@@ -9,15 +9,53 @@ import {
   normalizeKommoBaseUrl,
   verifyAdminSession,
 } from './_shared.js';
+import { hydrateLeadGanadoDistritoByBusinessId, recalculateLeadGanadoCountersByBusinessId } from './leads-ganados-auto.js';
 
 const SYNC_SECRET_HEADER = 'x-kommo-sync-secret';
 const SYNC_SECRET_ENV = 'KOMMO_SYNC_SECRET';
 const STANDARD_CUSTOM_FIELD_ENTITY_TYPES = ['leads', 'contacts', 'companies'] as const;
 const CUSTOM_FIELD_ENTITY_TYPES = [...STANDARD_CUSTOM_FIELD_ENTITY_TYPES, 'catalogs'] as const;
 const LINK_ENTITY_TYPES = ['leads', 'contacts', 'companies'] as const;
+const CHAT_SCOPE_ENV = 'KOMMO_CHAT_SCOPE_ID';
+const CHAT_CHANNEL_SECRET_ENV = 'KOMMO_CHAT_CHANNEL_SECRET';
+const DEFAULT_CHAT_CONVERSATIONS_LIMIT = 20;
+const DEFAULT_CHAT_PAGE_SIZE = 50;
+const DEFAULT_CHAT_MAX_PAGES = 10;
+const DINSIDES_BASE_URL = 'https://dinsidescourier.com';
+const DINSIDES_LOGIN_VALIDATE_URL = `${DINSIDES_BASE_URL}/login/validar`;
+const DINSIDES_ENVIOS_URL = `${DINSIDES_BASE_URL}/Admin/getlistadoBuscadorActualiza`;
+const DINSIDES_CLIENTES_LOOKUP_URL = `${DINSIDES_BASE_URL}/admin/datosclientenombre`;
 type StandardCustomFieldEntityType = typeof STANDARD_CUSTOM_FIELD_ENTITY_TYPES[number];
 type CustomFieldEntityType = typeof CUSTOM_FIELD_ENTITY_TYPES[number];
 type LinkEntityType = typeof LINK_ENTITY_TYPES[number];
+
+type ChatSenderPayload = {
+  id?: string | null;
+  name?: string | null;
+};
+
+type ChatReceiverPayload = {
+  id?: string | null;
+  name?: string | null;
+};
+
+type ChatMessagePayload = {
+  id?: string | null;
+  type?: string | null;
+  text?: string | null;
+  media?: string | null;
+  thumbnail?: string | null;
+  file_name?: string | null;
+  file_size?: string | null;
+};
+
+type ChatHistoryItem = {
+  timestamp?: number | null;
+  msec_timestamp?: number | null;
+  sender?: ChatSenderPayload | null;
+  receiver?: ChatReceiverPayload | null;
+  message?: ChatMessagePayload | null;
+};
 
 // Todos los recursos disponibles en Kommo API v4
 // Algunos necesitan manejo especial (tags, custom_fields, links, notes) porque no siguen el patrón estándar de endpoints o necesitan parámetros adicionales.
@@ -127,6 +165,315 @@ function asArrayQueryParam(value: string | string[] | undefined) {
   if (value === undefined) return [];
   const values = Array.isArray(value) ? value : [value];
   return values.map((v) => v.trim()).filter(Boolean);
+}
+
+function getRequestSearchParams(req: VercelRequest) {
+  const hostHeader = req.headers.host;
+  const host = (Array.isArray(hostHeader) ? hostHeader[0] : hostHeader) || 'localhost';
+  const protoHeader = req.headers['x-forwarded-proto'];
+  const protoRaw = Array.isArray(protoHeader) ? protoHeader[0] : protoHeader;
+  const protocol = protoRaw?.split(',')[0]?.trim() || 'https';
+  const rawUrl = typeof req.url === 'string' && req.url.trim().length > 0 ? req.url : '/';
+
+  return new URL(rawUrl, `${protocol}://${host}`).searchParams;
+}
+
+function parseEnviosProbeLimit(value: string | undefined, fallback = 10, max = 2000) {
+  if (!value) return fallback;
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
+  return Math.min(parsed, max);
+}
+
+function parseNonNegativeInt(value: string | undefined, fallback = 0, max = 1_000_000) {
+  if (!value) return fallback;
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isFinite(parsed) || parsed < 0) return fallback;
+  return Math.min(parsed, max);
+}
+
+function extractSetCookieValuesFromResponse(response: Response) {
+  const headers = response.headers as Headers & { getSetCookie?: () => string[] };
+
+  if (typeof headers.getSetCookie === 'function') {
+    return headers.getSetCookie();
+  }
+
+  const fallback = response.headers.get('set-cookie');
+  if (!fallback) return [];
+  return fallback.split(/,(?=\s*[A-Za-z0-9_\-]+=)/g);
+}
+
+function toCookieHeader(rawSetCookieValues: string[]) {
+  return rawSetCookieValues
+    .map((item) => item.split(';')[0]?.trim())
+    .filter(Boolean)
+    .join('; ');
+}
+
+async function loginDinsidesAndGetCookieHeader() {
+  const tlf = process.env.DINSIDES_ADMIN_TLF?.trim();
+  const clave = process.env.DINSIDES_ADMIN_CLAVE?.trim();
+
+  if (!tlf || !clave) {
+    throw new Error('Faltan DINSIDES_ADMIN_TLF y/o DINSIDES_ADMIN_CLAVE en el entorno.');
+  }
+
+  const body = new URLSearchParams({ tlf, clave });
+
+  const loginResponse = await fetch(DINSIDES_LOGIN_VALIDATE_URL, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+      'X-Requested-With': 'XMLHttpRequest',
+      Origin: DINSIDES_BASE_URL,
+      Referer: `${DINSIDES_BASE_URL}/login`,
+    },
+    body: body.toString(),
+  });
+
+  const rawText = await loginResponse.text();
+
+  let loginRole: number | null = null;
+  try {
+    const parsed = JSON.parse(rawText) as unknown;
+    if (typeof parsed === 'number') {
+      loginRole = parsed;
+    }
+  } catch {
+    // noop
+  }
+
+  if (!loginResponse.ok || !loginRole || loginRole <= 0) {
+    throw new Error(`Login Dinsides inválido. status=${loginResponse.status}, body=${rawText.slice(0, 180)}`);
+  }
+
+  const setCookieValues = extractSetCookieValuesFromResponse(loginResponse);
+  const cookieHeader = toCookieHeader(setCookieValues);
+  if (!cookieHeader) {
+    throw new Error('Login exitoso pero no se recibió cookie de sesión.');
+  }
+
+  return { cookieHeader, loginRole };
+}
+
+async function fetchDinsidesEnviosRows(args: {
+  cookieHeader: string;
+  searchNegocio?: string;
+  searchTipo?: string;
+  searchTelefono?: string;
+  searchIdPedido?: string;
+}) {
+  const form = new URLSearchParams({
+    SearchIdPedido: args.searchIdPedido ?? '',
+    SearchBuscadorDate: '',
+    SearchTelefono: args.searchTelefono ?? '',
+    searchMotorizado: '',
+    searchNegocio: args.searchNegocio ?? '',
+    searchTipo: args.searchTipo ?? '',
+    selectEstadoPunto: '',
+    selectEstadoSeguimiento: '',
+  });
+
+  const response = await fetch(DINSIDES_ENVIOS_URL, {
+    method: 'POST',
+    headers: {
+      Cookie: args.cookieHeader,
+      'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+      'X-Requested-With': 'XMLHttpRequest',
+      Origin: DINSIDES_BASE_URL,
+      Referer: `${DINSIDES_BASE_URL}/admin/listado`,
+    },
+    body: form.toString(),
+  });
+
+  const rawText = await response.text();
+  if (!response.ok) {
+    throw new Error(`Error al leer envíos. status=${response.status}, body=${rawText.slice(0, 180)}`);
+  }
+
+  let payload: unknown;
+  try {
+    payload = JSON.parse(rawText);
+  } catch {
+    throw new Error(`La respuesta de envíos no es JSON válido: ${rawText.slice(0, 220)}`);
+  }
+
+  if (Array.isArray(payload)) {
+    return payload as Array<Record<string, unknown>>;
+  }
+
+  if (payload && typeof payload === 'object') {
+    const candidate = payload as Record<string, unknown>;
+    const possibleArrayKeys = ['data', 'rows', 'result', 'results', 'listado', 'aaData'];
+
+    for (const key of possibleArrayKeys) {
+      const value = candidate[key];
+      if (Array.isArray(value)) {
+        return value as Array<Record<string, unknown>>;
+      }
+    }
+
+      const keys = Object.keys(candidate).slice(0, 12);
+      throw new Error(`La respuesta de envíos llegó como objeto y no se encontró array en claves comunes. keys=${keys.join(',') || 'none'}`);
+    }
+
+  throw new Error('La respuesta de envíos no es un array ni objeto JSON reconocido.');
+}
+
+async function lookupDinsidesClientIds(args: { cookieHeader: string; businessName: string }) {
+  const form = new URLSearchParams({
+    datos: args.businessName,
+    super_admin: '0',
+  });
+
+  const response = await fetch(DINSIDES_CLIENTES_LOOKUP_URL, {
+    method: 'POST',
+    headers: {
+      Cookie: args.cookieHeader,
+      'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+      'X-Requested-With': 'XMLHttpRequest',
+      Origin: DINSIDES_BASE_URL,
+      Referer: `${DINSIDES_BASE_URL}/admin/clientes_new`,
+      Accept: 'text/html, */*; q=0.01',
+    },
+    body: form.toString(),
+  });
+
+  const rawText = await response.text();
+  if (!response.ok) {
+    return [] as string[];
+  }
+
+  const ids = new Set<string>();
+  const lines = rawText.split(/\r?\n/);
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    const match = trimmed.match(/^(\d{3,})\b/);
+    if (match?.[1]) {
+      ids.add(match[1]);
+    }
+  }
+
+  if (ids.size === 0) {
+    const fallbackMatches = rawText.match(/\b\d{4,}\b/g) ?? [];
+    for (const candidate of fallbackMatches) {
+      ids.add(candidate);
+      if (ids.size >= 10) break;
+    }
+  }
+
+  return Array.from(ids);
+}
+
+function normalizeBusinessName(value: unknown) {
+  if (typeof value !== 'string') return '';
+  return value.replace(/\s+/g, ' ').trim();
+}
+
+function removeDiacritics(value: string) {
+  return value.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+}
+
+function buildBusinessSearchVariants(name: string) {
+  const base = normalizeBusinessName(name);
+  if (!base) return [] as string[];
+
+  const variants = new Set<string>();
+  variants.add(base);
+  variants.add(base.toUpperCase());
+  variants.add(removeDiacritics(base));
+  variants.add(removeDiacritics(base).toUpperCase());
+  return Array.from(variants).filter((item) => item.trim().length > 0);
+}
+
+function buildDedupeKeyFromEnvioRow(row: Record<string, unknown>) {
+  const idPedido = row.id_pedido;
+  if (typeof idPedido === 'string' && idPedido.trim()) {
+    return `id_pedido:${idPedido.trim()}`;
+  }
+
+  const fallback = [
+    typeof row.nombre_negocio === 'string' ? row.nombre_negocio : '',
+    typeof row.nombre_destinataio === 'string' ? row.nombre_destinataio : '',
+    typeof row.fecha_pedido === 'string' ? row.fecha_pedido : '',
+  ].join('|');
+
+  return `fallback:${fallback}`;
+}
+
+function parseNumeric(value: unknown) {
+  const normalized = String(value ?? '').replace(',', '.').trim();
+  if (!normalized) return 0;
+  const parsed = Number.parseFloat(normalized);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function parseDateOnlyFromUnknown(value: unknown) {
+  const raw = String(value ?? '').trim();
+  if (!raw) return null;
+  const parsed = new Date(raw.replace(' ', 'T'));
+  if (Number.isNaN(parsed.getTime())) {
+    return raw.slice(0, 10) || null;
+  }
+  return parsed.toISOString().slice(0, 10);
+}
+
+function normalizeLookupKey(value: unknown) {
+  return removeDiacritics(String(value ?? '').trim().toLowerCase());
+}
+
+function mapByNormalizedLabel<T extends { business_id?: unknown }>(
+  rows: T[],
+  getLabel: (row: T) => unknown,
+) {
+  const map = new Map<string, number>();
+  for (const row of rows) {
+    const key = normalizeLookupKey(getLabel(row));
+    const id = Number(row.business_id ?? 0);
+    if (!key || !Number.isFinite(id) || id <= 0) continue;
+    if (!map.has(key)) {
+      map.set(key, id);
+    }
+  }
+  return map;
+}
+
+async function getDistinctBusinessNamesFromLeads(args: {
+  supabase: ReturnType<typeof getSupabaseAdminClient>;
+  limitBusinesses: number;
+  sampleRows: number;
+}) {
+  const { data, error } = await args.supabase
+    .from('leads_ganados' as never)
+    .select('tienda_nombre_snapshot' as never)
+    .not('tienda_nombre_snapshot' as never, 'is' as never, null as never)
+    .neq('tienda_nombre_snapshot' as never, '' as never)
+    .not('tienda_nombre_snapshot' as never, 'ilike' as never, 'Lead #%' as never)
+    .not('tienda_nombre_snapshot' as never, 'ilike' as never, 'Lead sin nombre' as never)
+    .limit(args.sampleRows);
+
+  if (error) {
+    throw new Error(`No se pudieron leer nombres de negocio desde leads_ganados: ${error.message}`);
+  }
+
+  const rows = (data ?? []) as Array<{ tienda_nombre_snapshot?: unknown }>;
+  const dedupe = new Map<string, string>();
+
+  for (const row of rows) {
+    const normalized = normalizeBusinessName(row.tienda_nombre_snapshot);
+    if (!normalized) continue;
+    if (/^lead\s*#\s*\d+/i.test(normalized)) continue;
+    if (/^lead\s+sin\s+nombre$/i.test(normalized)) continue;
+
+    const key = normalized.toLocaleLowerCase('es');
+    if (!dedupe.has(key)) {
+      dedupe.set(key, normalized);
+    }
+  }
+
+  return Array.from(dedupe.values()).slice(0, args.limitBusinesses);
 }
 
 function getNestedQueryValue(
@@ -365,6 +712,401 @@ function getTaskDedupeVersion(item: Record<string, unknown>) {
 
   const stableSeed = JSON.stringify(item);
   return createHash('sha256').update(stableSeed).digest('hex');
+}
+
+function parseBoundedInteger(raw: string | undefined, fallback: number, min: number, max: number) {
+  if (!raw) return fallback;
+
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed)) return fallback;
+
+  return Math.max(min, Math.min(max, Math.trunc(parsed)));
+}
+
+function getRfc2822UtcDate() {
+  return new Date().toUTCString().replace('GMT', '+0000');
+}
+
+function buildContentMd5(body: string) {
+  return createHash('md5').update(body, 'utf8').digest('hex').toLowerCase();
+}
+
+function buildKommoChatSignature(args: {
+  method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
+  date: string;
+  contentType: string;
+  contentMd5: string;
+  path: string;
+  channelSecret: string;
+}) {
+  const signingPayload = [
+    args.method.toUpperCase(),
+    args.date,
+    args.contentType,
+    args.contentMd5,
+    args.path,
+  ].join('\n');
+
+  return createHmac('sha1', args.channelSecret)
+    .update(signingPayload, 'utf8')
+    .digest('hex')
+    .toLowerCase();
+}
+
+function extractChatHistoryItems(payload: unknown): ChatHistoryItem[] {
+  if (Array.isArray(payload)) {
+    return payload as ChatHistoryItem[];
+  }
+
+  if (!payload || typeof payload !== 'object') {
+    return [];
+  }
+
+  const candidate = payload as Record<string, unknown>;
+  const directMessages = candidate.messages;
+  if (Array.isArray(directMessages)) {
+    return directMessages as ChatHistoryItem[];
+  }
+
+  const directItems = candidate.items;
+  if (Array.isArray(directItems)) {
+    return directItems as ChatHistoryItem[];
+  }
+
+  const embedded = candidate._embedded;
+  if (embedded && typeof embedded === 'object') {
+    const embeddedRecord = embedded as Record<string, unknown>;
+    const embeddedMessages = embeddedRecord.messages;
+    if (Array.isArray(embeddedMessages)) {
+      return embeddedMessages as ChatHistoryItem[];
+    }
+
+    const embeddedItems = embeddedRecord.items;
+    if (Array.isArray(embeddedItems)) {
+      return embeddedItems as ChatHistoryItem[];
+    }
+  }
+
+  return [];
+}
+
+function resolveChatMessageId(item: ChatHistoryItem) {
+  const messageId = String(item.message?.id ?? '').trim();
+  if (messageId) return messageId;
+
+  const msecTimestamp = Number(item.msec_timestamp ?? 0);
+  const secTimestamp = Number(item.timestamp ?? 0);
+  const senderId = String(item.sender?.id ?? '').trim();
+  const fallbackId = `${msecTimestamp || secTimestamp || Date.now()}-${senderId || 'unknown'}`;
+  return fallbackId;
+}
+
+function resolveChatMessageTimestampIso(item: ChatHistoryItem) {
+  const msecTimestamp = Number(item.msec_timestamp ?? 0);
+  if (Number.isFinite(msecTimestamp) && msecTimestamp > 0) {
+    return new Date(msecTimestamp).toISOString();
+  }
+
+  const secTimestamp = Number(item.timestamp ?? 0);
+  if (Number.isFinite(secTimestamp) && secTimestamp > 0) {
+    return new Date(secTimestamp * 1000).toISOString();
+  }
+
+  return null;
+}
+
+async function fetchChatHistoryPage(args: {
+  scopeId: string;
+  conversationId: string;
+  offset: number;
+  limit: number;
+  channelSecret: string;
+}) {
+  const path = `/v2/origin/custom/${encodeURIComponent(args.scopeId)}/chats/${encodeURIComponent(args.conversationId)}/history`;
+  const query = new URLSearchParams({
+    offset: String(args.offset),
+    limit: String(args.limit),
+  });
+
+  const url = `https://amojo.kommo.com${path}?${query.toString()}`;
+  const body = '';
+  const contentType = 'application/json';
+  const contentMd5 = buildContentMd5(body);
+  const date = getRfc2822UtcDate();
+  const signature = buildKommoChatSignature({
+    method: 'GET',
+    date,
+    contentType,
+    contentMd5,
+    path,
+    channelSecret: args.channelSecret,
+  });
+
+  const response = await fetch(url, {
+    method: 'GET',
+    headers: {
+      Date: date,
+      'Content-Type': contentType,
+      'Content-MD5': contentMd5,
+      'X-Signature': signature,
+      Accept: 'application/json',
+    },
+  });
+
+  const raw = await response.text();
+  let parsedPayload: unknown = {};
+  if (raw.trim()) {
+    try {
+      parsedPayload = JSON.parse(raw) as unknown;
+    } catch {
+      parsedPayload = { raw };
+    }
+  }
+
+  if (!response.ok) {
+    throw new Error(
+      `Kommo chat history error (${response.status}) para conversación ${args.conversationId}: ${raw || 'sin detalle'}`,
+    );
+  }
+
+  return extractChatHistoryItems(parsedPayload);
+}
+
+async function upsertChatMessages(args: {
+  supabase: ReturnType<typeof getSupabaseAdminClient>;
+  conversationId: string;
+  items: ChatHistoryItem[];
+}) {
+  if (args.items.length === 0) {
+    return 0;
+  }
+
+  const rows = args.items.map((item) => ({
+    conversation_id: args.conversationId,
+    message_id: resolveChatMessageId(item),
+    message_timestamp: resolveChatMessageTimestampIso(item),
+    sender_id: item.sender?.id ?? null,
+    sender_name: item.sender?.name ?? null,
+    receiver_id: item.receiver?.id ?? null,
+    receiver_name: item.receiver?.name ?? null,
+    message_type: item.message?.type ?? null,
+    message_text: item.message?.text ?? null,
+    media_url: item.message?.media ?? null,
+    thumbnail_url: item.message?.thumbnail ?? null,
+    file_name: item.message?.file_name ?? null,
+    file_size: item.message?.file_size ?? null,
+    raw_payload: item,
+    updated_at: new Date().toISOString(),
+  }));
+
+  const { error } = await args.supabase
+    .from('kommo_chat_messages' as never)
+    .upsert(rows as never, { onConflict: 'conversation_id,message_id' });
+
+  if (error) {
+    throw new Error(error.message || `No se pudo upsert chat messages para conversación ${args.conversationId}`);
+  }
+
+  return rows.length;
+}
+
+async function getChatConversationTargets(args: {
+  supabase: ReturnType<typeof getSupabaseAdminClient>;
+  limitConversations: number;
+  conversationId?: string;
+}) {
+  if (args.conversationId) {
+    return [args.conversationId];
+  }
+
+  const { data, error } = await args.supabase
+    .from('kommo_lead_conversations' as never)
+    .select('conversation_id')
+    .not('conversation_id', 'is', null)
+    .limit(args.limitConversations);
+
+  if (error) {
+    throw new Error(error.message || 'No se pudieron leer conversaciones para chat sync');
+  }
+
+  const ids = new Set<string>();
+  for (const row of (data ?? []) as Array<{ conversation_id: string | null }>) {
+    const value = String(row.conversation_id ?? '').trim();
+    if (value) ids.add(value);
+  }
+
+  return Array.from(ids);
+}
+
+async function getChatSyncOffset(
+  supabase: ReturnType<typeof getSupabaseAdminClient>,
+  conversationId: string,
+) {
+  const { data, error } = await supabase
+    .from('kommo_chat_sync_state' as never)
+    .select('last_offset')
+    .eq('conversation_id', conversationId)
+    .limit(1);
+
+  if (error) {
+    throw new Error(error.message || `No se pudo leer sync state de ${conversationId}`);
+  }
+
+  const row = ((data ?? []) as Array<{ last_offset: number | null }>)[0];
+  return Math.max(0, Number(row?.last_offset ?? 0) || 0);
+}
+
+async function upsertChatSyncState(args: {
+  supabase: ReturnType<typeof getSupabaseAdminClient>;
+  conversationId: string;
+  offset: number;
+  status: 'pending' | 'synced' | 'failed';
+  lastError: string | null;
+}) {
+  const { error } = await args.supabase
+    .from('kommo_chat_sync_state' as never)
+    .upsert(
+      {
+        conversation_id: args.conversationId,
+        last_offset: args.offset,
+        last_synced_at: args.status === 'failed' ? null : new Date().toISOString(),
+        sync_status: args.status,
+        last_error: args.lastError,
+        updated_at: new Date().toISOString(),
+      } as never,
+      { onConflict: 'conversation_id' },
+    );
+
+  if (error) {
+    throw new Error(error.message || `No se pudo actualizar sync state para conversación ${args.conversationId}`);
+  }
+}
+
+async function runChatHistorySyncMode(args: {
+  req: VercelRequest;
+  supabase: ReturnType<typeof getSupabaseAdminClient>;
+}) {
+  const scopeId = process.env[CHAT_SCOPE_ENV];
+  const channelSecret = process.env[CHAT_CHANNEL_SECRET_ENV];
+  if (!scopeId || !channelSecret) {
+    throw new Error(`Faltan variables ${CHAT_SCOPE_ENV} y/o ${CHAT_CHANNEL_SECRET_ENV}`);
+  }
+
+  const limitConversations = parseBoundedInteger(
+    asSingleQueryParam(args.req.query.limit_conversations),
+    DEFAULT_CHAT_CONVERSATIONS_LIMIT,
+    1,
+    200,
+  );
+  const pageSize = parseBoundedInteger(
+    asSingleQueryParam(args.req.query.page_size),
+    DEFAULT_CHAT_PAGE_SIZE,
+    1,
+    50,
+  );
+  const maxPages = parseBoundedInteger(
+    asSingleQueryParam(args.req.query.max_pages),
+    DEFAULT_CHAT_MAX_PAGES,
+    1,
+    200,
+  );
+  const conversationId = asSingleQueryParam(args.req.query.conversation_id)?.trim() || undefined;
+
+  const targets = await getChatConversationTargets({
+    supabase: args.supabase,
+    limitConversations,
+    conversationId,
+  });
+
+  if (targets.length === 0) {
+    return {
+      success: true,
+      skipped: true,
+      reason: 'No hay conversation_id objetivo para sincronizar',
+      processedConversations: 0,
+      insertedMessages: 0,
+      failures: [] as Array<{ conversationId: string; error: string }>,
+      totalTargets: 0,
+      limitConversations,
+      pageSize,
+      maxPages,
+    };
+  }
+
+  let processedConversations = 0;
+  let insertedMessages = 0;
+  const failures: Array<{ conversationId: string; error: string }> = [];
+
+  for (const targetConversationId of targets) {
+    let offset = 0;
+
+    try {
+      offset = await getChatSyncOffset(args.supabase, targetConversationId);
+      let pagesProcessed = 0;
+
+      while (pagesProcessed < maxPages) {
+        const items = await fetchChatHistoryPage({
+          scopeId,
+          conversationId: targetConversationId,
+          offset,
+          limit: pageSize,
+          channelSecret,
+        });
+
+        if (items.length === 0) {
+          break;
+        }
+
+        insertedMessages += await upsertChatMessages({
+          supabase: args.supabase,
+          conversationId: targetConversationId,
+          items,
+        });
+
+        offset += items.length;
+        pagesProcessed += 1;
+
+        if (items.length < pageSize) {
+          break;
+        }
+      }
+
+      await upsertChatSyncState({
+        supabase: args.supabase,
+        conversationId: targetConversationId,
+        offset,
+        status: 'synced',
+        lastError: null,
+      });
+
+      processedConversations += 1;
+    } catch (conversationError: unknown) {
+      const message = conversationError instanceof Error ? conversationError.message : 'Error desconocido';
+      failures.push({ conversationId: targetConversationId, error: message });
+
+      await upsertChatSyncState({
+        supabase: args.supabase,
+        conversationId: targetConversationId,
+        offset,
+        status: 'failed',
+        lastError: message,
+      }).catch(() => {
+        // no-op
+      });
+    }
+  }
+
+  return {
+    success: failures.length === 0,
+    skipped: false,
+    processedConversations,
+    insertedMessages,
+    failures,
+    totalTargets: targets.length,
+    limitConversations,
+    pageSize,
+    maxPages,
+  };
 }
 
 // Dado un array de eventos a insertar, los inserta en la tabla kommo_webhook_events y evita los errores por duplicados. Si hay un error, divide el batch y reintenta para aislar filas problemáticas.
@@ -854,6 +1596,10 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
     return res.status(405).json({ error: 'Método no permitido' });
   }
 
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Expires', '0');
+
   try {
     const secretAuthorized = isSecretAuthorized(req, SYNC_SECRET_ENV, SYNC_SECRET_HEADER);
     const cronAuthorized = isVercelCronAuthorized(req);
@@ -862,6 +1608,946 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
       if (!auth.ok) {
         return res.status(auth.status).json({ error: auth.error ?? 'No autorizado' });
       }
+    }
+
+    const searchParams = getRequestSearchParams(req);
+    const mode = searchParams.get('mode')?.trim();
+    if (mode === 'dinsides_envios_probe') {
+      const limit = parseEnviosProbeLimit(searchParams.get('limit') ?? undefined, 10, 2000);
+      const searchNegocio = searchParams.get('search_negocio')?.trim();
+      const searchTelefono = searchParams.get('search_telefono')?.trim();
+      const searchIdPedido = searchParams.get('search_id_pedido')?.trim();
+      const { cookieHeader, loginRole } = await loginDinsidesAndGetCookieHeader();
+      const rows = await fetchDinsidesEnviosRows({
+        cookieHeader,
+        searchNegocio,
+        searchTelefono,
+        searchIdPedido,
+      });
+
+      return res.status(200).json({
+        success: true,
+        mode,
+        source: 'dinsidescourier.com/Admin/getlistadoBuscadorActualiza',
+        login_role: loginRole,
+        filters: {
+          search_negocio: searchNegocio ?? '',
+          search_telefono: searchTelefono ?? '',
+          search_id_pedido: searchIdPedido ?? '',
+        },
+        total_rows: rows.length,
+        returned_rows: Math.min(rows.length, limit),
+        rows: rows.slice(0, limit),
+      });
+    }
+
+    if (mode === 'dinsides_envios_sync_from_leads') {
+      const limitBusinesses = parseEnviosProbeLimit(searchParams.get('limit_businesses') ?? undefined, 30, 300);
+      const limitRows = parseEnviosProbeLimit(searchParams.get('limit_rows') ?? undefined, 1000, 10000);
+      const sampleRows = parseEnviosProbeLimit(searchParams.get('sample_rows') ?? undefined, 1200, 10000);
+      const offsetRows = parseNonNegativeInt(searchParams.get('offset_rows') ?? undefined, 0, 1_000_000);
+      const singleBusiness = searchParams.get('search_negocio')?.trim();
+      const singleSearchTipo = searchParams.get('search_tipo')?.trim();
+      const debug = ['1', 'true', 'yes'].includes((searchParams.get('debug') ?? '').toLowerCase());
+
+      const supabase = getSupabaseAdminClient();
+      const businessNames = singleBusiness
+        ? [singleBusiness]
+        : await getDistinctBusinessNamesFromLeads({
+          supabase,
+          limitBusinesses,
+          sampleRows,
+        });
+
+      const { cookieHeader } = await loginDinsidesAndGetCookieHeader();
+
+      const dedupe = new Map<string, Record<string, unknown>>();
+      const diagnostics = {
+        businesses_total: businessNames.length,
+        businesses_with_rows: 0,
+        attempts: 0,
+        errors: [] as string[],
+        tried_businesses: [] as Array<{ name: string; variants: string[]; rows: number }>,
+      };
+
+      const targetCollectionSize = offsetRows + limitRows;
+
+      for (const businessName of businessNames) {
+        const variants = buildBusinessSearchVariants(businessName);
+        let matchedAny = false;
+        let rowsForBusiness = 0;
+
+        try {
+          for (const variant of variants) {
+            diagnostics.attempts += 1;
+            const rows = await fetchDinsidesEnviosRows({
+              cookieHeader,
+              searchNegocio: variant,
+              searchTipo: singleSearchTipo,
+            });
+
+            rowsForBusiness += rows.length;
+            for (const row of rows) {
+              const key = buildDedupeKeyFromEnvioRow(row);
+              if (!dedupe.has(key)) {
+                dedupe.set(key, row);
+              }
+            }
+
+            if (rows.length > 0) {
+              matchedAny = true;
+              break;
+            }
+          }
+
+          if (!matchedAny) {
+            const clientIds = await lookupDinsidesClientIds({
+              cookieHeader,
+              businessName,
+            });
+
+            for (const clientId of clientIds) {
+              const attempts = [
+                { searchNegocio: clientId, searchTipo: '' },
+                { searchNegocio: '', searchTipo: clientId },
+                { searchNegocio: clientId, searchTipo: clientId },
+              ];
+
+              let foundForClient = false;
+              for (const attempt of attempts) {
+                diagnostics.attempts += 1;
+                const rows = await fetchDinsidesEnviosRows({
+                  cookieHeader,
+                  searchNegocio: attempt.searchNegocio,
+                  searchTipo: attempt.searchTipo,
+                });
+
+                rowsForBusiness += rows.length;
+                for (const row of rows) {
+                  const key = buildDedupeKeyFromEnvioRow(row);
+                  if (!dedupe.has(key)) {
+                    dedupe.set(key, row);
+                  }
+                }
+
+                if (rows.length > 0) {
+                  foundForClient = true;
+                  matchedAny = true;
+                  break;
+                }
+              }
+
+              if (foundForClient) {
+                break;
+              }
+            }
+          }
+        } catch (error: unknown) {
+          if (diagnostics.errors.length < 25) {
+            const message = error instanceof Error ? error.message : String(error);
+            diagnostics.errors.push(`${businessName}: ${message}`);
+          }
+        }
+
+        if (matchedAny) {
+          diagnostics.businesses_with_rows += 1;
+        }
+
+        if (debug && diagnostics.tried_businesses.length < 40) {
+          diagnostics.tried_businesses.push({
+            name: businessName,
+            variants,
+            rows: rowsForBusiness,
+          });
+        }
+
+        if (dedupe.size >= targetCollectionSize) {
+          break;
+        }
+      }
+
+      const finalRows = Array.from(dedupe.values()).slice(offsetRows, offsetRows + limitRows);
+
+      const persist = ['1', 'true', 'yes'].includes((searchParams.get('persist') ?? '').toLowerCase());
+      if (persist) {
+        const onlyRemaining = ['1', 'true', 'yes'].includes((searchParams.get('only_remaining') ?? '').toLowerCase());
+        const leadsResult = await supabase
+          .from('leads_ganados' as never)
+          .select('business_id,tienda_nombre_snapshot' as never)
+          .not('tienda_nombre_snapshot' as never, 'is' as never, null as never)
+          .neq('tienda_nombre_snapshot' as never, '' as never)
+          .limit(10000);
+
+        if (leadsResult.error) {
+          throw new Error(`No se pudieron leer leads_ganados para persistir envíos: ${leadsResult.error.message}`);
+        }
+
+        const destinosResult = await supabase
+          .from('destinos' as never)
+          .select('business_id,destino' as never)
+          .limit(1000);
+
+        if (destinosResult.error) {
+          throw new Error(`No se pudieron leer destinos para persistir envíos: ${destinosResult.error.message}`);
+        }
+
+        const resultadosResult = await supabase
+          .from('resultados' as never)
+          .select('business_id,resultado' as never)
+          .limit(1000);
+
+        if (resultadosResult.error) {
+          throw new Error(`No se pudieron leer resultados para persistir envíos: ${resultadosResult.error.message}`);
+        }
+
+        const tarifasResult = await supabase
+          .from('tarifas' as never)
+          .select('id_destino,cobro_entrega,pago_moto' as never)
+          .limit(5000);
+
+        if (tarifasResult.error) {
+          throw new Error(`No se pudieron leer tarifas para persistir envíos: ${tarifasResult.error.message}`);
+        }
+
+        const leadsRows = (leadsResult.data ?? []) as Array<{ business_id: number; tienda_nombre_snapshot: string | null }>;
+        const destinoRows = (destinosResult.data ?? []) as Array<{ business_id: number; destino: string | null }>;
+        const resultadoRows = (resultadosResult.data ?? []) as Array<{ business_id: number; resultado: string | null }>;
+        const tarifaRows = (tarifasResult.data ?? []) as Array<{ id_destino: number | null; cobro_entrega: number | null; pago_moto: number | null }>;
+
+        const leadByBusinessName = mapByNormalizedLabel(leadsRows, (row) => row.tienda_nombre_snapshot);
+        const destinoByName = mapByNormalizedLabel(destinoRows, (row) => row.destino);
+        const resultadoByName = mapByNormalizedLabel(resultadoRows, (row) => row.resultado);
+        const tarifaByDestinoId = new Map<number, { cobroEntrega: number; pagoMoto: number }>();
+        for (const tarifa of tarifaRows) {
+          const idDestino = Number(tarifa.id_destino ?? 0);
+          if (!Number.isFinite(idDestino) || idDestino <= 0) continue;
+          tarifaByDestinoId.set(idDestino, {
+            cobroEntrega: parseNumeric(tarifa.cobro_entrega),
+            pagoMoto: parseNumeric(tarifa.pago_moto),
+          });
+        }
+        const fallbackResultadoEntregado = resultadoRows.find((row) => normalizeLookupKey(row.resultado).includes('entregado'));
+        const fallbackResultadoId = Number(fallbackResultadoEntregado?.business_id ?? 1);
+
+        const rowsToUpsert: Array<Record<string, unknown>> = [];
+        let skippedMissingLead = 0;
+        let skippedMissingDestino = 0;
+        let skippedMissingTarifa = 0;
+        let skippedByEstado = 0;
+        let skippedExisting = 0;
+
+        const existingStableIds = new Set<string>();
+        if (onlyRemaining && finalRows.length > 0) {
+          const stableIds = finalRows
+            .map((row) => String(row.id_pedido ?? '').trim())
+            .filter((id) => id.length > 0)
+            .map((id) => `envio-dinsides-${id}`);
+
+          const chunkSize = 300;
+          for (let index = 0; index < stableIds.length; index += chunkSize) {
+            const chunk = stableIds.slice(index, index + chunkSize);
+            const { data: existingRows, error: existingError } = await supabase
+              .from('envios' as never)
+              .select('stable_id' as never)
+              .in('stable_id' as never, chunk as never);
+
+            if (existingError) {
+              throw new Error(`No se pudieron leer envíos existentes para only_remaining: ${existingError.message}`);
+            }
+
+            for (const row of ((existingRows ?? []) as Array<{ stable_id?: string | null }>)) {
+              const stableId = String(row.stable_id ?? '').trim();
+              if (stableId) existingStableIds.add(stableId);
+            }
+          }
+        }
+
+        for (const row of finalRows) {
+          const idPedido = String(row.id_pedido ?? '').trim();
+          if (!idPedido) continue;
+          const stableId = `envio-dinsides-${idPedido}`;
+
+          if (onlyRemaining && existingStableIds.has(stableId)) {
+            skippedExisting += 1;
+            continue;
+          }
+
+          const negocio = normalizeLookupKey(row.nombre_negocio);
+          const distrito = normalizeLookupKey(row.nombre_distrito);
+          const seguimiento = normalizeLookupKey(row.seguimiento);
+
+          const isEstadoPermitido =
+            seguimiento === 'entregado'
+            || seguimiento === 'rechazado por cliente en punto';
+          if (!isEstadoPermitido) {
+            skippedByEstado += 1;
+            continue;
+          }
+
+          const idLeadGanado = leadByBusinessName.get(negocio);
+          if (!idLeadGanado) {
+            skippedMissingLead += 1;
+            continue;
+          }
+
+          const idDestino = destinoByName.get(distrito);
+          if (!idDestino) {
+            skippedMissingDestino += 1;
+            continue;
+          }
+
+          const idResultado = resultadoByName.get(seguimiento) ?? fallbackResultadoId;
+          const tarifa = tarifaByDestinoId.get(idDestino);
+          if (!tarifa) {
+            skippedMissingTarifa += 1;
+            continue;
+          }
+
+          const pagoMoto = Number((tarifa.pagoMoto ?? 0).toFixed(2));
+          const cobroEntrega = Number((tarifa.cobroEntrega ?? 0).toFixed(2));
+          const fechaEnvio = parseDateOnlyFromUnknown(row.fecha_entrega) ?? parseDateOnlyFromUnknown(row.fecha_pedido);
+
+          rowsToUpsert.push({
+            stable_id: stableId,
+            fecha_envio: fechaEnvio,
+            id_lead_ganado: idLeadGanado,
+            id_destino: idDestino,
+            id_resultado: idResultado,
+            cobro_entrega: cobroEntrega,
+            pago_moto: pagoMoto,
+            excedente_pagado_moto: 0,
+            ingreso_total_fila: cobroEntrega,
+            costo_total_fila: pagoMoto,
+            observaciones: String(row.observacion ?? '').trim() || null,
+            id_tipo_punto: 1,
+            extra_punto_moto: 0,
+            extra_punto_empresa: 0,
+          });
+        }
+
+        if (rowsToUpsert.length > 0) {
+          const { error: upsertError } = await supabase
+            .from('envios' as never)
+            .upsert(rowsToUpsert as never, { onConflict: 'stable_id' as never });
+
+          if (upsertError) {
+            throw new Error(`No se pudieron upsertar envíos desde Dinsides: ${upsertError.message}`);
+          }
+        }
+
+        const affectedLeadIds = Array.from(new Set(
+          rowsToUpsert
+            .map((row) => Number(row.id_lead_ganado ?? 0))
+            .filter((id) => Number.isFinite(id) && id > 0),
+        ));
+
+        let recalculatedLeads = 0;
+        let recalculateErrors = 0;
+        for (const leadId of affectedLeadIds) {
+          try {
+            await recalculateLeadGanadoCountersByBusinessId(supabase, leadId);
+            recalculatedLeads += 1;
+          } catch {
+            recalculateErrors += 1;
+          }
+        }
+
+        return res.status(200).json({
+          success: true,
+          mode,
+          only_remaining: onlyRemaining,
+          offset_rows: offsetRows,
+          limit_rows: limitRows,
+          pulled: finalRows.length,
+          upserted: rowsToUpsert.length,
+          skipped_existing: skippedExisting,
+          skipped_by_estado: skippedByEstado,
+          skipped_missing_lead: skippedMissingLead,
+          skipped_missing_destino: skippedMissingDestino,
+          skipped_missing_tarifa: skippedMissingTarifa,
+          recalculated_leads: recalculatedLeads,
+          recalculate_errors: recalculateErrors,
+        });
+      }
+
+      if (debug) {
+        return res.status(200).json({
+          success: true,
+          mode,
+          offset_rows: offsetRows,
+          limit_rows: limitRows,
+          rows: finalRows,
+          diagnostics,
+        });
+      }
+
+      return res.status(200).json(finalRows);
+    }
+
+    if (mode === 'dinsides_envios_sync_cursor') {
+      const batchLeads = parseEnviosProbeLimit(searchParams.get('batch_leads') ?? undefined, 120, 1000);
+      const limitRows = parseEnviosProbeLimit(searchParams.get('limit_rows') ?? undefined, 2000, 10000);
+      const cursor = parseNonNegativeInt(
+        searchParams.get('cursor') ?? searchParams.get('lead_offset') ?? undefined,
+        0,
+        1_000_000,
+      );
+      const singleBusiness = searchParams.get('search_negocio')?.trim();
+      const singleSearchTipo = searchParams.get('search_tipo')?.trim();
+      const debug = ['1', 'true', 'yes'].includes((searchParams.get('debug') ?? '').toLowerCase());
+
+      const supabase = getSupabaseAdminClient();
+
+      let scannedLeadRows = 0;
+      let hasMore = false;
+      let nextCursor = cursor;
+
+      const businessNames = (() => {
+        if (singleBusiness) return [singleBusiness];
+        return [] as string[];
+      })();
+
+      if (!singleBusiness) {
+        const { data: leadRows, error: leadError } = await supabase
+          .from('leads_ganados' as never)
+          .select('business_id,tienda_nombre_snapshot' as never)
+          .not('tienda_nombre_snapshot' as never, 'is' as never, null as never)
+          .neq('tienda_nombre_snapshot' as never, '' as never)
+          .not('tienda_nombre_snapshot' as never, 'ilike' as never, 'Lead #%' as never)
+          .not('tienda_nombre_snapshot' as never, 'ilike' as never, 'Lead sin nombre' as never)
+          .order('business_id', { ascending: true })
+          .range(cursor, cursor + batchLeads - 1);
+
+        if (leadError) {
+          throw new Error(`No se pudieron leer leads_ganados para cursor sync: ${leadError.message}`);
+        }
+
+        const rows = (leadRows ?? []) as Array<{ tienda_nombre_snapshot?: unknown }>;
+        scannedLeadRows = rows.length;
+        hasMore = scannedLeadRows === batchLeads;
+        nextCursor = cursor + scannedLeadRows;
+
+        const dedupeBusinesses = new Map<string, string>();
+        for (const row of rows) {
+          const normalized = normalizeBusinessName(row.tienda_nombre_snapshot);
+          if (!normalized) continue;
+          const key = normalized.toLocaleLowerCase('es');
+          if (!dedupeBusinesses.has(key)) {
+            dedupeBusinesses.set(key, normalized);
+          }
+        }
+
+        businessNames.push(...Array.from(dedupeBusinesses.values()));
+      }
+
+      const { cookieHeader } = await loginDinsidesAndGetCookieHeader();
+
+      const dedupe = new Map<string, Record<string, unknown>>();
+      const diagnostics = {
+        businesses_total: businessNames.length,
+        businesses_with_rows: 0,
+        attempts: 0,
+        errors: [] as string[],
+        tried_businesses: [] as Array<{ name: string; variants: string[]; rows: number }>,
+      };
+
+      for (const businessName of businessNames) {
+        const variants = buildBusinessSearchVariants(businessName);
+        let matchedAny = false;
+        let rowsForBusiness = 0;
+
+        try {
+          for (const variant of variants) {
+            diagnostics.attempts += 1;
+            const rows = await fetchDinsidesEnviosRows({
+              cookieHeader,
+              searchNegocio: variant,
+              searchTipo: singleSearchTipo,
+            });
+
+            rowsForBusiness += rows.length;
+            for (const row of rows) {
+              const key = buildDedupeKeyFromEnvioRow(row);
+              if (!dedupe.has(key)) {
+                dedupe.set(key, row);
+              }
+            }
+
+            if (rows.length > 0) {
+              matchedAny = true;
+              break;
+            }
+          }
+
+          if (!matchedAny) {
+            const clientIds = await lookupDinsidesClientIds({
+              cookieHeader,
+              businessName,
+            });
+
+            for (const clientId of clientIds) {
+              const attempts = [
+                { searchNegocio: clientId, searchTipo: '' },
+                { searchNegocio: '', searchTipo: clientId },
+                { searchNegocio: clientId, searchTipo: clientId },
+              ];
+
+              let foundForClient = false;
+              for (const attempt of attempts) {
+                diagnostics.attempts += 1;
+                const rows = await fetchDinsidesEnviosRows({
+                  cookieHeader,
+                  searchNegocio: attempt.searchNegocio,
+                  searchTipo: attempt.searchTipo,
+                });
+
+                rowsForBusiness += rows.length;
+                for (const row of rows) {
+                  const key = buildDedupeKeyFromEnvioRow(row);
+                  if (!dedupe.has(key)) {
+                    dedupe.set(key, row);
+                  }
+                }
+
+                if (rows.length > 0) {
+                  foundForClient = true;
+                  matchedAny = true;
+                  break;
+                }
+              }
+
+              if (foundForClient) {
+                break;
+              }
+            }
+          }
+        } catch (error: unknown) {
+          if (diagnostics.errors.length < 25) {
+            const message = error instanceof Error ? error.message : String(error);
+            diagnostics.errors.push(`${businessName}: ${message}`);
+          }
+        }
+
+        if (matchedAny) {
+          diagnostics.businesses_with_rows += 1;
+        }
+
+        if (debug && diagnostics.tried_businesses.length < 40) {
+          diagnostics.tried_businesses.push({
+            name: businessName,
+            variants,
+            rows: rowsForBusiness,
+          });
+        }
+
+        if (dedupe.size >= limitRows) {
+          break;
+        }
+      }
+
+      const finalRows = Array.from(dedupe.values()).slice(0, limitRows);
+
+      const persist = ['1', 'true', 'yes'].includes((searchParams.get('persist') ?? '').toLowerCase());
+      if (persist) {
+        const onlyRemaining = ['1', 'true', 'yes'].includes((searchParams.get('only_remaining') ?? '').toLowerCase());
+        const leadsResult = await supabase
+          .from('leads_ganados' as never)
+          .select('business_id,tienda_nombre_snapshot' as never)
+          .not('tienda_nombre_snapshot' as never, 'is' as never, null as never)
+          .neq('tienda_nombre_snapshot' as never, '' as never)
+          .limit(10000);
+
+        if (leadsResult.error) {
+          throw new Error(`No se pudieron leer leads_ganados para persistir envíos: ${leadsResult.error.message}`);
+        }
+
+        const destinosResult = await supabase
+          .from('destinos' as never)
+          .select('business_id,destino' as never)
+          .limit(1000);
+
+        if (destinosResult.error) {
+          throw new Error(`No se pudieron leer destinos para persistir envíos: ${destinosResult.error.message}`);
+        }
+
+        const resultadosResult = await supabase
+          .from('resultados' as never)
+          .select('business_id,resultado' as never)
+          .limit(1000);
+
+        if (resultadosResult.error) {
+          throw new Error(`No se pudieron leer resultados para persistir envíos: ${resultadosResult.error.message}`);
+        }
+
+        const tarifasResult = await supabase
+          .from('tarifas' as never)
+          .select('id_destino,cobro_entrega,pago_moto' as never)
+          .limit(5000);
+
+        if (tarifasResult.error) {
+          throw new Error(`No se pudieron leer tarifas para persistir envíos: ${tarifasResult.error.message}`);
+        }
+
+        const leadsRows = (leadsResult.data ?? []) as Array<{ business_id: number; tienda_nombre_snapshot: string | null }>;
+        const destinoRows = (destinosResult.data ?? []) as Array<{ business_id: number; destino: string | null }>;
+        const resultadoRows = (resultadosResult.data ?? []) as Array<{ business_id: number; resultado: string | null }>;
+        const tarifaRows = (tarifasResult.data ?? []) as Array<{ id_destino: number | null; cobro_entrega: number | null; pago_moto: number | null }>;
+
+        const leadByBusinessName = mapByNormalizedLabel(leadsRows, (row) => row.tienda_nombre_snapshot);
+        const destinoByName = mapByNormalizedLabel(destinoRows, (row) => row.destino);
+        const resultadoByName = mapByNormalizedLabel(resultadoRows, (row) => row.resultado);
+        const tarifaByDestinoId = new Map<number, { cobroEntrega: number; pagoMoto: number }>();
+        for (const tarifa of tarifaRows) {
+          const idDestino = Number(tarifa.id_destino ?? 0);
+          if (!Number.isFinite(idDestino) || idDestino <= 0) continue;
+          tarifaByDestinoId.set(idDestino, {
+            cobroEntrega: parseNumeric(tarifa.cobro_entrega),
+            pagoMoto: parseNumeric(tarifa.pago_moto),
+          });
+        }
+        const fallbackResultadoEntregado = resultadoRows.find((row) => normalizeLookupKey(row.resultado).includes('entregado'));
+        const fallbackResultadoId = Number(fallbackResultadoEntregado?.business_id ?? 1);
+
+        const rowsToUpsert: Array<Record<string, unknown>> = [];
+        let skippedMissingLead = 0;
+        let skippedMissingDestino = 0;
+        let skippedMissingTarifa = 0;
+        let skippedByEstado = 0;
+        let skippedExisting = 0;
+
+        const existingStableIds = new Set<string>();
+        if (onlyRemaining && finalRows.length > 0) {
+          const stableIds = finalRows
+            .map((row) => String(row.id_pedido ?? '').trim())
+            .filter((id) => id.length > 0)
+            .map((id) => `envio-dinsides-${id}`);
+
+          const chunkSize = 300;
+          for (let index = 0; index < stableIds.length; index += chunkSize) {
+            const chunk = stableIds.slice(index, index + chunkSize);
+            const { data: existingRows, error: existingError } = await supabase
+              .from('envios' as never)
+              .select('stable_id' as never)
+              .in('stable_id' as never, chunk as never);
+
+            if (existingError) {
+              throw new Error(`No se pudieron leer envíos existentes para only_remaining: ${existingError.message}`);
+            }
+
+            for (const row of ((existingRows ?? []) as Array<{ stable_id?: string | null }>)) {
+              const stableId = String(row.stable_id ?? '').trim();
+              if (stableId) existingStableIds.add(stableId);
+            }
+          }
+        }
+
+        for (const row of finalRows) {
+          const idPedido = String(row.id_pedido ?? '').trim();
+          if (!idPedido) continue;
+          const stableId = `envio-dinsides-${idPedido}`;
+
+          if (onlyRemaining && existingStableIds.has(stableId)) {
+            skippedExisting += 1;
+            continue;
+          }
+
+          const negocio = normalizeLookupKey(row.nombre_negocio);
+          const distrito = normalizeLookupKey(row.nombre_distrito);
+          const seguimiento = normalizeLookupKey(row.seguimiento);
+
+          const isEstadoPermitido =
+            seguimiento === 'entregado'
+            || seguimiento === 'rechazado por cliente en punto';
+          if (!isEstadoPermitido) {
+            skippedByEstado += 1;
+            continue;
+          }
+
+          const idLeadGanado = leadByBusinessName.get(negocio);
+          if (!idLeadGanado) {
+            skippedMissingLead += 1;
+            continue;
+          }
+
+          const idDestino = destinoByName.get(distrito);
+          if (!idDestino) {
+            skippedMissingDestino += 1;
+            continue;
+          }
+
+          const idResultado = resultadoByName.get(seguimiento) ?? fallbackResultadoId;
+          const tarifa = tarifaByDestinoId.get(idDestino);
+          if (!tarifa) {
+            skippedMissingTarifa += 1;
+            continue;
+          }
+
+          const pagoMoto = Number((tarifa.pagoMoto ?? 0).toFixed(2));
+          const cobroEntrega = Number((tarifa.cobroEntrega ?? 0).toFixed(2));
+          const fechaEnvio = parseDateOnlyFromUnknown(row.fecha_entrega) ?? parseDateOnlyFromUnknown(row.fecha_pedido);
+
+          rowsToUpsert.push({
+            stable_id: stableId,
+            fecha_envio: fechaEnvio,
+            id_lead_ganado: idLeadGanado,
+            id_destino: idDestino,
+            id_resultado: idResultado,
+            cobro_entrega: cobroEntrega,
+            pago_moto: pagoMoto,
+            excedente_pagado_moto: 0,
+            ingreso_total_fila: cobroEntrega,
+            costo_total_fila: pagoMoto,
+            observaciones: String(row.observacion ?? '').trim() || null,
+            id_tipo_punto: 1,
+            extra_punto_moto: 0,
+            extra_punto_empresa: 0,
+          });
+        }
+
+        if (rowsToUpsert.length > 0) {
+          const { error: upsertError } = await supabase
+            .from('envios' as never)
+            .upsert(rowsToUpsert as never, { onConflict: 'stable_id' as never });
+
+          if (upsertError) {
+            throw new Error(`No se pudieron upsertar envíos desde Dinsides: ${upsertError.message}`);
+          }
+        }
+
+        const affectedLeadIds = Array.from(new Set(
+          rowsToUpsert
+            .map((row) => Number(row.id_lead_ganado ?? 0))
+            .filter((id) => Number.isFinite(id) && id > 0),
+        ));
+
+        let recalculatedLeads = 0;
+        let recalculateErrors = 0;
+        for (const leadId of affectedLeadIds) {
+          try {
+            await recalculateLeadGanadoCountersByBusinessId(supabase, leadId);
+            recalculatedLeads += 1;
+          } catch {
+            recalculateErrors += 1;
+          }
+        }
+
+        return res.status(200).json({
+          success: true,
+          mode,
+          only_remaining: onlyRemaining,
+          cursor,
+          next_cursor: nextCursor,
+          has_more: singleBusiness ? false : hasMore,
+          batch_leads: batchLeads,
+          businesses_total: businessNames.length,
+          limit_rows: limitRows,
+          pulled: finalRows.length,
+          upserted: rowsToUpsert.length,
+          skipped_existing: skippedExisting,
+          skipped_by_estado: skippedByEstado,
+          skipped_missing_lead: skippedMissingLead,
+          skipped_missing_destino: skippedMissingDestino,
+          skipped_missing_tarifa: skippedMissingTarifa,
+          recalculated_leads: recalculatedLeads,
+          recalculate_errors: recalculateErrors,
+        });
+      }
+
+      if (debug) {
+        return res.status(200).json({
+          success: true,
+          mode,
+          cursor,
+          next_cursor: nextCursor,
+          has_more: singleBusiness ? false : hasMore,
+          batch_leads: batchLeads,
+          scanned_leads: scannedLeadRows,
+          limit_rows: limitRows,
+          rows: finalRows,
+          diagnostics,
+        });
+      }
+
+      return res.status(200).json({
+        success: true,
+        mode,
+        cursor,
+        next_cursor: nextCursor,
+        has_more: singleBusiness ? false : hasMore,
+        batch_leads: batchLeads,
+        scanned_leads: scannedLeadRows,
+        limit_rows: limitRows,
+        pulled: finalRows.length,
+      });
+    }
+
+    if (mode === 'recalculate_leads_ganados_counters') {
+      const supabase = getSupabaseAdminClient();
+      const limit = parseEnviosProbeLimit(searchParams.get('limit') ?? undefined, 300, 2000);
+      const offset = parseNonNegativeInt(searchParams.get('offset') ?? undefined, 0, 200_000);
+
+      const { data: leadsRows, error: leadsError } = await supabase
+        .from('leads_ganados' as never)
+        .select('business_id' as never)
+        .order('business_id', { ascending: true })
+        .range(offset, offset + limit - 1);
+
+      if (leadsError) {
+        throw new Error(`No se pudieron leer leads_ganados para recálculo: ${leadsError.message}`);
+      }
+
+      const leadIds = ((leadsRows ?? []) as Array<{ business_id: number | null }>)
+        .map((row) => Number(row.business_id ?? 0))
+        .filter((id) => Number.isFinite(id) && id > 0);
+
+      let updated = 0;
+      let errors = 0;
+      const errorDetails: string[] = [];
+
+      for (const leadId of leadIds) {
+        try {
+          await recalculateLeadGanadoCountersByBusinessId(supabase, leadId);
+          updated += 1;
+        } catch (error: unknown) {
+          errors += 1;
+          if (errorDetails.length < 20) {
+            errorDetails.push(`${leadId}: ${error instanceof Error ? error.message : String(error)}`);
+          }
+        }
+      }
+
+      return res.status(200).json({
+        success: true,
+        mode,
+        offset,
+        limit,
+        processed: leadIds.length,
+        updated,
+        errors,
+        has_more: leadIds.length === limit,
+        next_offset: offset + leadIds.length,
+        error_details: errorDetails,
+      });
+    }
+
+    if (mode === 'hydrate_leads_ganados_distritos') {
+      const supabase = getSupabaseAdminClient();
+      const limit = parseEnviosProbeLimit(searchParams.get('limit') ?? undefined, 120, 500);
+      const offset = parseNonNegativeInt(searchParams.get('offset') ?? undefined, 0, 200_000);
+      const force = ['1', 'true', 'yes'].includes((searchParams.get('force') ?? '').toLowerCase());
+
+      const { data: leadsRows, error: leadsError } = await supabase
+        .from('leads_ganados' as never)
+        .select('business_id' as never)
+        .order('business_id', { ascending: true })
+        .range(offset, offset + limit - 1);
+
+      if (leadsError) {
+        throw new Error(`No se pudieron leer leads_ganados para hidratar distritos: ${leadsError.message}`);
+      }
+
+      const leadIds = ((leadsRows ?? []) as Array<{ business_id: number | null }>)
+        .map((row) => Number(row.business_id ?? 0))
+        .filter((id) => Number.isFinite(id) && id > 0);
+
+      let processed = 0;
+      let updated = 0;
+      let skipped = 0;
+      let errors = 0;
+      const errorDetails: string[] = [];
+      const skippedByReason: Record<string, number> = {};
+      const skippedDetails: Array<{ lead_id: number; reason: string; business_name?: string }> = [];
+
+      for (const leadId of leadIds) {
+        processed += 1;
+        try {
+          const result = await hydrateLeadGanadoDistritoByBusinessId(supabase, leadId, { force });
+          if (result.updated) {
+            updated += 1;
+          } else {
+            skipped += 1;
+            const reason = String(result.reason ?? 'unknown');
+            skippedByReason[reason] = (skippedByReason[reason] ?? 0) + 1;
+            if (skippedDetails.length < 30) {
+              skippedDetails.push({
+                lead_id: leadId,
+                reason,
+                business_name: typeof (result as { business_name?: unknown }).business_name === 'string'
+                  ? (result as { business_name?: string }).business_name
+                  : undefined,
+              });
+            }
+          }
+        } catch (error: unknown) {
+          errors += 1;
+          if (errorDetails.length < 20) {
+            errorDetails.push(`${leadId}: ${error instanceof Error ? error.message : String(error)}`);
+          }
+        }
+      }
+
+      return res.status(200).json({
+        success: true,
+        mode,
+        offset,
+        limit,
+        force,
+        processed,
+        updated,
+        skipped,
+        skipped_by_reason: skippedByReason,
+        skipped_details: skippedDetails,
+        errors,
+        has_more: leadIds.length === limit,
+        next_offset: offset + leadIds.length,
+        error_details: errorDetails,
+      });
+    }
+
+    if (mode === 'cleanup_placeholder_leads_ganados') {
+      const supabase = getSupabaseAdminClient();
+
+      const { data: rowsRaw, error: listError } = await supabase
+        .from('leads_ganados' as never)
+        .select('kommo_lead_id,tienda_nombre_snapshot' as never)
+        .limit(5000);
+
+      if (listError) {
+        throw new Error(`No se pudieron listar placeholders en leads_ganados: ${listError.message}`);
+      }
+
+      const rowsToDelete = ((rowsRaw ?? []) as Array<{ kommo_lead_id: number | null; tienda_nombre_snapshot: string | null }>)
+        .filter((row) => {
+          const name = String(row.tienda_nombre_snapshot ?? '').trim();
+          return /^Lead\s*#\s*\d+/i.test(name) || /^Lead\s+sin\s+nombre$/i.test(name);
+        });
+      const leadIds = rowsToDelete
+        .map((row) => Number(row.kommo_lead_id ?? 0))
+        .filter((id) => Number.isFinite(id) && id > 0);
+
+      if (leadIds.length === 0) {
+        return res.status(200).json({
+          success: true,
+          mode,
+          deleted: 0,
+          message: 'No se encontraron registros placeholder para eliminar.',
+        });
+      }
+
+      const { error: deleteError } = await supabase
+        .from('leads_ganados' as never)
+        .delete()
+        .in('kommo_lead_id', leadIds);
+
+      if (deleteError) {
+        throw new Error(`No se pudieron eliminar placeholders de leads_ganados: ${deleteError.message}`);
+      }
+
+      return res.status(200).json({
+        success: true,
+        mode,
+        deleted: leadIds.length,
+      });
     }
 
     const baseUrlRaw = asSingleQueryParam(req.query.base_url) ?? asSingleQueryParam(req.query.baseUrl);
@@ -875,6 +2561,16 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
 
     const freshConnection = await ensureFreshConnection(connection);
     const supabase = getSupabaseAdminClient();
+
+    if (mode === 'chat_history') {
+      const chatSync = await runChatHistorySyncMode({ req, supabase });
+
+      return res.status(200).json({
+        ...chatSync,
+        mode: 'chat_history',
+        account: freshConnection.account_subdomain,
+      });
+    }
 
     // Si se especifica un recurso en query params, solo sincronizamos ese recurso. Si no, sincronizamos todos los recursos.
     const resourceParam = asSingleQueryParam(req.query.resource);
