@@ -2493,77 +2493,92 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
         });
       }
 
-      const envioCountsByLeadDate = new Map<string, number>();
-      if (leadIds.length > 0) {
-        const pageSize = 1000;
-        let from = 0;
-        while (true) {
-          let enviosQuery = supabase
-            .from('envios' as never)
-            .select('id_lead_ganado,fecha_envio' as never)
-            .in('id_lead_ganado' as never, leadIds as never)
-            .order('id_lead_ganado', { ascending: true })
-            .order('fecha_envio', { ascending: true })
-            .range(from, from + pageSize - 1);
-
-          if (dateFrom) {
-            enviosQuery = enviosQuery.gte('fecha_envio' as never, dateFrom as never);
-          }
-          if (dateTo) {
-            enviosQuery = enviosQuery.lte('fecha_envio' as never, dateTo as never);
-          }
-
-          const { data: enviosRowsRaw, error: enviosError } = await enviosQuery;
-          if (enviosError) {
-            throw new Error(`No se pudieron leer envíos para recojos sync: ${enviosError.message}`);
-          }
-
-          const enviosRows = (enviosRowsRaw ?? []) as Array<{ id_lead_ganado: number | null; fecha_envio: string | null }>;
-          for (const row of enviosRows) {
-            const leadId = Number(row.id_lead_ganado ?? 0);
-            if (!Number.isFinite(leadId) || leadId <= 0) continue;
-            const fecha = parseDateOnlyFromUnknown(row.fecha_envio);
-            if (!fecha) continue;
-            const key = `${leadId}__${fecha}`;
-            envioCountsByLeadDate.set(key, (envioCountsByLeadDate.get(key) ?? 0) + 1);
-          }
-
-          if (enviosRows.length < pageSize) break;
-          from += pageSize;
-        }
-      }
-
-      const datesByLead = new Map<number, string[]>();
-      for (const key of envioCountsByLeadDate.keys()) {
-        const [leadIdRaw, date] = key.split('__');
-        const leadId = Number(leadIdRaw);
-        if (!Number.isFinite(leadId) || !date) continue;
-        const current = datesByLead.get(leadId) ?? [];
-        current.push(date);
-        datesByLead.set(leadId, current);
-      }
-
-      for (const [leadId, dates] of datesByLead.entries()) {
-        const uniqueDates = Array.from(new Set(dates)).sort((a, b) => a.localeCompare(b));
-        datesByLead.set(leadId, uniqueDates);
-      }
-
       const { cookieHeader } = await loginDinsidesAndGetCookieHeader();
+      const envioCountsByLeadDate = new Map<string, number>();
+      const datesByLead = new Map<number, string[]>();
       const recojoRawRows: Array<Record<string, unknown>> = [];
       const recojoRawDedup = new Set<string>();
       const dinsidesClientIdsByLead = new Map<number, string[]>();
 
       let queriesUsed = 0;
       let lookupQueriesUsed = 0;
+      let enviosQueriesUsed = 0;
       let processedLeads = 0;
       const diagnostics = {
         leads_total: leadIds.length,
         leads_processed: 0,
         queries_used: 0,
         lookup_queries_used: 0,
+        envios_queries_used: 0,
         leads_missing_client_ids: 0,
         errors: [] as string[],
       };
+
+      // Pre-cálculo: contar envíos ENTREGADO por fecha_pedido (día) en Dinsides.
+      for (const leadId of leadIds) {
+        let clientIds = dinsidesClientIdsByLead.get(leadId);
+        if (!clientIds) {
+          lookupQueriesUsed += 1;
+          const tiendaNombre = leadMeta.get(leadId)?.tienda ?? '';
+          try {
+            clientIds = await lookupDinsidesClientIds({
+              cookieHeader,
+              businessName: tiendaNombre,
+            });
+          } catch {
+            clientIds = [];
+          }
+
+          const uniqueIds = Array.from(new Set((clientIds ?? []).map((id) => String(id).trim()).filter(Boolean)));
+          clientIds = uniqueIds;
+          dinsidesClientIdsByLead.set(leadId, clientIds);
+        }
+
+        if (!clientIds || clientIds.length === 0) {
+          diagnostics.leads_missing_client_ids += 1;
+          continue;
+        }
+
+        for (const clientId of clientIds) {
+          if (queriesUsed + 1 > maxQueries) {
+            break;
+          }
+
+          queriesUsed += 1;
+          enviosQueriesUsed += 1;
+
+          let rows: Array<Record<string, unknown>> = [];
+          try {
+            rows = await fetchDinsidesEnviosRows({
+              cookieHeader,
+              searchNegocio: clientId,
+            });
+          } catch {
+            rows = [];
+          }
+
+          for (const row of rows) {
+            const seguimiento = normalizeLookupKey(row.seguimiento);
+            if (seguimiento !== 'entregado') continue;
+
+            const fechaPedido = parseDateOnlyFromUnknown(row.fecha_pedido);
+            if (!fechaPedido) continue;
+
+            if (dateFrom && fechaPedido < dateFrom) continue;
+            if (dateTo && fechaPedido > dateTo) continue;
+
+            const key = `${leadId}__${fechaPedido}`;
+            envioCountsByLeadDate.set(key, (envioCountsByLeadDate.get(key) ?? 0) + 1);
+          }
+        }
+
+        const dayKeys = Array.from(envioCountsByLeadDate.keys())
+          .filter((key) => key.startsWith(`${leadId}__`))
+          .map((key) => key.split('__')[1])
+          .filter(Boolean);
+        const uniqueDays = Array.from(new Set(dayKeys)).sort((a, b) => a.localeCompare(b));
+        datesByLead.set(leadId, uniqueDays);
+      }
 
       for (const leadId of leadIds) {
         const days = datesByLead.get(leadId) ?? [];
@@ -2675,6 +2690,7 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
       diagnostics.leads_processed = processedLeads;
       diagnostics.queries_used = queriesUsed;
       diagnostics.lookup_queries_used = lookupQueriesUsed;
+      diagnostics.envios_queries_used = enviosQueriesUsed;
 
       const grouped = new Map<string, { leadId: number; fecha: string; tipoCobro: string; veces: number; observaciones: string | null }>();
       for (const row of recojoRawRows) {
@@ -2684,7 +2700,7 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
 
         const envioCount = envioCountsByLeadDate.get(`${leadId}__${fecha}`) ?? 0;
         const tipoCobro = envioCount <= 1 ? '1 pedido' : '2+ pedidos';
-        const groupKey = `${leadId}__${fecha}__${tipoCobro}`;
+        const groupKey = `${leadId}__${tipoCobro}`;
 
         const current = grouped.get(groupKey) ?? {
           leadId,
@@ -2695,6 +2711,9 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
         };
 
         current.veces += 1;
+        if (fecha > current.fecha) {
+          current.fecha = fecha;
+        }
         if (!current.observaciones) {
           const obs = String(row.observacion ?? '').trim();
           current.observaciones = obs || null;
@@ -2711,8 +2730,8 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
           break;
         }
 
-        const stableId = `recojo-dinsides-${item.leadId}-${item.fecha}-${item.tipoCobro === '1 pedido' ? 'tipo1' : 'tipo2'}`;
-        // Recojos requiere upsert determinístico por clave (lead+fecha+tipo).
+        const stableId = `recojo-dinsides-${item.leadId}-${item.tipoCobro === '1 pedido' ? 'tipo1' : 'tipo2'}`;
+        // Recojos requiere upsert determinístico por clave (lead+tipo).
         // No salteamos existentes para evitar quedarse con "veces" desactualizado.
 
         const cobroATienda = item.tipoCobro === '1 pedido' ? 8 : 0;
