@@ -18,6 +18,8 @@ type EnrichedPost = {
   shares: number;
   clicks: number;
   views: number;
+  video_views: number;
+  retention: number;
 };
 
 type PostMetricTrendPoint = {
@@ -27,6 +29,8 @@ type PostMetricTrendPoint = {
   shares: number;
   clicks: number;
   views: number;
+  video_views: number;
+  avg_retention: number;
 };
 
 const chartTooltipStyle = {
@@ -91,6 +95,13 @@ export function MetaPagesDashboard() {
       ...post,
       clicks: latestByPostMetric.get(`${post.id}:post_clicks`) ?? 0,
       views: latestByPostMetric.get(`${post.id}:post_impressions`) ?? 0,
+      video_views: latestByPostMetric.get(`${post.id}:post_video_views`) ?? 0,
+      retention: (() => {
+        const impressions = latestByPostMetric.get(`${post.id}:post_impressions`) ?? 0;
+        const videoViews = latestByPostMetric.get(`${post.id}:post_video_views`) ?? 0;
+        if (!impressions) return 0;
+        return (videoViews * 100) / impressions;
+      })(),
     }));
   }, [posts, postInsightSnapshots]);
 
@@ -129,6 +140,8 @@ export function MetaPagesDashboard() {
         shares: 0,
         clicks: 0,
         views: 0,
+        video_views: 0,
+        avg_retention: 0,
       };
 
       current.reactions += post.reactions;
@@ -136,6 +149,8 @@ export function MetaPagesDashboard() {
       current.shares += post.shares;
       current.clicks += post.clicks;
       current.views += post.views;
+      current.video_views += post.video_views;
+      current.avg_retention = current.views > 0 ? (current.video_views * 100) / current.views : 0;
       grouped.set(date, current);
     }
 
@@ -152,6 +167,12 @@ export function MetaPagesDashboard() {
       totalShares: enrichedPosts.reduce((acc, post) => acc + post.shares, 0),
       totalClicks: enrichedPosts.reduce((acc, post) => acc + post.clicks, 0),
       totalViews: enrichedPosts.reduce((acc, post) => acc + post.views, 0),
+      totalVideoViews: enrichedPosts.reduce((acc, post) => acc + post.video_views, 0),
+      averageRetention: (() => {
+        const totalImpressions = enrichedPosts.reduce((acc, post) => acc + post.views, 0);
+        const totalVideoViews = enrichedPosts.reduce((acc, post) => acc + post.video_views, 0);
+        return totalImpressions > 0 ? (totalVideoViews * 100) / totalImpressions : 0;
+      })(),
     };
   }, [enrichedPosts, insights.length, pages, posts.length]);
 
@@ -212,6 +233,8 @@ export function MetaPagesDashboard() {
           <KpiCard title="Compartidos" value={formatNumberEs(totals.totalShares)} helper="Total acumulado" icon={<Share2 className="text-red-600" size={18} />} />
           <KpiCard title="Clicks" value={formatNumberEs(totals.totalClicks)} helper="Total acumulado" icon={<MousePointerClick className="text-red-600" size={18} />} />
           <KpiCard title="Vistas" value={formatNumberEs(totals.totalViews)} helper="Total acumulado" icon={<Eye className="text-red-600" size={18} />} />
+          <KpiCard title="Vistas de video" value={formatNumberEs(totals.totalVideoViews)} helper="post_video_views" icon={<Eye className="text-red-600" size={18} />} />
+          <KpiCard title="Retención video" value={`${totals.averageRetention.toFixed(2)}%`} helper="Video views / impresiones" icon={<Activity className="text-red-600" size={18} />} />
         </KpiGrid>
       </Section>
 

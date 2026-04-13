@@ -39,7 +39,7 @@ export function useMetaAdsReporting(filters: MetaAdsOverviewFilters) {
 
       let hourlyQuery = supabase
         .from('meta_ad_insights_hourly')
-        .select('ad_business_id,date_start,hour_bucket,spend,impressions,reach,clicks,ctr,cpc')
+        .select('ad_business_id,date_start,hour_bucket,spend,impressions,reach,clicks,reactions,comments,shares,video_views,video_p25_views,video_p50_views,video_p75_views,video_p95_views,video_p100_views,ctr,cpc')
         .order('date_start', { ascending: true })
         .order('hour_bucket', { ascending: true });
 

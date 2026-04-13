@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Activity, BadgeDollarSign, BarChart3, LineChart as LineChartIcon, Megaphone, MousePointerClick, PieChart as PieChartIcon, Target, Trophy } from 'lucide-react';
+import { Activity, BadgeDollarSign, BarChart3, Eye, LineChart as LineChartIcon, Megaphone, MessageSquare, MousePointerClick, PieChart as PieChartIcon, Share2, Target, ThumbsUp, Trophy } from 'lucide-react';
 import { Bar, BarChart, CartesianGrid, Cell, LabelList, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { DateRangePicker } from '../../../components/DateRangePicker';
 import { isDateRangeValid } from '../../../lib/dateRange';
@@ -257,11 +257,25 @@ export function MetaAdsDashboard() {
     const totalImpressions = sumBy(filteredRows, (row) => row.impressions);
     const totalReach = sumBy(filteredRows, (row) => row.reach);
     const totalClicks = sumBy(filteredRows, (row) => row.clicks);
+    const totalReactions = sumBy(filteredRows, (row) => row.reactions);
+    const totalComments = sumBy(filteredRows, (row) => row.comments);
+    const totalShares = sumBy(filteredRows, (row) => row.shares);
+    const totalVideoViews = sumBy(filteredRows, (row) => row.video_views);
+    const totalVideoP25Views = sumBy(filteredRows, (row) => row.video_p25_views);
+    const totalVideoP50Views = sumBy(filteredRows, (row) => row.video_p50_views);
+    const totalVideoP75Views = sumBy(filteredRows, (row) => row.video_p75_views);
+    const totalVideoP95Views = sumBy(filteredRows, (row) => row.video_p95_views);
+    const totalVideoP100Views = sumBy(filteredRows, (row) => row.video_p100_views);
     const totalCampaigns = new Set(filteredRows.map((row) => row.campaign_business_id).filter(Boolean)).size;
     const totalAdsets = new Set(filteredRows.map((row) => row.adset_business_id).filter(Boolean)).size;
     const totalAds = new Set(filteredRows.map((row) => row.ad_business_id).filter(Boolean)).size;
     const overallCtr = safeDivide(totalClicks * 100, totalImpressions);
     const overallCpc = safeDivide(totalSpend, totalClicks);
+    const retentionP25 = safeDivide(totalVideoP25Views * 100, totalVideoViews);
+    const retentionP50 = safeDivide(totalVideoP50Views * 100, totalVideoViews);
+    const retentionP75 = safeDivide(totalVideoP75Views * 100, totalVideoViews);
+    const retentionP95 = safeDivide(totalVideoP95Views * 100, totalVideoViews);
+    const retentionP100 = safeDivide(totalVideoP100Views * 100, totalVideoViews);
 
     const trend = aggregateTrendRows(filteredRows);
     const trendEfficiency = trend.map((point) => ({
@@ -414,11 +428,25 @@ export function MetaAdsDashboard() {
       totalImpressions,
       totalReach,
       totalClicks,
+      totalReactions,
+      totalComments,
+      totalShares,
+      totalVideoViews,
+      totalVideoP25Views,
+      totalVideoP50Views,
+      totalVideoP75Views,
+      totalVideoP95Views,
+      totalVideoP100Views,
       totalCampaigns,
       totalAdsets,
       totalAds,
       overallCtr,
       overallCpc,
+      retentionP25,
+      retentionP50,
+      retentionP75,
+      retentionP95,
+      retentionP100,
       trend,
       trendAveragesByDay,
       trendEfficiency,
@@ -829,8 +857,17 @@ export function MetaAdsDashboard() {
           <KpiCard title="Vistas" value={formatCompactMetric(dashboard.totalImpressions, 'number')} helper="Volumen total servido" icon={<Megaphone className="text-red-600" size={18} />} />
           <KpiCard title="Reach" value={formatCompactMetric(dashboard.totalReach, 'number')} helper="Usuarios alcanzados" icon={<Activity className="text-red-600" size={18} />} />
           <KpiCard title="Clicks" value={formatCompactMetric(dashboard.totalClicks, 'number')} helper="Interacciones principales" icon={<MousePointerClick className="text-red-600" size={18} />} />
+          <KpiCard title="Reacciones" value={formatCompactMetric(dashboard.totalReactions, 'number')} helper="Total desde acciones" icon={<ThumbsUp className="text-red-600" size={18} />} />
+          <KpiCard title="Comentarios" value={formatCompactMetric(dashboard.totalComments, 'number')} helper="Total desde acciones" icon={<MessageSquare className="text-red-600" size={18} />} />
+          <KpiCard title="Compartidos" value={formatCompactMetric(dashboard.totalShares, 'number')} helper="Total desde acciones" icon={<Share2 className="text-red-600" size={18} />} />
+          <KpiCard title="Vistas de video" value={formatCompactMetric(dashboard.totalVideoViews, 'number')} helper="video_play_actions" icon={<Eye className="text-red-600" size={18} />} />
           <KpiCard title="CTR global" value={formatCompactMetric(dashboard.overallCtr, 'percent')} helper="Clicks / vistas" icon={<Target className="text-red-600" size={18} />} />
           <KpiCard title="CPC global" value={formatCompactMetric(dashboard.overallCpc, 'currency')} helper="Gasto / clicks" icon={<BadgeDollarSign className="text-red-600" size={18} />} />
+          <KpiCard title="Retención 25%" value={formatCompactMetric(dashboard.retentionP25, 'percent')} helper="Video p25 / video views" icon={<Target className="text-red-600" size={18} />} />
+          <KpiCard title="Retención 50%" value={formatCompactMetric(dashboard.retentionP50, 'percent')} helper="Video p50 / video views" icon={<Target className="text-red-600" size={18} />} />
+          <KpiCard title="Retención 75%" value={formatCompactMetric(dashboard.retentionP75, 'percent')} helper="Video p75 / video views" icon={<Target className="text-red-600" size={18} />} />
+          <KpiCard title="Retención 95%" value={formatCompactMetric(dashboard.retentionP95, 'percent')} helper="Video p95 / video views" icon={<Target className="text-red-600" size={18} />} />
+          <KpiCard title="Retención 100%" value={formatCompactMetric(dashboard.retentionP100, 'percent')} helper="Video p100 / video views" icon={<Target className="text-red-600" size={18} />} />
           <KpiCard title="Campañas con data" value={formatNumberEs(dashboard.totalCampaigns)} helper="Campañas únicas en el rango" icon={<BarChart3 className="text-red-600" size={18} />} />
           <KpiCard title="Ads con data" value={formatNumberEs(dashboard.totalAds)} helper={`${formatNumberEs(dashboard.totalAdsets)} ad sets únicos`} icon={<Megaphone className="text-red-600" size={18} />} />
         </KpiGrid>

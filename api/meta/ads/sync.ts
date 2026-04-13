@@ -152,6 +152,15 @@ type MetaInsightRow = {
   impressions: number;
   reach: number;
   clicks: number;
+  reactions: number;
+  comments: number;
+  shares: number;
+  video_views: number;
+  video_p25_views: number;
+  video_p50_views: number;
+  video_p75_views: number;
+  video_p95_views: number;
+  video_p100_views: number;
   ctr: number | null;
   cpc: number | null;
   raw_payload: JsonRecord;
@@ -165,6 +174,15 @@ type MetaInsightHourlyRow = {
   impressions: number;
   reach: number;
   clicks: number;
+  reactions: number;
+  comments: number;
+  shares: number;
+  video_views: number;
+  video_p25_views: number;
+  video_p50_views: number;
+  video_p75_views: number;
+  video_p95_views: number;
+  video_p100_views: number;
   ctr: number | null;
   cpc: number | null;
   raw_payload: JsonRecord;
@@ -679,8 +697,10 @@ async function fetchPostInsightMetrics(
         .filter((item): item is { metric: string; period: string; value: number; raw_payload: JsonRecord } => item !== null);
 
       const normalized = (() => {
-        const viewMetrics = new Set([
+        const impressionMetrics = new Set([
           'post_impressions',
+        ]);
+        const videoViewMetrics = new Set([
           'post_total_media_view',
           'post_video_views',
           'post_video_views_organic',
@@ -690,7 +710,11 @@ async function fetchPostInsightMetrics(
         const byMetric = new Map<string, { metric: string; period: string; value: number; raw_payload: JsonRecord }>();
 
         for (const row of rawRows) {
-          const metric = viewMetrics.has(row.metric) ? 'post_impressions' : row.metric;
+          const metric = impressionMetrics.has(row.metric)
+            ? 'post_impressions'
+            : videoViewMetrics.has(row.metric)
+              ? 'post_video_views'
+              : row.metric;
           const current = byMetric.get(metric);
 
           if (!current) {
@@ -1029,6 +1053,27 @@ async function syncPagedResource<TItem, TRow extends JsonRecord>(options: {
   };
 }
 
+function getActionMetricValue(payload: JsonRecord, actionType: string) {
+  const actions = Array.isArray(payload.actions) ? payload.actions : [];
+  let total = 0;
+  for (const item of actions) {
+    const action = ensureObject(item);
+    if (toNullableText(action.action_type) !== actionType) continue;
+    total += toNumberOrZero(action.value);
+  }
+  return Math.trunc(total);
+}
+
+function getArrayMetricValue(payload: JsonRecord, key: string) {
+  const values = Array.isArray(payload[key]) ? payload[key] : [];
+  let total = 0;
+  for (const item of values) {
+    const metric = ensureObject(item);
+    total += toNumberOrZero(metric.value);
+  }
+  return Math.trunc(total);
+}
+
 async function getAdIdsForAccount(accountBusinessId: string, limit = 40) {
   const supabase = getSupabaseAdminClient();
   const { data, error } = await supabase
@@ -1170,6 +1215,18 @@ function mapInsightRow(payload: JsonRecord): MetaInsightRow | null {
     impressions: Math.trunc(toNumberOrZero(payload.impressions)),
     reach: Math.trunc(toNumberOrZero(payload.reach)),
     clicks: Math.trunc(toNumberOrZero(payload.clicks)),
+    reactions: getActionMetricValue(payload, 'post_reaction'),
+    comments: getActionMetricValue(payload, 'comment'),
+    shares: getActionMetricValue(payload, 'post'),
+    video_views: Math.max(
+      getActionMetricValue(payload, 'video_view'),
+      getArrayMetricValue(payload, 'video_play_actions'),
+    ),
+    video_p25_views: getArrayMetricValue(payload, 'video_p25_watched_actions'),
+    video_p50_views: getArrayMetricValue(payload, 'video_p50_watched_actions'),
+    video_p75_views: getArrayMetricValue(payload, 'video_p75_watched_actions'),
+    video_p95_views: getArrayMetricValue(payload, 'video_p95_watched_actions'),
+    video_p100_views: getArrayMetricValue(payload, 'video_p100_watched_actions'),
     ctr: toNullableNumber(payload.ctr),
     cpc: toNullableNumber(payload.cpc),
     raw_payload: payload,
@@ -1242,6 +1299,18 @@ function mapInsightHourlyRow(payload: JsonRecord, fallbackBusinessId: string): M
     impressions: Math.trunc(toNumberOrZero(payload.impressions)),
     reach: Math.trunc(toNumberOrZero(payload.reach)),
     clicks: Math.trunc(toNumberOrZero(payload.clicks)),
+    reactions: getActionMetricValue(payload, 'post_reaction'),
+    comments: getActionMetricValue(payload, 'comment'),
+    shares: getActionMetricValue(payload, 'post'),
+    video_views: Math.max(
+      getActionMetricValue(payload, 'video_view'),
+      getArrayMetricValue(payload, 'video_play_actions'),
+    ),
+    video_p25_views: getArrayMetricValue(payload, 'video_p25_watched_actions'),
+    video_p50_views: getArrayMetricValue(payload, 'video_p50_watched_actions'),
+    video_p75_views: getArrayMetricValue(payload, 'video_p75_watched_actions'),
+    video_p95_views: getArrayMetricValue(payload, 'video_p95_watched_actions'),
+    video_p100_views: getArrayMetricValue(payload, 'video_p100_watched_actions'),
     ctr: toNullableNumber(payload.ctr),
     cpc: toNullableNumber(payload.cpc),
     raw_payload: payload,
@@ -2065,7 +2134,7 @@ export default async function metaAdsSyncHandler(req: VercelRequest, res: Vercel
         path: `${accountBusinessId}/insights`,
         params: {
           level: 'ad',
-          fields: 'ad_id,date_start,date_stop,spend,impressions,reach,clicks,ctr,cpc',
+          fields: 'ad_id,date_start,date_stop,spend,impressions,reach,clicks,ctr,cpc,actions,video_play_actions,video_p25_watched_actions,video_p50_watched_actions,video_p75_watched_actions,video_p95_watched_actions,video_p100_watched_actions',
           date_preset: datePreset,
           time_increment: timeIncrement,
           limit: String(limit),
@@ -2099,7 +2168,7 @@ export default async function metaAdsSyncHandler(req: VercelRequest, res: Vercel
         path: `${accountBusinessId}/insights`,
         params: {
           level: 'ad',
-          fields: 'ad_id,date_start,date_stop,spend,impressions,reach,clicks,ctr,cpc',
+          fields: 'ad_id,date_start,date_stop,spend,impressions,reach,clicks,ctr,cpc,actions,video_play_actions,video_p25_watched_actions,video_p50_watched_actions,video_p75_watched_actions,video_p95_watched_actions,video_p100_watched_actions',
           breakdowns,
           date_preset: datePreset,
           time_increment: timeIncrement,
@@ -2160,7 +2229,7 @@ export default async function metaAdsSyncHandler(req: VercelRequest, res: Vercel
           label: 'insights',
           path: `${accountBusinessId}/insights`,
           params: {
-            fields: 'date_start,spend,impressions,reach,clicks,ctr,cpc',
+            fields: 'date_start,spend,impressions,reach,clicks,ctr,cpc,actions,video_play_actions,video_p25_watched_actions,video_p50_watched_actions,video_p75_watched_actions,video_p95_watched_actions,video_p100_watched_actions',
             breakdowns: 'hourly_stats_aggregated_by_advertiser_time_zone',
             date_preset: datePreset,
             time_increment: '1',
@@ -2196,7 +2265,7 @@ export default async function metaAdsSyncHandler(req: VercelRequest, res: Vercel
               label: 'insights',
               path: `${adId}/insights`,
               params: {
-                fields: 'date_start,spend,impressions,reach,clicks,ctr,cpc',
+                fields: 'date_start,spend,impressions,reach,clicks,ctr,cpc,actions,video_play_actions,video_p25_watched_actions,video_p50_watched_actions,video_p75_watched_actions,video_p95_watched_actions,video_p100_watched_actions',
                 breakdowns: 'hourly_stats_aggregated_by_advertiser_time_zone',
                 date_preset: datePreset,
                 time_increment: '1',

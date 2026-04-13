@@ -31,6 +31,15 @@ export type MetaAdsReportingRow = {
   impressions: number | null;
   reach: number | null;
   clicks: number | null;
+  reactions: number | null;
+  comments: number | null;
+  shares: number | null;
+  video_views: number | null;
+  video_p25_views: number | null;
+  video_p50_views: number | null;
+  video_p75_views: number | null;
+  video_p95_views: number | null;
+  video_p100_views: number | null;
   ctr: number | null;
   cpc: number | null;
 };
