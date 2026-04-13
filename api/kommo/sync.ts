@@ -2550,13 +2550,17 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
 
       const { cookieHeader } = await loginDinsidesAndGetCookieHeader();
       const recojoRawRows: Array<Record<string, unknown>> = [];
+      const dinsidesClientIdsByLead = new Map<number, string[]>();
 
       let queriesUsed = 0;
+      let lookupQueriesUsed = 0;
       let processedLeads = 0;
       const diagnostics = {
         leads_total: leadIds.length,
         leads_processed: 0,
         queries_used: 0,
+        lookup_queries_used: 0,
+        leads_missing_client_ids: 0,
         errors: [] as string[],
       };
 
@@ -2567,35 +2571,63 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
           continue;
         }
 
-        if (queriesUsed + days.length > maxQueries) {
+        let clientIds = dinsidesClientIdsByLead.get(leadId);
+        if (!clientIds) {
+          lookupQueriesUsed += 1;
+          const tiendaNombre = leadMeta.get(leadId)?.tienda ?? '';
+          try {
+            clientIds = await lookupDinsidesClientIds({
+              cookieHeader,
+              businessName: tiendaNombre,
+            });
+          } catch {
+            clientIds = [];
+          }
+
+          const uniqueIds = Array.from(new Set((clientIds ?? []).map((id) => String(id).trim()).filter(Boolean)));
+          clientIds = uniqueIds;
+          dinsidesClientIdsByLead.set(leadId, clientIds);
+        }
+
+        if (!clientIds || clientIds.length === 0) {
+          diagnostics.leads_missing_client_ids += 1;
+          processedLeads += 1;
+          continue;
+        }
+
+        const plannedQueriesForLead = days.length * clientIds.length;
+
+        if (queriesUsed + plannedQueriesForLead > maxQueries) {
           if (processedLeads === 0) {
-            throw new Error(`batch_leads demasiado grande para max_queries actual. reduce batch_leads o aumenta max_queries. lead_id=${leadId}, dias=${days.length}, max_queries=${maxQueries}`);
+            throw new Error(`batch_leads demasiado grande para max_queries actual. reduce batch_leads o aumenta max_queries. lead_id=${leadId}, dias=${days.length}, client_ids=${clientIds.length}, max_queries=${maxQueries}`);
           }
           break;
         }
 
         for (const day of days) {
-          queriesUsed += 1;
-          const rows = await fetchDinsidesRecojosRows({
-            cookieHeader,
-            negocioId: leadId,
-            dia: day,
-          });
-
-          for (const row of rows) {
-            const rowDate = parseDateOnlyFromUnknown(row.fecha_recojo) ?? parseDateOnlyFromUnknown(day);
-            if (!rowDate) continue;
-            const rowLeadKey = `${leadId}__${rowDate}`;
-            if (!envioCountsByLeadDate.has(rowLeadKey)) {
-              // protege de ruido de fechas fuera del universo de envíos consultado
-              continue;
-            }
-
-            recojoRawRows.push({
-              ...row,
-              __lead_id: leadId,
-              __fecha_dia: rowDate,
+          for (const clientId of clientIds) {
+            queriesUsed += 1;
+            const rows = await fetchDinsidesRecojosRows({
+              cookieHeader,
+              negocioId: clientId,
+              dia: day,
             });
+
+            for (const row of rows) {
+              const rowDate = parseDateOnlyFromUnknown(row.fecha_recojo) ?? parseDateOnlyFromUnknown(day);
+              if (!rowDate) continue;
+              const rowLeadKey = `${leadId}__${rowDate}`;
+              if (!envioCountsByLeadDate.has(rowLeadKey)) {
+                // protege de ruido de fechas fuera del universo de envíos consultado
+                continue;
+              }
+
+              recojoRawRows.push({
+                ...row,
+                __lead_id: leadId,
+                __fecha_dia: rowDate,
+              });
+            }
           }
         }
 
@@ -2604,6 +2636,7 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
 
       diagnostics.leads_processed = processedLeads;
       diagnostics.queries_used = queriesUsed;
+      diagnostics.lookup_queries_used = lookupQueriesUsed;
 
       const grouped = new Map<string, { leadId: number; fecha: string; tipoCobro: string; veces: number; observaciones: string | null }>();
       for (const row of recojoRawRows) {
