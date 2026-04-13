@@ -2550,6 +2550,7 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
 
       const { cookieHeader } = await loginDinsidesAndGetCookieHeader();
       const recojoRawRows: Array<Record<string, unknown>> = [];
+      const recojoRawDedup = new Set<string>();
       const dinsidesClientIdsByLead = new Map<number, string[]>();
 
       let queriesUsed = 0;
@@ -2595,17 +2596,44 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
           continue;
         }
 
-        const plannedQueriesForLead = days.length * clientIds.length;
+        let activeClientIds = clientIds;
+        if (clientIds.length > 1 && days.length > 0) {
+          const probeDay = days[0];
+          const probeCandidates = clientIds.slice(0, Math.min(4, clientIds.length));
+          const matchedProbeIds: string[] = [];
+
+          for (const candidateId of probeCandidates) {
+            queriesUsed += 1;
+            const probeRows = await fetchDinsidesRecojosRows({
+              cookieHeader,
+              negocioId: candidateId,
+              dia: probeDay,
+            });
+
+            if (probeRows.length > 0) {
+              matchedProbeIds.push(candidateId);
+              if (matchedProbeIds.length >= 2) break;
+            }
+          }
+
+          if (matchedProbeIds.length > 0) {
+            activeClientIds = matchedProbeIds;
+          } else {
+            activeClientIds = [clientIds[0]];
+          }
+        }
+
+        const plannedQueriesForLead = days.length * activeClientIds.length;
 
         if (queriesUsed + plannedQueriesForLead > maxQueries) {
           if (processedLeads === 0) {
-            throw new Error(`batch_leads demasiado grande para max_queries actual. reduce batch_leads o aumenta max_queries. lead_id=${leadId}, dias=${days.length}, client_ids=${clientIds.length}, max_queries=${maxQueries}`);
+            throw new Error(`batch_leads demasiado grande para max_queries actual. reduce batch_leads o aumenta max_queries. lead_id=${leadId}, dias=${days.length}, client_ids=${activeClientIds.length}, max_queries=${maxQueries}`);
           }
           break;
         }
 
         for (const day of days) {
-          for (const clientId of clientIds) {
+          for (const clientId of activeClientIds) {
             queriesUsed += 1;
             const rows = await fetchDinsidesRecojosRows({
               cookieHeader,
@@ -2621,6 +2649,16 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
                 // protege de ruido de fechas fuera del universo de envíos consultado
                 continue;
               }
+
+              const recojoId = String(row.id_recojo_moto ?? '').trim();
+              const dedupeKey = recojoId
+                ? `${leadId}__${recojoId}`
+                : `${leadId}__${rowDate}__${String(row.detalle_recojo ?? '').trim()}__${String(row.nombre_motorizado ?? '').trim()}`;
+
+              if (recojoRawDedup.has(dedupeKey)) {
+                continue;
+              }
+              recojoRawDedup.add(dedupeKey);
 
               recojoRawRows.push({
                 ...row,
@@ -2666,28 +2704,6 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
       }
 
       const rowsToUpsert: Array<Record<string, unknown>> = [];
-      const existingStableIds = new Set<string>();
-
-      if (onlyRemaining && grouped.size > 0) {
-        const stableIds = Array.from(grouped.values()).map((item) => `recojo-dinsides-${item.leadId}-${item.fecha}-${item.tipoCobro === '1 pedido' ? 'tipo1' : 'tipo2'}`);
-        const chunkSize = 300;
-        for (let index = 0; index < stableIds.length; index += chunkSize) {
-          const chunk = stableIds.slice(index, index + chunkSize);
-          const { data: existingRows, error: existingError } = await supabase
-            .from('recojos' as never)
-            .select('stable_id' as never)
-            .in('stable_id' as never, chunk as never);
-
-          if (existingError) {
-            throw new Error(`No se pudieron leer recojos existentes para only_remaining: ${existingError.message}`);
-          }
-
-          for (const row of ((existingRows ?? []) as Array<{ stable_id?: string | null }>)) {
-            const stableId = String(row.stable_id ?? '').trim();
-            if (stableId) existingStableIds.add(stableId);
-          }
-        }
-      }
 
       let skippedExisting = 0;
       for (const item of grouped.values()) {
@@ -2696,10 +2712,8 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
         }
 
         const stableId = `recojo-dinsides-${item.leadId}-${item.fecha}-${item.tipoCobro === '1 pedido' ? 'tipo1' : 'tipo2'}`;
-        if (onlyRemaining && existingStableIds.has(stableId)) {
-          skippedExisting += 1;
-          continue;
-        }
+        // Recojos requiere upsert determinístico por clave (lead+fecha+tipo).
+        // No salteamos existentes para evitar quedarse con "veces" desactualizado.
 
         const cobroATienda = item.tipoCobro === '1 pedido' ? 8 : 0;
         const pagoMoto = 4;
