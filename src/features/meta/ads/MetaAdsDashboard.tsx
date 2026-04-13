@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { Activity, BadgeDollarSign, BarChart3, LineChart as LineChartIcon, Megaphone, MousePointerClick, PieChart as PieChartIcon, Target, Trophy } from 'lucide-react';
-import { Bar, BarChart, CartesianGrid, LabelList, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
+import { Bar, BarChart, CartesianGrid, Cell, LabelList, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { DateRangePicker } from '../../../components/DateRangePicker';
 import { isDateRangeValid } from '../../../lib/dateRange';
 import { formatNumberEs } from '../../../lib/tableHelpers';
@@ -135,6 +135,11 @@ export function MetaAdsDashboard() {
 
   const handleDailyChartClick = (input: unknown) => {
     toggleInteractiveDate(extractDateFromChartClick(input));
+  };
+
+  const resolveDailyBarColor = (rowDate: string, activeColor: string, mutedColor: string) => {
+    if (!interactiveDate) return activeColor;
+    return rowDate === interactiveDate ? activeColor : mutedColor;
   };
 
   const reportingQuery = useMetaAdsReporting({ accountId: '', campaignId: '', adId: '', dateFrom, dateTo });
@@ -1024,12 +1029,15 @@ export function MetaAdsDashboard() {
 
             <ChartCard title="Clicks por día (totales)" icon={<MousePointerClick size={16} className="text-red-600" />}>
               <ResponsiveContainer width="100%" height={300}>
-                <BarChart data={dashboard.trend} onClick={handleDailyChartClick}>
+                <BarChart data={dashboard.trend}>
                   <CartesianGrid strokeDasharray="3 3" vertical={false} />
                   <XAxis dataKey="date_start" tick={{ fontSize: 12 }} />
                   <YAxis tick={{ fontSize: 12 }} />
                   <Tooltip {...chartTooltipStyle} formatter={(value) => formatCompactMetric(Number(value ?? 0), 'number')} />
-                  <Bar dataKey="clicks" name="Clicks" fill="#dc2626" radius={[8, 8, 0, 0]} isAnimationActive={false}>
+                  <Bar dataKey="clicks" name="Clicks" fill="#dc2626" radius={[8, 8, 0, 0]} isAnimationActive={false} onClick={handleDailyChartClick}>
+                    {dashboard.trend.map((row) => (
+                      <Cell key={`clicks-${row.date_start}`} fill={resolveDailyBarColor(row.date_start, '#dc2626', '#fca5a5')} />
+                    ))}
                     {showDailyLabels ? <LabelList dataKey="clicks" position="top" formatter={(value) => formatCompactMetric(Number(value ?? 0), 'number')} className="fill-gray-600 text-[10px] font-semibold" /> : null}
                   </Bar>
                 </BarChart>
@@ -1038,12 +1046,12 @@ export function MetaAdsDashboard() {
 
             <ChartCard title="Promedio diario de clicks" icon={<LineChartIcon size={16} className="text-red-600" />}>
               <ResponsiveContainer width="100%" height={300}>
-                <LineChart data={dashboard.trendAveragesByDay} onClick={handleDailyChartClick}>
+                <LineChart data={dashboard.trendAveragesByDay}>
                   <CartesianGrid strokeDasharray="3 3" vertical={false} />
                   <XAxis dataKey="date_start" tick={{ fontSize: 12 }} />
                   <YAxis tick={{ fontSize: 12 }} />
                   <Tooltip {...chartTooltipStyle} formatter={(value) => Number(value ?? 0).toFixed(2)} />
-                  <Line type="monotone" dataKey="avg_clicks" name="Promedio clicks" stroke="#f97316" strokeWidth={2.4} dot={{ r: 2 }} isAnimationActive={false}>
+                  <Line type="monotone" dataKey="avg_clicks" name="Promedio clicks" stroke="#f97316" strokeWidth={2.4} dot={{ r: 2 }} activeDot={{ r: 4 }} isAnimationActive={false} onClick={handleDailyChartClick}>
                     {showAverageDailyLabels ? <LabelList dataKey="avg_clicks" position="top" formatter={(value) => Number(value ?? 0).toFixed(1)} className="fill-gray-600 text-[10px] font-semibold" /> : null}
                   </Line>
                 </LineChart>
@@ -1097,12 +1105,15 @@ export function MetaAdsDashboard() {
 
             <ChartCard title="Vistas por día (totales)" icon={<LineChartIcon size={16} className="text-red-600" />}>
               <ResponsiveContainer width="100%" height={300}>
-                <BarChart data={dashboard.trend} onClick={handleDailyChartClick}>
+                <BarChart data={dashboard.trend}>
                   <CartesianGrid strokeDasharray="3 3" vertical={false} />
                   <XAxis dataKey="date_start" tick={{ fontSize: 12 }} />
                   <YAxis tick={{ fontSize: 12 }} allowDecimals={false} />
                   <Tooltip {...chartTooltipStyle} formatter={(value) => formatCompactMetric(Number(value ?? 0), 'number')} />
-                  <Bar dataKey="impressions" name="Vistas" fill="#dc2626" radius={[8, 8, 0, 0]} isAnimationActive={false}>
+                  <Bar dataKey="impressions" name="Vistas" fill="#dc2626" radius={[8, 8, 0, 0]} isAnimationActive={false} onClick={handleDailyChartClick}>
+                    {dashboard.trend.map((row) => (
+                      <Cell key={`impressions-${row.date_start}`} fill={resolveDailyBarColor(row.date_start, '#dc2626', '#fca5a5')} />
+                    ))}
                     {showDailyLabels ? <LabelList dataKey="impressions" position="top" formatter={(value) => formatCompactMetric(Number(value ?? 0), 'number')} className="fill-gray-600 text-[10px] font-semibold" /> : null}
                   </Bar>
                 </BarChart>
@@ -1111,12 +1122,12 @@ export function MetaAdsDashboard() {
 
             <ChartCard title="Promedio diario de vistas" icon={<LineChartIcon size={16} className="text-red-600" />}>
               <ResponsiveContainer width="100%" height={300}>
-                <LineChart data={dashboard.trendAveragesByDay} onClick={handleDailyChartClick}>
+                <LineChart data={dashboard.trendAveragesByDay}>
                   <CartesianGrid strokeDasharray="3 3" vertical={false} />
                   <XAxis dataKey="date_start" tick={{ fontSize: 12 }} />
                   <YAxis tick={{ fontSize: 12 }} allowDecimals={false} />
                   <Tooltip {...chartTooltipStyle} formatter={(value) => Number(value ?? 0).toFixed(2)} />
-                  <Line type="monotone" dataKey="avg_impressions" name="Promedio de vistas" stroke="#f97316" strokeWidth={2.4} dot={{ r: 2 }} isAnimationActive={false}>
+                  <Line type="monotone" dataKey="avg_impressions" name="Promedio de vistas" stroke="#f97316" strokeWidth={2.4} dot={{ r: 2 }} activeDot={{ r: 4 }} isAnimationActive={false} onClick={handleDailyChartClick}>
                     {showAverageDailyLabels ? <LabelList dataKey="avg_impressions" position="top" formatter={(value) => Number(value ?? 0).toFixed(1)} className="fill-gray-600 text-[10px] font-semibold" /> : null}
                   </Line>
                 </LineChart>
@@ -1170,12 +1181,15 @@ export function MetaAdsDashboard() {
 
             <ChartCard title="Gasto por día (total)" icon={<BadgeDollarSign size={16} className="text-red-600" />}>
               <ResponsiveContainer width="100%" height={300}>
-                <BarChart data={dashboard.trend} onClick={handleDailyChartClick}>
+                <BarChart data={dashboard.trend}>
                   <CartesianGrid strokeDasharray="3 3" vertical={false} />
                   <XAxis dataKey="date_start" tick={{ fontSize: 12 }} />
                   <YAxis tick={{ fontSize: 12 }} />
                   <Tooltip {...chartTooltipStyle} formatter={(value) => formatCompactMetric(Number(value ?? 0), 'currency')} />
-                  <Bar dataKey="spend" name="Gasto" fill="#dc2626" radius={[8, 8, 0, 0]} isAnimationActive={false}>
+                  <Bar dataKey="spend" name="Gasto" fill="#dc2626" radius={[8, 8, 0, 0]} isAnimationActive={false} onClick={handleDailyChartClick}>
+                    {dashboard.trend.map((row) => (
+                      <Cell key={`spend-${row.date_start}`} fill={resolveDailyBarColor(row.date_start, '#dc2626', '#fca5a5')} />
+                    ))}
                     {showDailyLabels ? <LabelList dataKey="spend" position="top" formatter={(value) => formatCompactMetric(Number(value ?? 0), 'currency')} className="fill-gray-600 text-[10px] font-semibold" /> : null}
                   </Bar>
                 </BarChart>
@@ -1184,12 +1198,12 @@ export function MetaAdsDashboard() {
 
             <ChartCard title="Promedio diario de gasto" icon={<LineChartIcon size={16} className="text-red-600" />}>
               <ResponsiveContainer width="100%" height={300}>
-                <LineChart data={dashboard.trendAveragesByDay} onClick={handleDailyChartClick}>
+                <LineChart data={dashboard.trendAveragesByDay}>
                   <CartesianGrid strokeDasharray="3 3" vertical={false} />
                   <XAxis dataKey="date_start" tick={{ fontSize: 12 }} />
                   <YAxis tick={{ fontSize: 12 }} />
                   <Tooltip {...chartTooltipStyle} formatter={(value) => formatCompactMetric(Number(value ?? 0), 'currency')} />
-                  <Line type="monotone" dataKey="avg_spend" name="Promedio gasto" stroke="#f97316" strokeWidth={2.4} dot={{ r: 2 }} isAnimationActive={false}>
+                  <Line type="monotone" dataKey="avg_spend" name="Promedio gasto" stroke="#f97316" strokeWidth={2.4} dot={{ r: 2 }} activeDot={{ r: 4 }} isAnimationActive={false} onClick={handleDailyChartClick}>
                     {showAverageDailyLabels ? <LabelList dataKey="avg_spend" position="top" formatter={(value) => formatCompactMetric(Number(value ?? 0), 'currency')} className="fill-gray-600 text-[10px] font-semibold" /> : null}
                   </Line>
                 </LineChart>
@@ -1203,7 +1217,7 @@ export function MetaAdsDashboard() {
           <div className="grid grid-cols-1 gap-4 xl:grid-cols-1">
             <ChartCard title="Tendencia diaria de CTR y CPC" icon={<PieChartIcon size={16} className="text-red-600" />}>
               <ResponsiveContainer width="100%" height={300}>
-                <LineChart data={dashboard.trendEfficiency} onClick={handleDailyChartClick}>
+                <LineChart data={dashboard.trendEfficiency}>
                   <CartesianGrid strokeDasharray="3 3" vertical={false} />
                   <XAxis dataKey="date_start" tick={{ fontSize: 12 }} />
                   <YAxis yAxisId="left" tick={{ fontSize: 12 }} tickFormatter={(value) => `${Number(value).toFixed(1)}%`} />
@@ -1216,10 +1230,10 @@ export function MetaAdsDashboard() {
                       return formatCompactMetric(numeric, 'currency');
                     }}
                   />
-                  <Line yAxisId="left" type="monotone" dataKey="ctr" name="CTR" stroke="#dc2626" strokeWidth={2.5} dot={{ r: 2 }} isAnimationActive={false}>
+                  <Line yAxisId="left" type="monotone" dataKey="ctr" name="CTR" stroke="#dc2626" strokeWidth={2.5} dot={{ r: 2 }} activeDot={{ r: 4 }} isAnimationActive={false} onClick={handleDailyChartClick}>
                     {showEfficiencyLabels ? <LabelList dataKey="ctr" position="top" formatter={(value) => `${Number(value ?? 0).toFixed(1)}%`} className="fill-gray-600 text-[10px] font-semibold" /> : null}
                   </Line>
-                  <Line yAxisId="right" type="monotone" dataKey="cpc" name="CPC" stroke="#f97316" strokeWidth={2.2} dot={{ r: 2 }} isAnimationActive={false}>
+                  <Line yAxisId="right" type="monotone" dataKey="cpc" name="CPC" stroke="#f97316" strokeWidth={2.2} dot={{ r: 2 }} activeDot={{ r: 4 }} isAnimationActive={false} onClick={handleDailyChartClick}>
                     {showEfficiencyLabels ? <LabelList dataKey="cpc" position="top" formatter={(value) => formatCompactMetric(Number(value ?? 0), 'currency')} className="fill-gray-600 text-[10px] font-semibold" /> : null}
                   </Line>
                 </LineChart>

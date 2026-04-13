@@ -163,6 +163,24 @@ function formatHour(hour: number) {
   return `${String(hour).padStart(2, '0')}:00`;
 }
 
+function getCurrentLimaDate() {
+  const formatter = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Lima',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  });
+  return formatter.format(new Date());
+}
+
+function shiftDate(dateString: string, days: number) {
+  const [year, month, day] = dateString.split('-').map(Number);
+  const utcDate = new Date(Date.UTC(year, month - 1, day));
+  utcDate.setUTCDate(utcDate.getUTCDate() + days);
+
+  return `${utcDate.getUTCFullYear()}-${String(utcDate.getUTCMonth() + 1).padStart(2, '0')}-${String(utcDate.getUTCDate()).padStart(2, '0')}`;
+}
+
 function asChartNumber(value: unknown) {
   if (Array.isArray(value)) {
     return asChartNumber(value[0]);
@@ -557,6 +575,25 @@ export function KommoLeadsInsights() {
   const [pdfExportError, setPdfExportError] = useState<string | null>(null);
   const [pdfExportSuccess, setPdfExportSuccess] = useState<string | null>(null);
   const hasValidDraftDateRange = isDateRangeValid(draftStartDate, draftEndDate);
+
+  const applyQuickRange = (range: 'today' | 'last7' | 'last30') => {
+    const todayLima = getCurrentLimaDate();
+
+    if (range === 'today') {
+      setDraftStartDate(todayLima);
+      setDraftEndDate(todayLima);
+      return;
+    }
+
+    if (range === 'last7') {
+      setDraftStartDate(shiftDate(todayLima, -6));
+      setDraftEndDate(todayLima);
+      return;
+    }
+
+    setDraftStartDate(shiftDate(todayLima, -29));
+    setDraftEndDate(todayLima);
+  };
 
   const insightsQuery = useQuery({
     queryKey: ['kommo-leads-insights', appliedStartDate, appliedEndDate],
@@ -978,7 +1015,13 @@ export function KommoLeadsInsights() {
           {insightsQuery.isFetching ? <span className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">Actualizando…</span> : null}
         </div>
 
-        <div className="grid grid-cols-1 gap-3 xl:grid-cols-[minmax(0,2fr)_auto] xl:items-end">
+        <div className="flex flex-wrap items-center gap-2">
+          <QuickRangeButton label="Hoy" onClick={() => applyQuickRange('today')} />
+          <QuickRangeButton label="Últimos 7 días" onClick={() => applyQuickRange('last7')} />
+          <QuickRangeButton label="Último mes" onClick={() => applyQuickRange('last30')} />
+        </div>
+
+        <div className="grid grid-cols-1 gap-3 xl:grid-cols-[minmax(0,22rem)_auto] xl:items-end">
           <DateRangePicker
             startDate={draftStartDate}
             endDate={draftEndDate}
@@ -987,7 +1030,8 @@ export function KommoLeadsInsights() {
             showPresets={false}
             startLabel="Desde"
             endLabel="Hasta"
-            layoutClassName="grid grid-cols-1 gap-3 sm:grid-cols-2"
+            className="max-w-md"
+            layoutClassName="space-y-3"
             fieldClassName="rounded-2xl border border-gray-200 bg-white px-4 py-3 text-xs font-semibold uppercase tracking-wide text-gray-600 shadow-none"
             labelClassName="text-xs font-semibold uppercase tracking-wide text-gray-600"
             inputWrapperClassName="mt-2 rounded-xl border border-gray-200 bg-white px-0 py-0"
@@ -1279,6 +1323,18 @@ function resolveRangeDays(startDate: string | null, endDate: string | null) {
   if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || end < start) return 1;
   const diff = end.getTime() - start.getTime();
   return Math.max(1, Math.floor(diff / (1000 * 60 * 60 * 24)) + 1);
+}
+
+function QuickRangeButton({ label, onClick }: { label: string; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="inline-flex items-center rounded-full border border-gray-200 bg-white px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.14em] text-gray-700 transition hover:border-red-200 hover:bg-red-50 hover:text-red-700"
+    >
+      {label}
+    </button>
+  );
 }
 
 function normalizePipelineKey(value: string) {
