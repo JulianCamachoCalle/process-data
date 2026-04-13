@@ -2053,12 +2053,12 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
     if (mode === 'dinsides_envios_sync_cursor') {
       const batchLeads = parseEnviosProbeLimit(searchParams.get('batch_leads') ?? undefined, 120, 1000);
       const limitRows = parseEnviosProbeLimit(searchParams.get('limit_rows') ?? undefined, 2000, 10000);
+      const singleBusiness = searchParams.get('search_negocio')?.trim();
       const cursor = parseNonNegativeInt(
         searchParams.get('cursor') ?? searchParams.get('lead_offset') ?? undefined,
         0,
         1_000_000,
       );
-      const singleBusiness = searchParams.get('search_negocio')?.trim();
       const singleSearchTipo = searchParams.get('search_tipo')?.trim();
       const debug = ['1', 'true', 'yes'].includes((searchParams.get('debug') ?? '').toLowerCase());
 
@@ -2451,6 +2451,7 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
       const batchLeads = parseEnviosProbeLimit(searchParams.get('batch_leads') ?? undefined, 30, 200);
       const maxQueries = parseEnviosProbeLimit(searchParams.get('max_queries') ?? undefined, 180, 800);
       const limitRows = parseEnviosProbeLimit(searchParams.get('limit_rows') ?? undefined, 2000, 10000);
+      const singleBusiness = searchParams.get('search_negocio')?.trim();
       const cursor = parseNonNegativeInt(
         searchParams.get('cursor') ?? searchParams.get('lead_offset') ?? undefined,
         0,
@@ -2464,20 +2465,28 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
 
       const supabase = getSupabaseAdminClient();
 
-      const { data: leadRowsRaw, error: leadError } = await supabase
+      let leadQuery = supabase
         .from('leads_ganados' as never)
         .select('business_id,tienda_nombre_snapshot,vendedor_nombre_snapshot' as never)
         .not('tienda_nombre_snapshot' as never, 'is' as never, null as never)
         .neq('tienda_nombre_snapshot' as never, '' as never)
-        .order('business_id', { ascending: true })
-        .range(cursor, cursor + batchLeads - 1);
+        .order('business_id', { ascending: true });
+
+      if (singleBusiness) {
+        leadQuery = leadQuery.ilike('tienda_nombre_snapshot' as never, `%${singleBusiness}%` as never);
+      }
+
+      const { data: leadRowsRaw, error: leadError } = await leadQuery.range(
+        cursor,
+        cursor + batchLeads - 1,
+      );
 
       if (leadError) {
         throw new Error(`No se pudieron leer leads_ganados para recojos cursor sync: ${leadError.message}`);
       }
 
       const leadsRows = (leadRowsRaw ?? []) as Array<{ business_id: number | null; tienda_nombre_snapshot: string | null; vendedor_nombre_snapshot: string | null }>;
-      const hasMore = leadsRows.length === batchLeads;
+      const hasMore = !singleBusiness && leadsRows.length === batchLeads;
 
       const leadIds = leadsRows
         .map((row) => Number(row.business_id ?? 0))
@@ -2772,6 +2781,7 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
         return res.status(200).json({
           success: true,
           mode,
+          search_negocio: singleBusiness ?? '',
           cursor,
           next_cursor: nextCursor,
           has_more: hasMoreFinal,
@@ -2791,6 +2801,7 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
       return res.status(200).json({
         success: true,
         mode,
+        search_negocio: singleBusiness ?? '',
         only_remaining: onlyRemaining,
         persist,
         cursor,
