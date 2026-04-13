@@ -100,7 +100,28 @@ function normalizeText(value: unknown): string {
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
     .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
     .trim();
+}
+
+function normalizeLookupComparable(value: unknown): string {
+  return normalizeText(value).replace(/\s+/g, ' ').trim();
+}
+
+function businessMatchesLine(normalizedBusiness: string, normalizedLine: string): boolean {
+  if (!normalizedBusiness) return true;
+  if (!normalizedLine) return false;
+
+  if (normalizedLine.includes(normalizedBusiness) || normalizedBusiness.includes(normalizedLine)) {
+    return true;
+  }
+
+  const businessTokens = normalizedBusiness.split(' ').filter((token) => token.length >= 3);
+  if (businessTokens.length === 0) return false;
+
+  const matchedTokens = businessTokens.filter((token) => normalizedLine.includes(token)).length;
+  return matchedTokens >= Math.min(2, businessTokens.length);
 }
 
 function toDateOnlyIso(value: string | null): string {
@@ -207,7 +228,7 @@ async function resolveDistritoFromDinsidesCached(businessName: string) {
 }
 
 function inferDistritoFromLookupText(rawText: string, businessName: string): string {
-  const normalizedBusiness = normalizeText(businessName);
+  const normalizedBusiness = normalizeLookupComparable(businessName);
   const lines = rawText.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
 
   const tryResolveFromText = (text: string) => {
@@ -223,9 +244,9 @@ function inferDistritoFromLookupText(rawText: string, businessName: string): str
   };
 
   for (const line of lines) {
-    const normalizedLine = normalizeText(line);
+    const normalizedLine = normalizeLookupComparable(line);
     if (!normalizedLine) continue;
-    if (normalizedBusiness && !normalizedLine.includes(normalizedBusiness)) continue;
+    if (normalizedBusiness && !businessMatchesLine(normalizedBusiness, normalizedLine)) continue;
 
     const distrito = tryResolveFromText(line);
     if (distrito) return distrito;
@@ -583,7 +604,7 @@ export async function hydrateLeadGanadoDistritoByBusinessId(
 
   const distrito = await resolveDistritoFromDinsidesCached(businessName);
   if (!distrito) {
-    return { updated: false, reason: 'not_resolved' as const };
+    return { updated: false, reason: 'not_resolved' as const, business_name: businessName };
   }
 
   const { error: updateError } = await supabase
