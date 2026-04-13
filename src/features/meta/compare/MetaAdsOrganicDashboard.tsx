@@ -176,6 +176,14 @@ export function MetaAdsOrganicDashboard() {
     organic: totals.organicImpressions > 0 ? (totals.organicVideoViews * 100) / totals.organicImpressions : 0,
   }), [totals.adsImpressions, totals.adsVideoViews, totals.organicImpressions, totals.organicVideoViews]);
 
+  const retentionByDate = useMemo(() => {
+    return compareByDate.map((row) => ({
+      date: row.date,
+      ads_retention: row.ads_impressions > 0 ? (row.ads_video_views * 100) / row.ads_impressions : 0,
+      organic_retention: row.organic_impressions > 0 ? (row.organic_video_views * 100) / row.organic_impressions : 0,
+    }));
+  }, [compareByDate]);
+
   const isLoading = adsQuery.isLoading || organicQuery.isLoading;
   const error = adsQuery.error ?? organicQuery.error;
 
@@ -287,7 +295,113 @@ export function MetaAdsOrganicDashboard() {
         </ChartCard>
       </Section>
 
-      <Section title="3) Comparativa total (barras)">
+      <Section title="3) Reacciones, comentarios y compartidos por día (líneas)">
+        <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
+          <ChartCard title="Reacciones · Ads vs Orgánico" icon={<ThumbsUp size={16} className="text-red-600" />}>
+            {compareByDate.length === 0 ? (
+              <div className="rounded-xl border border-dashed border-gray-200 bg-gray-50 px-4 py-6 text-sm text-gray-500">
+                Sin datos para este rango.
+              </div>
+            ) : (
+              <ResponsiveContainer width="100%" height={300}>
+                <LineChart data={compareByDate}>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                  <XAxis dataKey="date" tick={{ fontSize: 12 }} />
+                  <YAxis tick={{ fontSize: 12 }} />
+                  <Tooltip {...chartTooltipStyle} />
+                  <Line type="monotone" dataKey="ads_reactions" name="Reacciones Ads" stroke="#dc2626" strokeWidth={2.4} dot={false} isAnimationActive={false} />
+                  <Line type="monotone" dataKey="organic_reactions" name="Reacciones Orgánico" stroke="#2563eb" strokeWidth={2.4} dot={false} isAnimationActive={false} />
+                </LineChart>
+              </ResponsiveContainer>
+            )}
+          </ChartCard>
+
+          <ChartCard title="Comentarios · Ads vs Orgánico" icon={<MessageSquare size={16} className="text-red-600" />}>
+            {compareByDate.length === 0 ? (
+              <div className="rounded-xl border border-dashed border-gray-200 bg-gray-50 px-4 py-6 text-sm text-gray-500">
+                Sin datos para este rango.
+              </div>
+            ) : (
+              <ResponsiveContainer width="100%" height={300}>
+                <LineChart data={compareByDate}>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                  <XAxis dataKey="date" tick={{ fontSize: 12 }} />
+                  <YAxis tick={{ fontSize: 12 }} />
+                  <Tooltip {...chartTooltipStyle} />
+                  <Line type="monotone" dataKey="ads_comments" name="Comentarios Ads" stroke="#dc2626" strokeWidth={2.4} dot={false} isAnimationActive={false} />
+                  <Line type="monotone" dataKey="organic_comments" name="Comentarios Orgánico" stroke="#2563eb" strokeWidth={2.4} dot={false} isAnimationActive={false} />
+                </LineChart>
+              </ResponsiveContainer>
+            )}
+          </ChartCard>
+
+          <ChartCard title="Compartidos · Ads vs Orgánico" icon={<Share2 size={16} className="text-red-600" />}>
+            {compareByDate.length === 0 ? (
+              <div className="rounded-xl border border-dashed border-gray-200 bg-gray-50 px-4 py-6 text-sm text-gray-500">
+                Sin datos para este rango.
+              </div>
+            ) : (
+              <ResponsiveContainer width="100%" height={300}>
+                <LineChart data={compareByDate}>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                  <XAxis dataKey="date" tick={{ fontSize: 12 }} />
+                  <YAxis tick={{ fontSize: 12 }} />
+                  <Tooltip {...chartTooltipStyle} />
+                  <Line type="monotone" dataKey="ads_shares" name="Compartidos Ads" stroke="#dc2626" strokeWidth={2.4} dot={false} isAnimationActive={false} />
+                  <Line type="monotone" dataKey="organic_shares" name="Compartidos Orgánico" stroke="#2563eb" strokeWidth={2.4} dot={false} isAnimationActive={false} />
+                </LineChart>
+              </ResponsiveContainer>
+            )}
+          </ChartCard>
+        </div>
+      </Section>
+
+      <Section title="4) Video views y retención (líneas)">
+        <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+          <ChartCard title="Video Views · Ads vs Orgánico" icon={<Eye size={16} className="text-red-600" />}>
+            {compareByDate.length === 0 ? (
+              <div className="rounded-xl border border-dashed border-gray-200 bg-gray-50 px-4 py-6 text-sm text-gray-500">
+                Sin datos para este rango.
+              </div>
+            ) : (
+              <ResponsiveContainer width="100%" height={300}>
+                <LineChart data={compareByDate}>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                  <XAxis dataKey="date" tick={{ fontSize: 12 }} />
+                  <YAxis tick={{ fontSize: 12 }} />
+                  <Tooltip {...chartTooltipStyle} />
+                  <Line type="monotone" dataKey="ads_video_views" name="Video Views Ads" stroke="#dc2626" strokeWidth={2.4} dot={false} isAnimationActive={false} />
+                  <Line type="monotone" dataKey="organic_video_views" name="Video Views Orgánico" stroke="#2563eb" strokeWidth={2.4} dot={false} isAnimationActive={false} />
+                </LineChart>
+              </ResponsiveContainer>
+            )}
+          </ChartCard>
+
+          <ChartCard title="Retención · Ads vs Orgánico" icon={<Target size={16} className="text-red-600" />}>
+            {retentionByDate.length === 0 ? (
+              <div className="rounded-xl border border-dashed border-gray-200 bg-gray-50 px-4 py-6 text-sm text-gray-500">
+                Sin datos para este rango.
+              </div>
+            ) : (
+              <ResponsiveContainer width="100%" height={300}>
+                <LineChart data={retentionByDate}>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                  <XAxis dataKey="date" tick={{ fontSize: 12 }} />
+                  <YAxis tick={{ fontSize: 12 }} tickFormatter={(value) => `${Number(value).toFixed(1)}%`} />
+                  <Tooltip
+                    {...chartTooltipStyle}
+                    formatter={(value) => `${Number(value ?? 0).toFixed(2)}%`}
+                  />
+                  <Line type="monotone" dataKey="ads_retention" name="Retención Ads" stroke="#dc2626" strokeWidth={2.4} dot={false} isAnimationActive={false} />
+                  <Line type="monotone" dataKey="organic_retention" name="Retención Orgánico" stroke="#2563eb" strokeWidth={2.4} dot={false} isAnimationActive={false} />
+                </LineChart>
+              </ResponsiveContainer>
+            )}
+          </ChartCard>
+        </div>
+      </Section>
+
+      <Section title="5) Comparativa total (barras)">
         <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
           <ChartCard title="Total Clicks · Ads vs Orgánico" icon={<BarChart3 size={16} className="text-red-600" />}>
             <ResponsiveContainer width="100%" height={280}>
