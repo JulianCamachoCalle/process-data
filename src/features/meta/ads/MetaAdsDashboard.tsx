@@ -869,7 +869,6 @@ export function MetaAdsDashboard() {
           <KpiCard title="Retención 95%" value={formatCompactMetric(dashboard.retentionP95, 'percent')} helper="Video p95 / video views" icon={<Target className="text-red-600" size={18} />} />
           <KpiCard title="Retención 100%" value={formatCompactMetric(dashboard.retentionP100, 'percent')} helper="Video p100 / video views" icon={<Target className="text-red-600" size={18} />} />
           <KpiCard title="Campañas con data" value={formatNumberEs(dashboard.totalCampaigns)} helper="Campañas únicas en el rango" icon={<BarChart3 className="text-red-600" size={18} />} />
-          <KpiCard title="Ads con data" value={formatNumberEs(dashboard.totalAds)} helper={`${formatNumberEs(dashboard.totalAdsets)} ad sets únicos`} icon={<Megaphone className="text-red-600" size={18} />} />
         </KpiGrid>
       </Section>
 
