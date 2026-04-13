@@ -774,7 +774,7 @@ export function MetaAdsDashboard() {
     }
 
     return Array.from(grouped.entries())
-      .map(([label, total]) => ({ label, total }))
+      .map(([label, total]) => ({ label, total: Math.round(total) }))
       .sort((a, b) => b.total - a.total)
       .slice(0, 12);
   }, [scopedAudienceRows, audienceMetric]);
@@ -791,7 +791,7 @@ export function MetaAdsDashboard() {
     }
 
     return Array.from(grouped.entries())
-      .map(([label, total]) => ({ label, total }))
+      .map(([label, total]) => ({ label, total: Math.round(total) }))
       .sort((a, b) => b.total - a.total)
       .slice(0, 12);
   }, [scopedAudienceRows, audienceMetric]);
@@ -807,7 +807,7 @@ export function MetaAdsDashboard() {
     }
 
     return Array.from(grouped.entries())
-      .map(([label, total]) => ({ label, total }))
+      .map(([label, total]) => ({ label, total: Math.round(total) }))
       .sort((a, b) => b.total - a.total)
       .slice(0, 10);
   }, [scopedAudienceRows, audienceMetric]);
@@ -823,7 +823,7 @@ export function MetaAdsDashboard() {
     }
 
     return Array.from(grouped.entries())
-      .map(([label, total]) => ({ label, total }))
+      .map(([label, total]) => ({ label, total: Math.round(total) }))
       .sort((a, b) => b.total - a.total)
       .slice(0, 10);
   }, [scopedAudienceRows, audienceMetric]);
@@ -839,7 +839,7 @@ export function MetaAdsDashboard() {
     }
 
     return Array.from(grouped.entries())
-      .map(([label, total]) => ({ label, total }))
+      .map(([label, total]) => ({ label, total: Math.round(total) }))
       .sort((a, b) => b.total - a.total)
       .slice(0, 12);
   }, [scopedAudienceRows, audienceMetric]);
@@ -855,7 +855,7 @@ export function MetaAdsDashboard() {
     }
 
     return Array.from(grouped.entries())
-      .map(([label, total]) => ({ label, total }))
+      .map(([label, total]) => ({ label, total: Math.round(total) }))
       .sort((a, b) => b.total - a.total)
       .slice(0, 12);
   }, [scopedAudienceRows, audienceMetric]);
