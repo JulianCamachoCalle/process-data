@@ -53,7 +53,7 @@ const DISTRITO_OPTIONS = [
   'Jesús María',
   'La Molina',
   'La Victoria',
-  'Lima (Cercado)',
+  'Cercado de Lima',
   'Lince',
   'Los Olivos',
   'Lurigancho-Chosica',
