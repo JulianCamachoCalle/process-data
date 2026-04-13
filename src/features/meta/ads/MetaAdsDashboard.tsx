@@ -79,6 +79,14 @@ function getAudienceMetricValue(row: { [key: string]: unknown }, metric: Audienc
   return Number(row.impressions ?? 0);
 }
 
+function getAudienceMetricField(metric: AudienceMetricKey) {
+  if (metric === 'reactions') return 'reactions';
+  if (metric === 'comments') return 'comments';
+  if (metric === 'shares') return 'shares';
+  if (metric === 'video_views') return 'video_views';
+  return null;
+}
+
 function resolveCountryLabel(codeOrName: string) {
   const normalized = (codeOrName ?? '').trim();
   if (!normalized) return 'N/D';
@@ -584,9 +592,18 @@ export function MetaAdsDashboard() {
       grouped.set(date, (grouped.get(date) ?? 0) + value);
     }
 
-    return Array.from(grouped.entries())
+    const rows = Array.from(grouped.entries())
       .map(([date_start, total]) => ({ date_start, total }))
       .sort((a, b) => a.date_start.localeCompare(b.date_start));
+
+    const shouldHideZeroDailyPoints = insightChartMetric === 'video_views'
+      || insightChartMetric === 'reactions'
+      || insightChartMetric === 'comments'
+      || insightChartMetric === 'shares';
+
+    return shouldHideZeroDailyPoints
+      ? rows.filter((row) => row.total > 0)
+      : rows;
   }, [dashboard.filteredRows, insightChartMetric]);
 
   const selectedDailyAverages = useMemo(() => {
@@ -695,13 +712,64 @@ export function MetaAdsDashboard() {
   const metricLabel = audienceMetricMeta[audienceMetric].label;
   const metricFormat = audienceMetricMeta[audienceMetric].format;
 
+  const audienceFallbackContext = useMemo(() => {
+    const breakdownImpressionsByAdDate = new Map<string, number>();
+    for (const row of scopedAudienceRows) {
+      const key = `${row.ad_business_id}__${row.date_start}`;
+      breakdownImpressionsByAdDate.set(key, (breakdownImpressionsByAdDate.get(key) ?? 0) + Number(row.impressions ?? 0));
+    }
+
+    const metricTotalsByAdDate = new Map<string, { reactions: number; comments: number; shares: number; video_views: number }>();
+    for (const row of dashboard.filteredRows) {
+      const key = `${row.ad_business_id}__${row.date_start}`;
+      const current = metricTotalsByAdDate.get(key) ?? { reactions: 0, comments: 0, shares: 0, video_views: 0 };
+      current.reactions += Number(row.reactions ?? 0);
+      current.comments += Number(row.comments ?? 0);
+      current.shares += Number(row.shares ?? 0);
+      current.video_views += Number(row.video_views ?? 0);
+      metricTotalsByAdDate.set(key, current);
+    }
+
+    return {
+      breakdownImpressionsByAdDate,
+      metricTotalsByAdDate,
+    };
+  }, [scopedAudienceRows, dashboard.filteredRows]);
+
+  const resolveAudienceMetricValue = (row: { [key: string]: unknown }) => {
+    const directValue = getAudienceMetricValue(row, audienceMetric);
+    if (directValue > 0) return directValue;
+
+    const field = getAudienceMetricField(audienceMetric);
+    if (!field) return directValue;
+
+    const adBusinessId = String(row.ad_business_id ?? '');
+    const dateStart = String(row.date_start ?? '');
+    if (!adBusinessId || !dateStart) return directValue;
+
+    const key = `${adBusinessId}__${dateStart}`;
+    const breakdownTotalImpressions = audienceFallbackContext.breakdownImpressionsByAdDate.get(key) ?? 0;
+    if (breakdownTotalImpressions <= 0) return directValue;
+
+    const adMetricTotals = audienceFallbackContext.metricTotalsByAdDate.get(key);
+    if (!adMetricTotals) return directValue;
+
+    const adMetricValue = Number(adMetricTotals[field] ?? 0);
+    if (adMetricValue <= 0) return directValue;
+
+    const rowImpressions = Number(row.impressions ?? 0);
+    if (rowImpressions <= 0) return directValue;
+
+    return adMetricValue * (rowImpressions / breakdownTotalImpressions);
+  };
+
   const audienceByAge = useMemo(() => {
     const grouped = new Map<string, number>();
 
     for (const row of scopedAudienceRows) {
       if (row.breakdown_type !== 'age_gender') continue;
       const key = row.breakdown_value_1 || 'N/D';
-      const value = getAudienceMetricValue(row, audienceMetric);
+      const value = resolveAudienceMetricValue(row);
       grouped.set(key, (grouped.get(key) ?? 0) + value);
     }
 
@@ -718,7 +786,7 @@ export function MetaAdsDashboard() {
       if (row.breakdown_type !== 'age_gender') continue;
       const key = resolveGenderLabel(row.breakdown_value_2 || '');
       if (!key) continue;
-      const value = getAudienceMetricValue(row, audienceMetric);
+      const value = resolveAudienceMetricValue(row);
       grouped.set(key, (grouped.get(key) ?? 0) + value);
     }
 
@@ -734,7 +802,7 @@ export function MetaAdsDashboard() {
     for (const row of scopedAudienceRows) {
       if (row.breakdown_type !== 'country') continue;
       const key = resolveCountryLabel(row.breakdown_value_1 || 'N/D');
-      const value = getAudienceMetricValue(row, audienceMetric);
+      const value = resolveAudienceMetricValue(row);
       grouped.set(key, (grouped.get(key) ?? 0) + value);
     }
 
@@ -750,7 +818,7 @@ export function MetaAdsDashboard() {
     for (const row of scopedAudienceRows) {
       if (row.breakdown_type !== 'publisher_platform') continue;
       const key = row.breakdown_value_1 || 'N/D';
-      const value = getAudienceMetricValue(row, audienceMetric);
+      const value = resolveAudienceMetricValue(row);
       grouped.set(key, (grouped.get(key) ?? 0) + value);
     }
 
@@ -766,7 +834,7 @@ export function MetaAdsDashboard() {
     for (const row of scopedAudienceRows) {
       if (row.breakdown_type !== 'region') continue;
       const key = row.breakdown_value_1 || 'N/D';
-      const value = getAudienceMetricValue(row, audienceMetric);
+      const value = resolveAudienceMetricValue(row);
       grouped.set(key, (grouped.get(key) ?? 0) + value);
     }
 
@@ -782,7 +850,7 @@ export function MetaAdsDashboard() {
     for (const row of scopedAudienceRows) {
       if (row.breakdown_type !== 'device_platform') continue;
       const key = row.breakdown_value_1 || 'N/D';
-      const value = getAudienceMetricValue(row, audienceMetric);
+      const value = resolveAudienceMetricValue(row);
       grouped.set(key, (grouped.get(key) ?? 0) + value);
     }
 
