@@ -8,7 +8,8 @@
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview",
-    "auth:hash-admin-password": "node scripts/generate-admin-password-hash.mjs"
+    "auth:hash-admin-password": "node scripts/generate-admin-password-hash.mjs",
+    "sync:dinsides:cursors": "node scripts/run-dinsides-cursor-sync.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.100.1",
