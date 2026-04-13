@@ -58,26 +58,33 @@ function safeDivide(numerator: number, denominator: number) {
   return numerator / denominator;
 }
 
-// Función para encontrar el valor más frecuente en un array de strings, ignorando mayúsculas, espacios y caracteres especiales. Devuelve una cadena vacía si no hay valores válidos.
-function getMostFrequent(values: string[]) {
-  const count = new Map<string, number>();
+function getMostFrequentNormalized(values: string[]) {
+  const countByNormalized = new Map<string, number>();
+  const displayByNormalized = new Map<string, string>();
 
-  for (const value of values) {
-    const key = value.trim();
-    if (!key) continue;
-    count.set(key, (count.get(key) ?? 0) + 1);
-  }
+  for (const raw of values) {
+    const value = String(raw ?? '').trim();
+    if (!value) continue;
 
-  let winner = '';
-  let winnerCount = 0;
-  for (const [value, currentCount] of count) {
-    if (currentCount > winnerCount) {
-      winner = value;
-      winnerCount = currentCount;
+    const normalized = normalizeText(value);
+    if (!normalized) continue;
+
+    countByNormalized.set(normalized, (countByNormalized.get(normalized) ?? 0) + 1);
+    if (!displayByNormalized.has(normalized)) {
+      displayByNormalized.set(normalized, value);
     }
   }
 
-  return winner;
+  let winnerNormalized = '';
+  let winnerCount = 0;
+  for (const [normalized, count] of countByNormalized.entries()) {
+    if (count > winnerCount) {
+      winnerNormalized = normalized;
+      winnerCount = count;
+    }
+  }
+
+  return winnerNormalized ? displayByNormalized.get(winnerNormalized) ?? '' : '';
 }
 
 // Función para encontrar el ID de negocio de tipo de recojo basado en etiquetas candidatas, buscando en las filas de la hoja de "TIPO DE RECOJO". Devuelve null si no encuentra una coincidencia o si no puede determinar las columnas relevantes.
@@ -212,7 +219,9 @@ export function DashboardOverview() {
       0,
     );
 
-    const distritoLeadGanadoFrecuente = getMostFrequent(leadsInRange.map((row) => getStringValue(row, distritoLeadCol)).filter(Boolean));
+    const distritoLeadGanadoFrecuente = getMostFrequentNormalized(
+      leadsInRange.map((row) => getStringValue(row, distritoLeadCol)).filter(Boolean),
+    );
 
     return {
       periodo: dateFrom || dateTo ? `${dateFrom || '...'} → ${dateTo || '...'}` : 'Sin filtro (todo el periodo)',
