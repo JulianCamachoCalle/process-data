@@ -49,6 +49,7 @@ const DISTRITO_OPTIONS = [
   'Cieneguilla',
   'Comas',
   'El Agustino',
+  'Huaycan',
   'Independencia',
   'Jesús María',
   'La Molina',
