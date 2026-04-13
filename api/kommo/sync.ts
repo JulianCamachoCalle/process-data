@@ -9,6 +9,7 @@ import {
   normalizeKommoBaseUrl,
   verifyAdminSession,
 } from './_shared.js';
+import { recalculateLeadGanadoCountersByBusinessId } from './leads-ganados-auto.js';
 
 const SYNC_SECRET_HEADER = 'x-kommo-sync-secret';
 const SYNC_SECRET_ENV = 'KOMMO_SYNC_SECRET';
@@ -1934,6 +1935,23 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
           }
         }
 
+        const affectedLeadIds = Array.from(new Set(
+          rowsToUpsert
+            .map((row) => Number(row.id_lead_ganado ?? 0))
+            .filter((id) => Number.isFinite(id) && id > 0),
+        ));
+
+        let recalculatedLeads = 0;
+        let recalculateErrors = 0;
+        for (const leadId of affectedLeadIds) {
+          try {
+            await recalculateLeadGanadoCountersByBusinessId(supabase, leadId);
+            recalculatedLeads += 1;
+          } catch {
+            recalculateErrors += 1;
+          }
+        }
+
         return res.status(200).json({
           success: true,
           mode,
@@ -1947,6 +1965,8 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
           skipped_missing_lead: skippedMissingLead,
           skipped_missing_destino: skippedMissingDestino,
           skipped_missing_tarifa: skippedMissingTarifa,
+          recalculated_leads: recalculatedLeads,
+          recalculate_errors: recalculateErrors,
         });
       }
 
@@ -1962,6 +1982,55 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
       }
 
       return res.status(200).json(finalRows);
+    }
+
+    if (mode === 'recalculate_leads_ganados_counters') {
+      const supabase = getSupabaseAdminClient();
+      const limit = parseEnviosProbeLimit(searchParams.get('limit') ?? undefined, 300, 2000);
+      const offset = parseNonNegativeInt(searchParams.get('offset') ?? undefined, 0, 200_000);
+
+      const { data: leadsRows, error: leadsError } = await supabase
+        .from('leads_ganados' as never)
+        .select('business_id' as never)
+        .order('business_id', { ascending: true })
+        .range(offset, offset + limit - 1);
+
+      if (leadsError) {
+        throw new Error(`No se pudieron leer leads_ganados para recálculo: ${leadsError.message}`);
+      }
+
+      const leadIds = ((leadsRows ?? []) as Array<{ business_id: number | null }>)
+        .map((row) => Number(row.business_id ?? 0))
+        .filter((id) => Number.isFinite(id) && id > 0);
+
+      let updated = 0;
+      let errors = 0;
+      const errorDetails: string[] = [];
+
+      for (const leadId of leadIds) {
+        try {
+          await recalculateLeadGanadoCountersByBusinessId(supabase, leadId);
+          updated += 1;
+        } catch (error: unknown) {
+          errors += 1;
+          if (errorDetails.length < 20) {
+            errorDetails.push(`${leadId}: ${error instanceof Error ? error.message : String(error)}`);
+          }
+        }
+      }
+
+      return res.status(200).json({
+        success: true,
+        mode,
+        offset,
+        limit,
+        processed: leadIds.length,
+        updated,
+        errors,
+        has_more: leadIds.length === limit,
+        next_offset: offset + leadIds.length,
+        error_details: errorDetails,
+      });
     }
 
     if (mode === 'cleanup_placeholder_leads_ganados') {

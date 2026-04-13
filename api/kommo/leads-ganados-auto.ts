@@ -1,5 +1,9 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 
+const DINSIDES_BASE_URL = 'https://dinsidescourier.com';
+const DINSIDES_LOGIN_VALIDATE_URL = `${DINSIDES_BASE_URL}/login/validar`;
+const DINSIDES_CLIENTES_LOOKUP_URL = `${DINSIDES_BASE_URL}/admin/datosclientenombre`;
+
 type JsonObject = Record<string, unknown>;
 
 type KommoLeadRow = {
@@ -115,6 +119,110 @@ function diffDays(fromIso: string, toIso: string): number {
 function asArray(value: unknown): unknown[] {
   if (Array.isArray(value)) return value;
   return [];
+}
+
+function extractSetCookieValuesFromResponse(response: Response) {
+  const headers = response.headers as Headers & { getSetCookie?: () => string[] };
+
+  if (typeof headers.getSetCookie === 'function') {
+    return headers.getSetCookie();
+  }
+
+  const fallback = response.headers.get('set-cookie');
+  if (!fallback) return [];
+  return fallback.split(/,(?=\s*[A-Za-z0-9_\-]+=)/g);
+}
+
+function toCookieHeader(rawSetCookieValues: string[]) {
+  return rawSetCookieValues
+    .map((item) => item.split(';')[0]?.trim())
+    .filter(Boolean)
+    .join('; ');
+}
+
+async function loginDinsidesAndGetCookieHeader() {
+  const tlf = process.env.DINSIDES_ADMIN_TLF?.trim();
+  const clave = process.env.DINSIDES_ADMIN_CLAVE?.trim();
+
+  if (!tlf || !clave) {
+    return null;
+  }
+
+  const body = new URLSearchParams({
+    tlf,
+    clave,
+  });
+
+  const response = await fetch(DINSIDES_LOGIN_VALIDATE_URL, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+      'X-Requested-With': 'XMLHttpRequest',
+      Origin: DINSIDES_BASE_URL,
+      Referer: `${DINSIDES_BASE_URL}/`,
+    },
+    body: body.toString(),
+  });
+
+  if (!response.ok) {
+    return null;
+  }
+
+  const setCookieValues = extractSetCookieValuesFromResponse(response);
+  const cookieHeader = toCookieHeader(setCookieValues);
+  return cookieHeader || null;
+}
+
+function inferDistritoFromLookupText(rawText: string, businessName: string): string {
+  const normalizedBusiness = normalizeText(businessName);
+  const lines = rawText.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+
+  const tryResolveFromText = (text: string) => {
+    const normalizedText = normalizeText(text);
+
+    for (const [normalizedDistrito, distrito] of NORMALIZED_DISTRITO_MAP.entries()) {
+      if (normalizedText.includes(normalizedDistrito)) {
+        return distrito;
+      }
+    }
+
+    return '';
+  };
+
+  for (const line of lines) {
+    const normalizedLine = normalizeText(line);
+    if (!normalizedLine) continue;
+    if (normalizedBusiness && !normalizedLine.includes(normalizedBusiness)) continue;
+
+    const distrito = tryResolveFromText(line);
+    if (distrito) return distrito;
+  }
+
+  return tryResolveFromText(rawText);
+}
+
+async function lookupDinsidesDistritoByBusinessName(args: { cookieHeader: string; businessName: string }) {
+  const form = new URLSearchParams({
+    datos: args.businessName,
+    super_admin: '0',
+  });
+
+  const response = await fetch(DINSIDES_CLIENTES_LOOKUP_URL, {
+    method: 'POST',
+    headers: {
+      Cookie: args.cookieHeader,
+      'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+      'X-Requested-With': 'XMLHttpRequest',
+      Origin: DINSIDES_BASE_URL,
+      Referer: `${DINSIDES_BASE_URL}/admin/clientes_new`,
+      Accept: 'text/html, */*; q=0.01',
+    },
+    body: form.toString(),
+  });
+
+  const rawText = await response.text();
+  if (!response.ok) return '';
+  return inferDistritoFromLookupText(rawText, args.businessName);
 }
 
 function extractTagNamesFromUnknown(value: unknown): string[] {
@@ -298,6 +406,39 @@ export async function syncLeadsGanadosFromKommoLeadIds(
   }
 
   const rowsToUpsert: Array<Record<string, unknown>> = [];
+  const distritoByBusinessNameCache = new Map<string, string>();
+  let dinsidesCookieHeaderPromise: Promise<string | null> | null = null;
+
+  const resolveDistritoFromDinsides = async (businessName: string) => {
+    const key = normalizeText(businessName);
+    if (!key) return '';
+
+    if (distritoByBusinessNameCache.has(key)) {
+      return distritoByBusinessNameCache.get(key) ?? '';
+    }
+
+    if (!dinsidesCookieHeaderPromise) {
+      dinsidesCookieHeaderPromise = loginDinsidesAndGetCookieHeader().catch(() => null);
+    }
+
+    const cookieHeader = await dinsidesCookieHeaderPromise;
+    if (!cookieHeader) {
+      distritoByBusinessNameCache.set(key, '');
+      return '';
+    }
+
+    try {
+      const distrito = await lookupDinsidesDistritoByBusinessName({
+        cookieHeader,
+        businessName,
+      });
+      distritoByBusinessNameCache.set(key, distrito || '');
+      return distrito || '';
+    } catch {
+      distritoByBusinessNameCache.set(key, '');
+      return '';
+    }
+  };
 
   const { data: existingLeadsGanadosData, error: existingLeadsGanadosError } = await supabase
     .from('leads_ganados' as never)
@@ -368,6 +509,9 @@ export async function syncLeadsGanadosFromKommoLeadIds(
     const fullfilmentSnapshotComputed = inferFullfilmentFromTags(tags);
     const distritoComputed = inferDistritoFromTags(tags);
     const existingDistrito = String(existing?.distrito ?? '').trim();
+    const distritoFromDinsides = !existingDistrito && !distritoComputed
+      ? await resolveDistritoFromDinsides(resolvedTiendaSnapshot)
+      : '';
 
     rowsToUpsert.push({
       kommo_lead_id: leadId,
@@ -377,7 +521,7 @@ export async function syncLeadsGanadosFromKommoLeadIds(
       origen_snapshot: existing?.origen_snapshot || origenSnapshotComputed,
       fullfilment_snapshot: existing?.fullfilment_snapshot ?? fullfilmentSnapshotComputed,
       // Preserva edición manual cuando ya existe valor; sólo autocompleta si está vacío.
-      distrito: existingDistrito || distritoComputed,
+      distrito: existingDistrito || distritoComputed || distritoFromDinsides,
       fecha_ingreso_lead: fechaIngresoLead,
       fecha_lead_ganado: fechaLeadGanado,
       dias_lead_a_ganado: diffDays(fechaIngresoLead, fechaLeadGanado),
