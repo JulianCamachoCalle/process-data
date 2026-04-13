@@ -1,5 +1,11 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 
+const DINSIDES_BASE_URL = 'https://dinsidescourier.com';
+const DINSIDES_LOGIN_VALIDATE_URL = `${DINSIDES_BASE_URL}/login/validar`;
+const DINSIDES_CLIENTES_LOOKUP_URL = `${DINSIDES_BASE_URL}/admin/datosclientenombre`;
+const distritoByBusinessNameCache = new Map<string, string>();
+let dinsidesCookieHeaderPromise: Promise<string | null> | null = null;
+
 type JsonObject = Record<string, unknown>;
 
 type KommoLeadRow = {
@@ -43,11 +49,12 @@ const DISTRITO_OPTIONS = [
   'Cieneguilla',
   'Comas',
   'El Agustino',
+  'Huaycan',
   'Independencia',
   'Jesús María',
   'La Molina',
   'La Victoria',
-  'Lima (Cercado)',
+  'Cercado de Lima',
   'Lince',
   'Los Olivos',
   'Lurigancho-Chosica',
@@ -94,7 +101,28 @@ function normalizeText(value: unknown): string {
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
     .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
     .trim();
+}
+
+function normalizeLookupComparable(value: unknown): string {
+  return normalizeText(value).replace(/\s+/g, ' ').trim();
+}
+
+function businessMatchesLine(normalizedBusiness: string, normalizedLine: string): boolean {
+  if (!normalizedBusiness) return true;
+  if (!normalizedLine) return false;
+
+  if (normalizedLine.includes(normalizedBusiness) || normalizedBusiness.includes(normalizedLine)) {
+    return true;
+  }
+
+  const businessTokens = normalizedBusiness.split(' ').filter((token) => token.length >= 3);
+  if (businessTokens.length === 0) return false;
+
+  const matchedTokens = businessTokens.filter((token) => normalizedLine.includes(token)).length;
+  return matchedTokens >= Math.min(2, businessTokens.length);
 }
 
 function toDateOnlyIso(value: string | null): string {
@@ -115,6 +143,141 @@ function diffDays(fromIso: string, toIso: string): number {
 function asArray(value: unknown): unknown[] {
   if (Array.isArray(value)) return value;
   return [];
+}
+
+function extractSetCookieValuesFromResponse(response: Response) {
+  const headers = response.headers as Headers & { getSetCookie?: () => string[] };
+
+  if (typeof headers.getSetCookie === 'function') {
+    return headers.getSetCookie();
+  }
+
+  const fallback = response.headers.get('set-cookie');
+  if (!fallback) return [];
+  return fallback.split(/,(?=\s*[A-Za-z0-9_\-]+=)/g);
+}
+
+function toCookieHeader(rawSetCookieValues: string[]) {
+  return rawSetCookieValues
+    .map((item) => item.split(';')[0]?.trim())
+    .filter(Boolean)
+    .join('; ');
+}
+
+async function loginDinsidesAndGetCookieHeader() {
+  const tlf = process.env.DINSIDES_ADMIN_TLF?.trim();
+  const clave = process.env.DINSIDES_ADMIN_CLAVE?.trim();
+
+  if (!tlf || !clave) {
+    return null;
+  }
+
+  const body = new URLSearchParams({
+    tlf,
+    clave,
+  });
+
+  const response = await fetch(DINSIDES_LOGIN_VALIDATE_URL, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+      'X-Requested-With': 'XMLHttpRequest',
+      Origin: DINSIDES_BASE_URL,
+      Referer: `${DINSIDES_BASE_URL}/`,
+    },
+    body: body.toString(),
+  });
+
+  if (!response.ok) {
+    return null;
+  }
+
+  const setCookieValues = extractSetCookieValuesFromResponse(response);
+  const cookieHeader = toCookieHeader(setCookieValues);
+  return cookieHeader || null;
+}
+
+async function resolveDistritoFromDinsidesCached(businessName: string) {
+  const key = normalizeText(businessName);
+  if (!key) return '';
+
+  if (distritoByBusinessNameCache.has(key)) {
+    return distritoByBusinessNameCache.get(key) ?? '';
+  }
+
+  if (!dinsidesCookieHeaderPromise) {
+    dinsidesCookieHeaderPromise = loginDinsidesAndGetCookieHeader().catch(() => null);
+  }
+
+  const cookieHeader = await dinsidesCookieHeaderPromise;
+  if (!cookieHeader) {
+    distritoByBusinessNameCache.set(key, '');
+    return '';
+  }
+
+  try {
+    const distrito = await lookupDinsidesDistritoByBusinessName({
+      cookieHeader,
+      businessName,
+    });
+    distritoByBusinessNameCache.set(key, distrito || '');
+    return distrito || '';
+  } catch {
+    distritoByBusinessNameCache.set(key, '');
+    return '';
+  }
+}
+
+function inferDistritoFromLookupText(rawText: string, businessName: string): string {
+  const normalizedBusiness = normalizeLookupComparable(businessName);
+  const lines = rawText.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+
+  const tryResolveFromText = (text: string) => {
+    const normalizedText = normalizeText(text);
+
+    for (const [normalizedDistrito, distrito] of NORMALIZED_DISTRITO_MAP.entries()) {
+      if (normalizedText.includes(normalizedDistrito)) {
+        return distrito;
+      }
+    }
+
+    return '';
+  };
+
+  for (const line of lines) {
+    const normalizedLine = normalizeLookupComparable(line);
+    if (!normalizedLine) continue;
+    if (normalizedBusiness && !businessMatchesLine(normalizedBusiness, normalizedLine)) continue;
+
+    const distrito = tryResolveFromText(line);
+    if (distrito) return distrito;
+  }
+
+  return tryResolveFromText(rawText);
+}
+
+async function lookupDinsidesDistritoByBusinessName(args: { cookieHeader: string; businessName: string }) {
+  const form = new URLSearchParams({
+    datos: args.businessName,
+    super_admin: '0',
+  });
+
+  const response = await fetch(DINSIDES_CLIENTES_LOOKUP_URL, {
+    method: 'POST',
+    headers: {
+      Cookie: args.cookieHeader,
+      'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+      'X-Requested-With': 'XMLHttpRequest',
+      Origin: DINSIDES_BASE_URL,
+      Referer: `${DINSIDES_BASE_URL}/admin/clientes_new`,
+      Accept: 'text/html, */*; q=0.01',
+    },
+    body: form.toString(),
+  });
+
+  const rawText = await response.text();
+  if (!response.ok) return '';
+  return inferDistritoFromLookupText(rawText, args.businessName);
 }
 
 function extractTagNamesFromUnknown(value: unknown): string[] {
@@ -368,6 +531,9 @@ export async function syncLeadsGanadosFromKommoLeadIds(
     const fullfilmentSnapshotComputed = inferFullfilmentFromTags(tags);
     const distritoComputed = inferDistritoFromTags(tags);
     const existingDistrito = String(existing?.distrito ?? '').trim();
+    const distritoFromDinsides = !existingDistrito && !distritoComputed
+      ? await resolveDistritoFromDinsidesCached(resolvedTiendaSnapshot)
+      : '';
 
     rowsToUpsert.push({
       kommo_lead_id: leadId,
@@ -377,7 +543,7 @@ export async function syncLeadsGanadosFromKommoLeadIds(
       origen_snapshot: existing?.origen_snapshot || origenSnapshotComputed,
       fullfilment_snapshot: existing?.fullfilment_snapshot ?? fullfilmentSnapshotComputed,
       // Preserva edición manual cuando ya existe valor; sólo autocompleta si está vacío.
-      distrito: existingDistrito || distritoComputed,
+      distrito: existingDistrito || distritoComputed || distritoFromDinsides,
       fecha_ingreso_lead: fechaIngresoLead,
       fecha_lead_ganado: fechaLeadGanado,
       dias_lead_a_ganado: diffDays(fechaIngresoLead, fechaLeadGanado),
@@ -400,6 +566,58 @@ export async function syncLeadsGanadosFromKommoLeadIds(
     processed: leads.length,
     upserted: rowsToUpsert.length,
   };
+}
+
+export async function hydrateLeadGanadoDistritoByBusinessId(
+  supabase: SupabaseClient,
+  leadGanadoBusinessIdInput: number,
+  options?: { force?: boolean },
+) {
+  const leadGanadoBusinessId = Math.trunc(Number(leadGanadoBusinessIdInput));
+  if (!Number.isFinite(leadGanadoBusinessId) || leadGanadoBusinessId <= 0) {
+    return { updated: false, reason: 'invalid_id' as const };
+  }
+
+  const { data: leadRows, error: leadError } = await supabase
+    .from('leads_ganados' as never)
+    .select('business_id,tienda_nombre_snapshot,distrito' as never)
+    .eq('business_id', leadGanadoBusinessId)
+    .limit(1);
+
+  if (leadError) {
+    throw new Error(leadError.message || 'No se pudo leer lead_ganado para hidratar distrito');
+  }
+
+  const lead = ((leadRows ?? []) as unknown as Array<{ business_id: number | null; tienda_nombre_snapshot: string | null; distrito: string | null }>)[0];
+  if (!lead) {
+    return { updated: false, reason: 'not_found' as const };
+  }
+
+  const currentDistrito = String(lead.distrito ?? '').trim();
+  if (currentDistrito && !options?.force) {
+    return { updated: false, reason: 'already_set' as const };
+  }
+
+  const businessName = String(lead.tienda_nombre_snapshot ?? '').trim();
+  if (!businessName) {
+    return { updated: false, reason: 'missing_business_name' as const };
+  }
+
+  const distrito = await resolveDistritoFromDinsidesCached(businessName);
+  if (!distrito) {
+    return { updated: false, reason: 'not_resolved' as const, business_name: businessName };
+  }
+
+  const { error: updateError } = await supabase
+    .from('leads_ganados' as never)
+    .update({ distrito } as never)
+    .eq('business_id', leadGanadoBusinessId);
+
+  if (updateError) {
+    throw new Error(updateError.message || 'No se pudo actualizar distrito en lead_ganado');
+  }
+
+  return { updated: true, distrito };
 }
 
 function isAnuladoResultado(resultado: string): boolean {

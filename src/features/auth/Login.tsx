@@ -51,14 +51,14 @@ export function Login() {
         credentials: 'include',
       });
 
-      const data: { success?: boolean; error?: string } = await response.json().catch(() => ({}));
+      const data: { success?: boolean; error?: string; role?: 'admin' | 'user' } = await response.json().catch(() => ({}));
 
       if (!response.ok || !data.success) {
         setError(data.error || 'No se pudo iniciar sesión');
         return;
       }
 
-      navigate('/');
+      navigate(data.role === 'user' ? '/meta/ads/dashboard' : '/');
     } catch {
       setError('No se pudo conectar con el servidor');
     } finally {

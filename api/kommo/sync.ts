@@ -9,6 +9,7 @@ import {
   normalizeKommoBaseUrl,
   verifyAdminSession,
 } from './_shared.js';
+import { hydrateLeadGanadoDistritoByBusinessId, recalculateLeadGanadoCountersByBusinessId } from './leads-ganados-auto.js';
 
 const SYNC_SECRET_HEADER = 'x-kommo-sync-secret';
 const SYNC_SECRET_ENV = 'KOMMO_SYNC_SECRET';
@@ -164,6 +165,17 @@ function asArrayQueryParam(value: string | string[] | undefined) {
   if (value === undefined) return [];
   const values = Array.isArray(value) ? value : [value];
   return values.map((v) => v.trim()).filter(Boolean);
+}
+
+function getRequestSearchParams(req: VercelRequest) {
+  const hostHeader = req.headers.host;
+  const host = (Array.isArray(hostHeader) ? hostHeader[0] : hostHeader) || 'localhost';
+  const protoHeader = req.headers['x-forwarded-proto'];
+  const protoRaw = Array.isArray(protoHeader) ? protoHeader[0] : protoHeader;
+  const protocol = protoRaw?.split(',')[0]?.trim() || 'https';
+  const rawUrl = typeof req.url === 'string' && req.url.trim().length > 0 ? req.url : '/';
+
+  return new URL(rawUrl, `${protocol}://${host}`).searchParams;
 }
 
 function parseEnviosProbeLimit(value: string | undefined, fallback = 10, max = 2000) {
@@ -1598,12 +1610,13 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
       }
     }
 
-    const mode = asSingleQueryParam(req.query.mode)?.trim();
+    const searchParams = getRequestSearchParams(req);
+    const mode = searchParams.get('mode')?.trim();
     if (mode === 'dinsides_envios_probe') {
-      const limit = parseEnviosProbeLimit(asSingleQueryParam(req.query.limit), 10, 2000);
-      const searchNegocio = asSingleQueryParam(req.query.search_negocio)?.trim();
-      const searchTelefono = asSingleQueryParam(req.query.search_telefono)?.trim();
-      const searchIdPedido = asSingleQueryParam(req.query.search_id_pedido)?.trim();
+      const limit = parseEnviosProbeLimit(searchParams.get('limit') ?? undefined, 10, 2000);
+      const searchNegocio = searchParams.get('search_negocio')?.trim();
+      const searchTelefono = searchParams.get('search_telefono')?.trim();
+      const searchIdPedido = searchParams.get('search_id_pedido')?.trim();
       const { cookieHeader, loginRole } = await loginDinsidesAndGetCookieHeader();
       const rows = await fetchDinsidesEnviosRows({
         cookieHeader,
@@ -1629,13 +1642,13 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
     }
 
     if (mode === 'dinsides_envios_sync_from_leads') {
-      const limitBusinesses = parseEnviosProbeLimit(asSingleQueryParam(req.query.limit_businesses), 30, 300);
-      const limitRows = parseEnviosProbeLimit(asSingleQueryParam(req.query.limit_rows), 1000, 10000);
-      const sampleRows = parseEnviosProbeLimit(asSingleQueryParam(req.query.sample_rows), 1200, 10000);
-      const offsetRows = parseNonNegativeInt(asSingleQueryParam(req.query.offset_rows), 0, 1_000_000);
-      const singleBusiness = asSingleQueryParam(req.query.search_negocio)?.trim();
-      const singleSearchTipo = asSingleQueryParam(req.query.search_tipo)?.trim();
-      const debug = ['1', 'true', 'yes'].includes((asSingleQueryParam(req.query.debug) ?? '').toLowerCase());
+      const limitBusinesses = parseEnviosProbeLimit(searchParams.get('limit_businesses') ?? undefined, 30, 300);
+      const limitRows = parseEnviosProbeLimit(searchParams.get('limit_rows') ?? undefined, 1000, 10000);
+      const sampleRows = parseEnviosProbeLimit(searchParams.get('sample_rows') ?? undefined, 1200, 10000);
+      const offsetRows = parseNonNegativeInt(searchParams.get('offset_rows') ?? undefined, 0, 1_000_000);
+      const singleBusiness = searchParams.get('search_negocio')?.trim();
+      const singleSearchTipo = searchParams.get('search_tipo')?.trim();
+      const debug = ['1', 'true', 'yes'].includes((searchParams.get('debug') ?? '').toLowerCase());
 
       const supabase = getSupabaseAdminClient();
       const businessNames = singleBusiness
@@ -1755,9 +1768,9 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
 
       const finalRows = Array.from(dedupe.values()).slice(offsetRows, offsetRows + limitRows);
 
-      const persist = ['1', 'true', 'yes'].includes((asSingleQueryParam(req.query.persist) ?? '').toLowerCase());
+      const persist = ['1', 'true', 'yes'].includes((searchParams.get('persist') ?? '').toLowerCase());
       if (persist) {
-        const onlyRemaining = ['1', 'true', 'yes'].includes((asSingleQueryParam(req.query.only_remaining) ?? '').toLowerCase());
+        const onlyRemaining = ['1', 'true', 'yes'].includes((searchParams.get('only_remaining') ?? '').toLowerCase());
         const leadsResult = await supabase
           .from('leads_ganados' as never)
           .select('business_id,tienda_nombre_snapshot' as never)
@@ -1922,6 +1935,23 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
           }
         }
 
+        const affectedLeadIds = Array.from(new Set(
+          rowsToUpsert
+            .map((row) => Number(row.id_lead_ganado ?? 0))
+            .filter((id) => Number.isFinite(id) && id > 0),
+        ));
+
+        let recalculatedLeads = 0;
+        let recalculateErrors = 0;
+        for (const leadId of affectedLeadIds) {
+          try {
+            await recalculateLeadGanadoCountersByBusinessId(supabase, leadId);
+            recalculatedLeads += 1;
+          } catch {
+            recalculateErrors += 1;
+          }
+        }
+
         return res.status(200).json({
           success: true,
           mode,
@@ -1935,6 +1965,8 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
           skipped_missing_lead: skippedMissingLead,
           skipped_missing_destino: skippedMissingDestino,
           skipped_missing_tarifa: skippedMissingTarifa,
+          recalculated_leads: recalculatedLeads,
+          recalculate_errors: recalculateErrors,
         });
       }
 
@@ -1950,6 +1982,129 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
       }
 
       return res.status(200).json(finalRows);
+    }
+
+    if (mode === 'recalculate_leads_ganados_counters') {
+      const supabase = getSupabaseAdminClient();
+      const limit = parseEnviosProbeLimit(searchParams.get('limit') ?? undefined, 300, 2000);
+      const offset = parseNonNegativeInt(searchParams.get('offset') ?? undefined, 0, 200_000);
+
+      const { data: leadsRows, error: leadsError } = await supabase
+        .from('leads_ganados' as never)
+        .select('business_id' as never)
+        .order('business_id', { ascending: true })
+        .range(offset, offset + limit - 1);
+
+      if (leadsError) {
+        throw new Error(`No se pudieron leer leads_ganados para recálculo: ${leadsError.message}`);
+      }
+
+      const leadIds = ((leadsRows ?? []) as Array<{ business_id: number | null }>)
+        .map((row) => Number(row.business_id ?? 0))
+        .filter((id) => Number.isFinite(id) && id > 0);
+
+      let updated = 0;
+      let errors = 0;
+      const errorDetails: string[] = [];
+
+      for (const leadId of leadIds) {
+        try {
+          await recalculateLeadGanadoCountersByBusinessId(supabase, leadId);
+          updated += 1;
+        } catch (error: unknown) {
+          errors += 1;
+          if (errorDetails.length < 20) {
+            errorDetails.push(`${leadId}: ${error instanceof Error ? error.message : String(error)}`);
+          }
+        }
+      }
+
+      return res.status(200).json({
+        success: true,
+        mode,
+        offset,
+        limit,
+        processed: leadIds.length,
+        updated,
+        errors,
+        has_more: leadIds.length === limit,
+        next_offset: offset + leadIds.length,
+        error_details: errorDetails,
+      });
+    }
+
+    if (mode === 'hydrate_leads_ganados_distritos') {
+      const supabase = getSupabaseAdminClient();
+      const limit = parseEnviosProbeLimit(searchParams.get('limit') ?? undefined, 120, 500);
+      const offset = parseNonNegativeInt(searchParams.get('offset') ?? undefined, 0, 200_000);
+      const force = ['1', 'true', 'yes'].includes((searchParams.get('force') ?? '').toLowerCase());
+
+      const { data: leadsRows, error: leadsError } = await supabase
+        .from('leads_ganados' as never)
+        .select('business_id' as never)
+        .order('business_id', { ascending: true })
+        .range(offset, offset + limit - 1);
+
+      if (leadsError) {
+        throw new Error(`No se pudieron leer leads_ganados para hidratar distritos: ${leadsError.message}`);
+      }
+
+      const leadIds = ((leadsRows ?? []) as Array<{ business_id: number | null }>)
+        .map((row) => Number(row.business_id ?? 0))
+        .filter((id) => Number.isFinite(id) && id > 0);
+
+      let processed = 0;
+      let updated = 0;
+      let skipped = 0;
+      let errors = 0;
+      const errorDetails: string[] = [];
+      const skippedByReason: Record<string, number> = {};
+      const skippedDetails: Array<{ lead_id: number; reason: string; business_name?: string }> = [];
+
+      for (const leadId of leadIds) {
+        processed += 1;
+        try {
+          const result = await hydrateLeadGanadoDistritoByBusinessId(supabase, leadId, { force });
+          if (result.updated) {
+            updated += 1;
+          } else {
+            skipped += 1;
+            const reason = String(result.reason ?? 'unknown');
+            skippedByReason[reason] = (skippedByReason[reason] ?? 0) + 1;
+            if (skippedDetails.length < 30) {
+              skippedDetails.push({
+                lead_id: leadId,
+                reason,
+                business_name: typeof (result as { business_name?: unknown }).business_name === 'string'
+                  ? (result as { business_name?: string }).business_name
+                  : undefined,
+              });
+            }
+          }
+        } catch (error: unknown) {
+          errors += 1;
+          if (errorDetails.length < 20) {
+            errorDetails.push(`${leadId}: ${error instanceof Error ? error.message : String(error)}`);
+          }
+        }
+      }
+
+      return res.status(200).json({
+        success: true,
+        mode,
+        offset,
+        limit,
+        force,
+        processed,
+        updated,
+        skipped,
+        skipped_by_reason: skippedByReason,
+        skipped_details: skippedDetails,
+        errors,
+        has_more: leadIds.length === limit,
+        next_offset: offset + leadIds.length,
+        error_details: errorDetails,
+      });
     }
 
     if (mode === 'cleanup_placeholder_leads_ganados') {

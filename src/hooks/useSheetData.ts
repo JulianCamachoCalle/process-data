@@ -885,24 +885,27 @@ async function fetchEnviosFromSupabase(): Promise<SheetData> {
 
   await requireSupabaseSession();
 
+  const client = supabase;
+
   const [refs, enviosResponse] = await Promise.all([
     fetchEnvioReferenceData(),
-    supabase
-      .from('envios')
-      .select(
-        'stable_id,business_id,fecha_envio,id_lead_ganado,id_destino,id_resultado,cobro_entrega,pago_moto,excedente_pagado_moto,ingreso_total_fila,costo_total_fila,observaciones,id_tipo_punto,extra_punto_moto,extra_punto_empresa',
-      )
-      .order('business_id', { ascending: true }),
-  ]);
+    fetchAllRowsPaged<EnvioRecord>(async (from, to) => {
+      const response = await client
+        .from('envios')
+        .select(
+          'stable_id,business_id,fecha_envio,id_lead_ganado,id_destino,id_resultado,cobro_entrega,pago_moto,excedente_pagado_moto,ingreso_total_fila,costo_total_fila,observaciones,id_tipo_punto,extra_punto_moto,extra_punto_empresa',
+        )
+        .order('business_id', { ascending: true })
+        .order('stable_id', { ascending: true })
+        .range(from, to);
 
-  const { data, error } = enviosResponse;
-  if (error) {
-    throw new Error(error.message || 'No se pudieron cargar ENVIOS desde Supabase');
-  }
+      return { data: (response.data ?? []) as EnvioRecord[], error: response.error };
+    }),
+  ]);
 
   return {
     columns: [...ENVIOS_COLUMNS],
-    rows: ((data ?? []) as EnvioRecord[]).map((record) => toEnvioSheetRow(record, refs)),
+    rows: (enviosResponse ?? []).map((record) => toEnvioSheetRow(record, refs)),
   };
 }
 
@@ -911,24 +914,27 @@ async function fetchRecojosFromSupabase(): Promise<SheetData> {
 
   await requireSupabaseSession();
 
+  const client = supabase;
+
   const [refs, recojosResponse] = await Promise.all([
     fetchRecojoReferenceData(),
-    supabase
-      .from('recojos')
-      .select(
-        'stable_id,business_id,fecha,id_lead_ganado,tipo_cobro,veces,cobro_a_tienda,pago_a_moto,ingreso_recojo_total,costo_recojo_total,observaciones',
-      )
-      .order('business_id', { ascending: true }),
-  ]);
+    fetchAllRowsPaged<RecojoRecord>(async (from, to) => {
+      const response = await client
+        .from('recojos')
+        .select(
+          'stable_id,business_id,fecha,id_lead_ganado,tipo_cobro,veces,cobro_a_tienda,pago_a_moto,ingreso_recojo_total,costo_recojo_total,observaciones',
+        )
+        .order('business_id', { ascending: true })
+        .order('stable_id', { ascending: true })
+        .range(from, to);
 
-  const { data, error } = recojosResponse;
-  if (error) {
-    throw new Error(error.message || 'No se pudieron cargar RECOJOS desde Supabase');
-  }
+      return { data: (response.data ?? []) as RecojoRecord[], error: response.error };
+    }),
+  ]);
 
   return {
     columns: [...RECOJOS_COLUMNS],
-    rows: ((data ?? []) as RecojoRecord[]).map((record) => toRecojoSheetRow(record, refs)),
+    rows: (recojosResponse ?? []).map((record) => toRecojoSheetRow(record, refs)),
   };
 }
 
@@ -937,21 +943,24 @@ async function fetchLeadsGanadosFromSupabase(): Promise<SheetData> {
 
   await requireSupabaseSession();
 
-  const leadsResponse = await supabase
-    .from('leads_ganados')
-    .select(
-      'stable_id,business_id,fecha_ingreso_lead,fecha_lead_ganado,dias_lead_a_ganado,notas,distrito,cantidad_envios,anulados_fullfilment,ingreso_anulados_fullfilment,kommo_lead_id,tienda_nombre_snapshot,vendedor_nombre_snapshot,pipeline_id_snapshot,origen_snapshot,fullfilment_snapshot',
-    )
-    .order('business_id', { ascending: true });
+  const client = supabase;
 
-  const { data, error } = leadsResponse;
-  if (error) {
-    throw new Error(error.message || 'No se pudieron cargar LEADS GANADOS desde Supabase');
-  }
+  const leadsResponse = await fetchAllRowsPaged<LeadGanadoRecord>(async (from, to) => {
+    const response = await client
+      .from('leads_ganados')
+      .select(
+        'stable_id,business_id,fecha_ingreso_lead,fecha_lead_ganado,dias_lead_a_ganado,notas,distrito,cantidad_envios,anulados_fullfilment,ingreso_anulados_fullfilment,kommo_lead_id,tienda_nombre_snapshot,vendedor_nombre_snapshot,pipeline_id_snapshot,origen_snapshot,fullfilment_snapshot',
+      )
+      .order('business_id', { ascending: true })
+      .order('stable_id', { ascending: true })
+      .range(from, to);
+
+    return { data: (response.data ?? []) as LeadGanadoRecord[], error: response.error };
+  });
 
   return {
     columns: [...LEADS_GANADOS_COLUMNS],
-    rows: ((data ?? []) as LeadGanadoRecord[]).map((record) => toLeadGanadoSheetRow(record)),
+    rows: (leadsResponse ?? []).map((record) => toLeadGanadoSheetRow(record)),
   };
 }
 

@@ -10,6 +10,7 @@ interface SidebarPrefetchHandlers {
 
 interface SidebarProps {
   sheets: string[];
+  role: 'admin' | 'user';
   prefetchHandlers?: SidebarPrefetchHandlers;
   onSecretClick?: () => void;
   collapsed?: boolean;
@@ -21,6 +22,7 @@ interface SidebarProps {
 
 export function Sidebar({
   sheets,
+  role,
   prefetchHandlers,
   onSecretClick,
   collapsed = false,
@@ -30,6 +32,7 @@ export function Sidebar({
   onNavigate,
 }: SidebarProps) {
   const location = useLocation();
+  const isAdmin = role === 'admin';
   const groupedSheets = groupSheetsByDomain(sheets);
 
   const isKommoExplorerActive = location.pathname === '/kommo' || (location.pathname.startsWith('/kommo/') && !location.pathname.startsWith('/kommo/leads-insights'));
@@ -125,17 +128,18 @@ export function Sidebar({
               ? 'bg-gradient-to-r from-red-700 to-red-600 text-white font-semibold border-red-400/80 shadow-[0_12px_24px_-16px_rgba(230,0,0,0.9)]'
               : 'text-gray-300 border-transparent hover:bg-white/5 hover:text-white hover:border-white/10'
             } ${collapsed ? 'md:justify-center md:px-2' : 'gap-3'}`}
+          hidden={!isAdmin}
         >
           <BookMarked size={18} className={location.pathname === '/' ? 'text-white' : 'text-red-500 group-hover:text-red-400'} />
           <span className={collapsed ? 'md:hidden' : 'text-xs text-gray-100 font-semibold uppercase tracking-[0.14em]'}>Resumen general</span>
         </Link>
 
-        {renderGroup(
+        {isAdmin && renderGroup(
           'Tablas base',
           <Layers3 size={12} className="text-red-500" />,
           groupedSheets.base
         )}
-        {renderGroup(
+        {isAdmin && renderGroup(
           'Tablas operativas',
           <Workflow size={12} className="text-red-500" />,
           groupedSheets.operativas
@@ -163,18 +167,20 @@ export function Sidebar({
             <span className={`text-[12px] text-gray-400 font-semibold uppercase tracking-[0.05em] ${collapsed ? 'md:hidden' : ''}`}>Ads Dashboard</span>
           </Link>
 
-          <Link
-            to="/meta/ads/data"
-            onClick={() => onNavigate?.()}
-            title={collapsed ? 'Meta Ads Data' : undefined}
-            className={`group flex items-center w-full text-left px-4 py-2.5 rounded-xl border transition-all duration-200 ${isMetaAdsDataActive
-                ? 'bg-white/10 text-white font-semibold border-red-500/70 shadow-[0_8px_24px_-18px_rgba(255,255,255,0.8)]'
-                : 'text-gray-400 border-transparent hover:bg-white/5 hover:text-gray-100 hover:border-white/10'
-              } ${collapsed ? 'md:justify-center md:px-2' : 'gap-3'}`}
-          >
-            <Database size={16} className={isMetaAdsDataActive ? 'text-red-500' : 'text-gray-500 group-hover:text-red-400'} />
-            <span className={`text-[12px] text-gray-400 font-semibold uppercase tracking-[0.05em] ${collapsed ? 'md:hidden' : ''}`}>Ads Data</span>
-          </Link>
+          {isAdmin && (
+            <Link
+              to="/meta/ads/data"
+              onClick={() => onNavigate?.()}
+              title={collapsed ? 'Meta Ads Data' : undefined}
+              className={`group flex items-center w-full text-left px-4 py-2.5 rounded-xl border transition-all duration-200 ${isMetaAdsDataActive
+                  ? 'bg-white/10 text-white font-semibold border-red-500/70 shadow-[0_8px_24px_-18px_rgba(255,255,255,0.8)]'
+                  : 'text-gray-400 border-transparent hover:bg-white/5 hover:text-gray-100 hover:border-white/10'
+                } ${collapsed ? 'md:justify-center md:px-2' : 'gap-3'}`}
+            >
+              <Database size={16} className={isMetaAdsDataActive ? 'text-red-500' : 'text-gray-500 group-hover:text-red-400'} />
+              <span className={`text-[12px] text-gray-400 font-semibold uppercase tracking-[0.05em] ${collapsed ? 'md:hidden' : ''}`}>Ads Data</span>
+            </Link>
+          )}
 
           <Link
             to="/meta/compare/dashboard"
@@ -222,18 +228,20 @@ export function Sidebar({
             <span className={collapsed ? 'md:hidden' : ''}>Kommo CRM</span>
           </div>
 
-          <Link
-            to="/kommo"
-            onClick={() => onNavigate?.()}
-            title={collapsed ? 'Kommo Explorer' : undefined}
-            className={`group flex items-center w-full text-left px-4 py-2.5 rounded-xl border transition-all duration-200 ${isKommoExplorerActive
-                ? 'bg-white/10 text-white font-semibold border-red-500/70 shadow-[0_8px_24px_-18px_rgba(255,255,255,0.8)]'
-                : 'text-gray-400 border-transparent hover:bg-white/5 hover:text-gray-100 hover:border-white/10'
-              } ${collapsed ? 'md:justify-center md:px-2' : 'gap-3'}`}
-          >
-            <Database size={16} className={isKommoExplorerActive ? 'text-red-500' : 'text-gray-500 group-hover:text-red-400'} />
-            <span className={`text-[12px] text-gray-400 font-semibold uppercase tracking-[0.05em] ${collapsed ? 'md:hidden' : ''}`}>Kommo Explorer</span>
-          </Link>
+          {isAdmin && (
+            <Link
+              to="/kommo"
+              onClick={() => onNavigate?.()}
+              title={collapsed ? 'Kommo Explorer' : undefined}
+              className={`group flex items-center w-full text-left px-4 py-2.5 rounded-xl border transition-all duration-200 ${isKommoExplorerActive
+                  ? 'bg-white/10 text-white font-semibold border-red-500/70 shadow-[0_8px_24px_-18px_rgba(255,255,255,0.8)]'
+                  : 'text-gray-400 border-transparent hover:bg-white/5 hover:text-gray-100 hover:border-white/10'
+                } ${collapsed ? 'md:justify-center md:px-2' : 'gap-3'}`}
+            >
+              <Database size={16} className={isKommoExplorerActive ? 'text-red-500' : 'text-gray-500 group-hover:text-red-400'} />
+              <span className={`text-[12px] text-gray-400 font-semibold uppercase tracking-[0.05em] ${collapsed ? 'md:hidden' : ''}`}>Kommo Explorer</span>
+            </Link>
+          )}
 
           <Link
             to="/kommo/leads-insights"
@@ -249,7 +257,8 @@ export function Sidebar({
           </Link>
         </div>
 
-        <div className="space-y-1.5 pt-2">
+        {isAdmin && (
+          <div className="space-y-1.5 pt-2">
           <div
             className={`px-4 pt-3 pb-2 text-[11px] font-semibold text-gray-400 uppercase tracking-[0.18em] inline-flex items-center gap-2 ${collapsed ? 'md:justify-center' : ''}`}
             title={collapsed ? 'Exportaciones' : undefined}
@@ -270,10 +279,11 @@ export function Sidebar({
             <Send size={16} className={isGoogleSheetsExportActive ? 'text-red-500' : 'text-gray-500 group-hover:text-red-400'} />
             <span className={`text-[12px] text-gray-400 font-semibold uppercase tracking-[0.05em] ${collapsed ? 'md:hidden' : ''}`}>Google Sheets</span>
           </Link>
-        </div>
+          </div>
+        )}
       </nav>
 
-      <div className="border-t border-white/10 px-2 pb-4 pt-1.5 sm:pb-5">
+      <div className="border-t border-white/10 px-2 pb-4 pt-1.5 sm:pb-5" hidden={!isAdmin}>
 
         {/* Hidden admin trigger */}
         <button

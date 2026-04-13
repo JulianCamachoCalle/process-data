@@ -163,27 +163,14 @@ function formatHour(hour: number) {
   return `${String(hour).padStart(2, '0')}:00`;
 }
 
-function getLimaDateFormatter() {
-  return new Intl.DateTimeFormat('en-US', {
+function getCurrentLimaDate() {
+  const formatter = new Intl.DateTimeFormat('en-CA', {
     timeZone: 'America/Lima',
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
   });
-}
-
-function toLimaDateString(date: Date) {
-  const parts = getLimaDateFormatter().formatToParts(date);
-  const year = parts.find((part) => part.type === 'year')?.value;
-  const month = parts.find((part) => part.type === 'month')?.value;
-  const day = parts.find((part) => part.type === 'day')?.value;
-
-  if (!year || !month || !day) return null;
-  return `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
-}
-
-function getCurrentLimaDate() {
-  return toLimaDateString(new Date()) ?? '1970-01-01';
+  return formatter.format(new Date());
 }
 
 function shiftDate(dateString: string, days: number) {
@@ -589,6 +576,25 @@ export function KommoLeadsInsights() {
   const [pdfExportSuccess, setPdfExportSuccess] = useState<string | null>(null);
   const hasValidDraftDateRange = isDateRangeValid(draftStartDate, draftEndDate);
 
+  const applyQuickRange = (range: 'today' | 'last7' | 'last30') => {
+    const todayLima = getCurrentLimaDate();
+
+    if (range === 'today') {
+      setDraftStartDate(todayLima);
+      setDraftEndDate(todayLima);
+      return;
+    }
+
+    if (range === 'last7') {
+      setDraftStartDate(shiftDate(todayLima, -6));
+      setDraftEndDate(todayLima);
+      return;
+    }
+
+    setDraftStartDate(shiftDate(todayLima, -29));
+    setDraftEndDate(todayLima);
+  };
+
   const insightsQuery = useQuery({
     queryKey: ['kommo-leads-insights', appliedStartDate, appliedEndDate],
     queryFn: async (): Promise<LeadsInsightsPayload> => {
@@ -613,31 +619,6 @@ export function KommoLeadsInsights() {
       return payload;
     },
   });
-
-  const applyQuickRange = (range: 'today' | 'last7' | 'last30' | 'all') => {
-    const todayLima = getCurrentLimaDate();
-
-    if (range === 'today') {
-      setDraftStartDate(todayLima);
-      setDraftEndDate(todayLima);
-      return;
-    }
-
-    if (range === 'last7') {
-      setDraftStartDate(shiftDate(todayLima, -6));
-      setDraftEndDate(todayLima);
-      return;
-    }
-
-    if (range === 'last30') {
-      setDraftStartDate(shiftDate(todayLima, -29));
-      setDraftEndDate(todayLima);
-      return;
-    }
-
-    setDraftStartDate(null);
-    setDraftEndDate(null);
-  };
 
   const applyFilters = () => {
     setAppliedStartDate(draftStartDate);
@@ -1037,25 +1018,20 @@ export function KommoLeadsInsights() {
         <div className="flex flex-wrap items-center gap-2">
           <QuickRangeButton label="Hoy" onClick={() => applyQuickRange('today')} />
           <QuickRangeButton label="Últimos 7 días" onClick={() => applyQuickRange('last7')} />
-          <QuickRangeButton label="Últimos 30 días" onClick={() => applyQuickRange('last30')} />
-          <QuickRangeButton label="Todo" onClick={() => applyQuickRange('all')} />
+          <QuickRangeButton label="Último mes" onClick={() => applyQuickRange('last30')} />
         </div>
 
-        <div className="grid grid-cols-1 gap-3 xl:grid-cols-[minmax(0,2fr)_auto] xl:items-end">
+        <div className="grid grid-cols-1 gap-3 xl:grid-cols-[minmax(0,22rem)_auto] xl:items-end">
           <DateRangePicker
             startDate={draftStartDate}
             endDate={draftEndDate}
             onStartDateChange={(value) => setDraftStartDate(value || null)}
             onEndDateChange={(value) => setDraftEndDate(value || null)}
-            onPresetApply={({ startDate, endDate }) => {
-              setDraftStartDate(startDate);
-              setDraftEndDate(endDate);
-              setAppliedStartDate(startDate);
-              setAppliedEndDate(endDate);
-            }}
+            showPresets={false}
             startLabel="Desde"
             endLabel="Hasta"
-            layoutClassName="grid grid-cols-1 gap-3 sm:grid-cols-2"
+            className="max-w-md"
+            layoutClassName="space-y-3"
             fieldClassName="rounded-2xl border border-gray-200 bg-white px-4 py-3 text-xs font-semibold uppercase tracking-wide text-gray-600 shadow-none"
             labelClassName="text-xs font-semibold uppercase tracking-wide text-gray-600"
             inputWrapperClassName="mt-2 rounded-xl border border-gray-200 bg-white px-0 py-0"
@@ -1340,6 +1316,15 @@ function InsightsReportSections({
   );
 }
 
+function resolveRangeDays(startDate: string | null, endDate: string | null) {
+  if (!startDate || !endDate) return 1;
+  const start = new Date(`${startDate}T00:00:00`);
+  const end = new Date(`${endDate}T00:00:00`);
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || end < start) return 1;
+  const diff = end.getTime() - start.getTime();
+  return Math.max(1, Math.floor(diff / (1000 * 60 * 60 * 24)) + 1);
+}
+
 function QuickRangeButton({ label, onClick }: { label: string; onClick: () => void }) {
   return (
     <button
@@ -1350,15 +1335,6 @@ function QuickRangeButton({ label, onClick }: { label: string; onClick: () => vo
       {label}
     </button>
   );
-}
-
-function resolveRangeDays(startDate: string | null, endDate: string | null) {
-  if (!startDate || !endDate) return 1;
-  const start = new Date(`${startDate}T00:00:00`);
-  const end = new Date(`${endDate}T00:00:00`);
-  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || end < start) return 1;
-  const diff = end.getTime() - start.getTime();
-  return Math.max(1, Math.floor(diff / (1000 * 60 * 60 * 24)) + 1);
 }
 
 function normalizePipelineKey(value: string) {
