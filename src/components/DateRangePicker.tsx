@@ -284,7 +284,7 @@ export function DateRangePicker({
         </button>
 
         {isOpen ? (
-          <div className="absolute left-0 z-30 mt-2 w-[min(92vw,19rem)] rounded-2xl border border-gray-200 bg-white p-3 shadow-[0_24px_52px_-36px_rgba(15,23,42,0.95)]">
+          <div className="absolute left-1/2 z-30 mt-2 w-[min(96vw,26rem)] -translate-x-1/2 rounded-2xl border border-gray-200 bg-white p-3 shadow-[0_24px_52px_-36px_rgba(15,23,42,0.95)] sm:left-auto sm:right-0 sm:translate-x-0">
             <div className={joinClasses('space-y-3', layoutClassName)}>
               <div className={joinClasses('rounded-2xl border border-gray-200 bg-gray-50/80 px-4 py-3 text-sm text-gray-600', fieldClassName)}>
                 <div className="mb-3 flex items-center justify-between gap-2">

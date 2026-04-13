@@ -163,37 +163,6 @@ function formatHour(hour: number) {
   return `${String(hour).padStart(2, '0')}:00`;
 }
 
-function getLimaDateFormatter() {
-  return new Intl.DateTimeFormat('en-US', {
-    timeZone: 'America/Lima',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  });
-}
-
-function toLimaDateString(date: Date) {
-  const parts = getLimaDateFormatter().formatToParts(date);
-  const year = parts.find((part) => part.type === 'year')?.value;
-  const month = parts.find((part) => part.type === 'month')?.value;
-  const day = parts.find((part) => part.type === 'day')?.value;
-
-  if (!year || !month || !day) return null;
-  return `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
-}
-
-function getCurrentLimaDate() {
-  return toLimaDateString(new Date()) ?? '1970-01-01';
-}
-
-function shiftDate(dateString: string, days: number) {
-  const [year, month, day] = dateString.split('-').map(Number);
-  const utcDate = new Date(Date.UTC(year, month - 1, day));
-  utcDate.setUTCDate(utcDate.getUTCDate() + days);
-
-  return `${utcDate.getUTCFullYear()}-${String(utcDate.getUTCMonth() + 1).padStart(2, '0')}-${String(utcDate.getUTCDate()).padStart(2, '0')}`;
-}
-
 function asChartNumber(value: unknown) {
   if (Array.isArray(value)) {
     return asChartNumber(value[0]);
@@ -614,31 +583,6 @@ export function KommoLeadsInsights() {
     },
   });
 
-  const applyQuickRange = (range: 'today' | 'last7' | 'last30' | 'all') => {
-    const todayLima = getCurrentLimaDate();
-
-    if (range === 'today') {
-      setDraftStartDate(todayLima);
-      setDraftEndDate(todayLima);
-      return;
-    }
-
-    if (range === 'last7') {
-      setDraftStartDate(shiftDate(todayLima, -6));
-      setDraftEndDate(todayLima);
-      return;
-    }
-
-    if (range === 'last30') {
-      setDraftStartDate(shiftDate(todayLima, -29));
-      setDraftEndDate(todayLima);
-      return;
-    }
-
-    setDraftStartDate(null);
-    setDraftEndDate(null);
-  };
-
   const applyFilters = () => {
     setAppliedStartDate(draftStartDate);
     setAppliedEndDate(draftEndDate);
@@ -1034,25 +978,13 @@ export function KommoLeadsInsights() {
           {insightsQuery.isFetching ? <span className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">Actualizando…</span> : null}
         </div>
 
-        <div className="flex flex-wrap items-center gap-2">
-          <QuickRangeButton label="Hoy" onClick={() => applyQuickRange('today')} />
-          <QuickRangeButton label="Últimos 7 días" onClick={() => applyQuickRange('last7')} />
-          <QuickRangeButton label="Últimos 30 días" onClick={() => applyQuickRange('last30')} />
-          <QuickRangeButton label="Todo" onClick={() => applyQuickRange('all')} />
-        </div>
-
         <div className="grid grid-cols-1 gap-3 xl:grid-cols-[minmax(0,2fr)_auto] xl:items-end">
           <DateRangePicker
             startDate={draftStartDate}
             endDate={draftEndDate}
             onStartDateChange={(value) => setDraftStartDate(value || null)}
             onEndDateChange={(value) => setDraftEndDate(value || null)}
-            onPresetApply={({ startDate, endDate }) => {
-              setDraftStartDate(startDate);
-              setDraftEndDate(endDate);
-              setAppliedStartDate(startDate);
-              setAppliedEndDate(endDate);
-            }}
+            showPresets={false}
             startLabel="Desde"
             endLabel="Hasta"
             layoutClassName="grid grid-cols-1 gap-3 sm:grid-cols-2"
@@ -1337,18 +1269,6 @@ function InsightsReportSections({
         </ChartCard>
       </section>
     </>
-  );
-}
-
-function QuickRangeButton({ label, onClick }: { label: string; onClick: () => void }) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className="inline-flex items-center rounded-full border border-gray-200 bg-white px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.14em] text-gray-700 transition hover:border-red-200 hover:bg-red-50 hover:text-red-700"
-    >
-      {label}
-    </button>
   );
 }
 

@@ -100,6 +100,42 @@ export function MetaAdsDashboard() {
   const [campaignCompareIds, setCampaignCompareIds] = useState({ left: '', right: '' });
   const [adCompareIds, setAdCompareIds] = useState({ left: '', right: '' });
   const [audienceMetric, setAudienceMetric] = useState<AudienceMetricKey>('impressions');
+  const [interactiveDate, setInteractiveDate] = useState('');
+
+  const toggleInteractiveDate = (nextDate: string | null) => {
+    if (!nextDate) return;
+    setInteractiveDate((current) => (current === nextDate ? '' : nextDate));
+  };
+
+  const extractDateFromChartClick = (input: unknown): string | null => {
+    if (!input || typeof input !== 'object') return null;
+    const record = input as Record<string, unknown>;
+
+    const directDate = record.date_start;
+    if (typeof directDate === 'string' && directDate) return directDate;
+
+    const payload = record.payload;
+    if (payload && typeof payload === 'object') {
+      const payloadDate = (payload as Record<string, unknown>).date_start;
+      if (typeof payloadDate === 'string' && payloadDate) return payloadDate;
+    }
+
+    const activePayload = record.activePayload;
+    if (!Array.isArray(activePayload) || activePayload.length === 0) return null;
+
+    const firstEntry = activePayload[0];
+    if (!firstEntry || typeof firstEntry !== 'object') return null;
+
+    const firstPayload = (firstEntry as Record<string, unknown>).payload;
+    if (!firstPayload || typeof firstPayload !== 'object') return null;
+
+    const activeDate = (firstPayload as Record<string, unknown>).date_start;
+    return typeof activeDate === 'string' && activeDate ? activeDate : null;
+  };
+
+  const handleDailyChartClick = (input: unknown) => {
+    toggleInteractiveDate(extractDateFromChartClick(input));
+  };
 
   const reportingQuery = useMetaAdsReporting({ accountId: '', campaignId: '', adId: '', dateFrom, dateTo });
   const comparisonQuery = useMetaAdsReporting({
@@ -208,6 +244,7 @@ export function MetaAdsDashboard() {
       if (campaignId && row.campaign_business_id !== campaignId) return false;
       if (adsetId && row.adset_business_id !== adsetId) return false;
       if (adId && row.ad_business_id !== adId) return false;
+      if (interactiveDate && row.date_start !== interactiveDate) return false;
       return true;
     });
 
@@ -254,13 +291,17 @@ export function MetaAdsDashboard() {
 
     const adIdsInScope = new Set(filteredRows.map((row) => row.ad_business_id).filter(Boolean));
 
-    const scopedHourlyRows = adId
+    const scopedHourlyRowsBase = adId
       ? hourlyRows.filter((row) => row.ad_business_id === adId)
       : adIdsInScope.size > 0
         ? hourlyRows.filter((row) => adIdsInScope.has(row.ad_business_id))
         : hourlyRows;
 
-    const hourlyRowsForTrend = scopedHourlyRows.length > 0 ? scopedHourlyRows : hourlyRows;
+    const scopedHourlyRows = interactiveDate
+      ? scopedHourlyRowsBase.filter((row) => row.date_start === interactiveDate)
+      : scopedHourlyRowsBase;
+
+    const hourlyRowsForTrend = scopedHourlyRows.length > 0 ? scopedHourlyRows : (interactiveDate ? [] : hourlyRows);
 
     const hourlyClicksByDateMap = new Map<string, number[]>();
     const hourlyImpressionsByDateMap = new Map<string, number[]>();
@@ -387,7 +428,7 @@ export function MetaAdsDashboard() {
       hourlyRowsCount: hourlyRowsForTrend.length,
       hourlyRowsRawCount: hourlyRows.length,
     };
-  }, [adId, adsetId, campaignId, reportingQuery.data?.hourlyRows, reportingQuery.data?.rows]);
+  }, [adId, adsetId, campaignId, interactiveDate, reportingQuery.data?.hourlyRows, reportingQuery.data?.rows]);
 
   const isFiltersDirty = campaignId !== draftCampaignId
     || adsetId !== draftAdsetId
@@ -498,8 +539,13 @@ export function MetaAdsDashboard() {
       if (campaignId && row.campaign_business_id !== campaignId) return false;
       if (adsetId && row.adset_business_id !== adsetId) return false;
       if (adId && row.ad_business_id !== adId) return false;
+      if (interactiveDate && row.date_start !== interactiveDate) return false;
       return true;
     });
+
+    const audienceRowsInDateScope = interactiveDate
+      ? audienceRows.filter((row) => row.date_start === interactiveDate)
+      : audienceRows;
 
     const scopedAdIds = new Set(
       filteredReportRows
@@ -508,11 +554,11 @@ export function MetaAdsDashboard() {
     );
 
     if (scopedAdIds.size === 0) {
-      return adId || adsetId || campaignId ? [] : audienceRows;
+      return adId || adsetId || campaignId ? [] : audienceRowsInDateScope;
     }
 
-    return audienceRows.filter((row) => scopedAdIds.has(row.ad_business_id));
-  }, [audienceQuery.data, reportingQuery.data?.rows, campaignId, adsetId, adId]);
+    return audienceRowsInDateScope.filter((row) => scopedAdIds.has(row.ad_business_id));
+  }, [audienceQuery.data, reportingQuery.data?.rows, campaignId, adsetId, adId, interactiveDate]);
 
   const metricLabel = audienceMetricMeta[audienceMetric].label;
   const metricFormat = audienceMetricMeta[audienceMetric].format;
@@ -754,6 +800,7 @@ export function MetaAdsDashboard() {
           setAdId(draftAdId);
           setDateFrom(draftDateFrom);
           setDateTo(draftDateTo);
+          setInteractiveDate('');
         }}
         onClear={() => {
           setCampaignId('');
@@ -766,6 +813,7 @@ export function MetaAdsDashboard() {
           setDraftAdId('');
           setDraftDateFrom('');
           setDraftDateTo('');
+          setInteractiveDate('');
         }}
         isApplyDisabled={!isFiltersDirty}
       />
@@ -916,6 +964,21 @@ export function MetaAdsDashboard() {
       </Section>
 
       <Section title="Gráficos">
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-gray-200 bg-white px-4 py-3 text-xs">
+          <span className="font-semibold uppercase tracking-[0.14em] text-gray-600">
+            Cross-filter por fecha: hacé click en barras/líneas diarias para filtrar todo el dashboard.
+          </span>
+          {interactiveDate ? (
+            <button
+              type="button"
+              onClick={() => setInteractiveDate('')}
+              className="inline-flex items-center rounded-xl border border-gray-300 bg-white px-3 py-1.5 font-semibold uppercase tracking-[0.12em] text-gray-700 transition hover:border-red-300 hover:text-red-700"
+            >
+              Limpiar fecha ({interactiveDate})
+            </button>
+          ) : null}
+        </div>
+
         <div className="space-y-3">
           <p className="text-xs font-semibold uppercase tracking-[0.18em] text-gray-500">Clicks</p>
           <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
@@ -961,7 +1024,7 @@ export function MetaAdsDashboard() {
 
             <ChartCard title="Clicks por día (totales)" icon={<MousePointerClick size={16} className="text-red-600" />}>
               <ResponsiveContainer width="100%" height={300}>
-                <BarChart data={dashboard.trend}>
+                <BarChart data={dashboard.trend} onClick={handleDailyChartClick}>
                   <CartesianGrid strokeDasharray="3 3" vertical={false} />
                   <XAxis dataKey="date_start" tick={{ fontSize: 12 }} />
                   <YAxis tick={{ fontSize: 12 }} />
@@ -975,7 +1038,7 @@ export function MetaAdsDashboard() {
 
             <ChartCard title="Promedio diario de clicks" icon={<LineChartIcon size={16} className="text-red-600" />}>
               <ResponsiveContainer width="100%" height={300}>
-                <LineChart data={dashboard.trendAveragesByDay}>
+                <LineChart data={dashboard.trendAveragesByDay} onClick={handleDailyChartClick}>
                   <CartesianGrid strokeDasharray="3 3" vertical={false} />
                   <XAxis dataKey="date_start" tick={{ fontSize: 12 }} />
                   <YAxis tick={{ fontSize: 12 }} />
@@ -1034,7 +1097,7 @@ export function MetaAdsDashboard() {
 
             <ChartCard title="Vistas por día (totales)" icon={<LineChartIcon size={16} className="text-red-600" />}>
               <ResponsiveContainer width="100%" height={300}>
-                <BarChart data={dashboard.trend}>
+                <BarChart data={dashboard.trend} onClick={handleDailyChartClick}>
                   <CartesianGrid strokeDasharray="3 3" vertical={false} />
                   <XAxis dataKey="date_start" tick={{ fontSize: 12 }} />
                   <YAxis tick={{ fontSize: 12 }} allowDecimals={false} />
@@ -1048,7 +1111,7 @@ export function MetaAdsDashboard() {
 
             <ChartCard title="Promedio diario de vistas" icon={<LineChartIcon size={16} className="text-red-600" />}>
               <ResponsiveContainer width="100%" height={300}>
-                <LineChart data={dashboard.trendAveragesByDay}>
+                <LineChart data={dashboard.trendAveragesByDay} onClick={handleDailyChartClick}>
                   <CartesianGrid strokeDasharray="3 3" vertical={false} />
                   <XAxis dataKey="date_start" tick={{ fontSize: 12 }} />
                   <YAxis tick={{ fontSize: 12 }} allowDecimals={false} />
@@ -1107,7 +1170,7 @@ export function MetaAdsDashboard() {
 
             <ChartCard title="Gasto por día (total)" icon={<BadgeDollarSign size={16} className="text-red-600" />}>
               <ResponsiveContainer width="100%" height={300}>
-                <BarChart data={dashboard.trend}>
+                <BarChart data={dashboard.trend} onClick={handleDailyChartClick}>
                   <CartesianGrid strokeDasharray="3 3" vertical={false} />
                   <XAxis dataKey="date_start" tick={{ fontSize: 12 }} />
                   <YAxis tick={{ fontSize: 12 }} />
@@ -1121,7 +1184,7 @@ export function MetaAdsDashboard() {
 
             <ChartCard title="Promedio diario de gasto" icon={<LineChartIcon size={16} className="text-red-600" />}>
               <ResponsiveContainer width="100%" height={300}>
-                <LineChart data={dashboard.trendAveragesByDay}>
+                <LineChart data={dashboard.trendAveragesByDay} onClick={handleDailyChartClick}>
                   <CartesianGrid strokeDasharray="3 3" vertical={false} />
                   <XAxis dataKey="date_start" tick={{ fontSize: 12 }} />
                   <YAxis tick={{ fontSize: 12 }} />
@@ -1140,7 +1203,7 @@ export function MetaAdsDashboard() {
           <div className="grid grid-cols-1 gap-4 xl:grid-cols-1">
             <ChartCard title="Tendencia diaria de CTR y CPC" icon={<PieChartIcon size={16} className="text-red-600" />}>
               <ResponsiveContainer width="100%" height={300}>
-                <LineChart data={dashboard.trendEfficiency}>
+                <LineChart data={dashboard.trendEfficiency} onClick={handleDailyChartClick}>
                   <CartesianGrid strokeDasharray="3 3" vertical={false} />
                   <XAxis dataKey="date_start" tick={{ fontSize: 12 }} />
                   <YAxis yAxisId="left" tick={{ fontSize: 12 }} tickFormatter={(value) => `${Number(value).toFixed(1)}%`} />
