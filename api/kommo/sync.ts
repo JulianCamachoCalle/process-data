@@ -9,7 +9,7 @@ import {
   normalizeKommoBaseUrl,
   verifyAdminSession,
 } from './_shared.js';
-import { recalculateLeadGanadoCountersByBusinessId } from './leads-ganados-auto.js';
+import { hydrateLeadGanadoDistritoByBusinessId, recalculateLeadGanadoCountersByBusinessId } from './leads-ganados-auto.js';
 
 const SYNC_SECRET_HEADER = 'x-kommo-sync-secret';
 const SYNC_SECRET_ENV = 'KOMMO_SYNC_SECRET';
@@ -2026,6 +2026,65 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
         limit,
         processed: leadIds.length,
         updated,
+        errors,
+        has_more: leadIds.length === limit,
+        next_offset: offset + leadIds.length,
+        error_details: errorDetails,
+      });
+    }
+
+    if (mode === 'hydrate_leads_ganados_distritos') {
+      const supabase = getSupabaseAdminClient();
+      const limit = parseEnviosProbeLimit(searchParams.get('limit') ?? undefined, 120, 500);
+      const offset = parseNonNegativeInt(searchParams.get('offset') ?? undefined, 0, 200_000);
+      const force = ['1', 'true', 'yes'].includes((searchParams.get('force') ?? '').toLowerCase());
+
+      const { data: leadsRows, error: leadsError } = await supabase
+        .from('leads_ganados' as never)
+        .select('business_id' as never)
+        .order('business_id', { ascending: true })
+        .range(offset, offset + limit - 1);
+
+      if (leadsError) {
+        throw new Error(`No se pudieron leer leads_ganados para hidratar distritos: ${leadsError.message}`);
+      }
+
+      const leadIds = ((leadsRows ?? []) as Array<{ business_id: number | null }>)
+        .map((row) => Number(row.business_id ?? 0))
+        .filter((id) => Number.isFinite(id) && id > 0);
+
+      let processed = 0;
+      let updated = 0;
+      let skipped = 0;
+      let errors = 0;
+      const errorDetails: string[] = [];
+
+      for (const leadId of leadIds) {
+        processed += 1;
+        try {
+          const result = await hydrateLeadGanadoDistritoByBusinessId(supabase, leadId, { force });
+          if (result.updated) {
+            updated += 1;
+          } else {
+            skipped += 1;
+          }
+        } catch (error: unknown) {
+          errors += 1;
+          if (errorDetails.length < 20) {
+            errorDetails.push(`${leadId}: ${error instanceof Error ? error.message : String(error)}`);
+          }
+        }
+      }
+
+      return res.status(200).json({
+        success: true,
+        mode,
+        offset,
+        limit,
+        force,
+        processed,
+        updated,
+        skipped,
         errors,
         has_more: leadIds.length === limit,
         next_offset: offset + leadIds.length,
