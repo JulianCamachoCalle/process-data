@@ -91,6 +91,11 @@ function resolveCountryLabel(codeOrName: string) {
   const normalized = (codeOrName ?? '').trim();
   if (!normalized) return 'N/D';
 
+  const normalizedLower = normalized.toLowerCase();
+  if (normalizedLower === 'unknown' || normalizedLower === 'undefined' || normalizedLower === 'null' || normalizedLower === 'not set') {
+    return 'N/D';
+  }
+
   if (!/^[A-Za-z]{2}$/.test(normalized)) {
     return normalized;
   }
@@ -101,6 +106,18 @@ function resolveCountryLabel(codeOrName: string) {
   } catch {
     return normalized.toUpperCase();
   }
+}
+
+function normalizeAudienceLabel(raw: string) {
+  const value = (raw ?? '').trim();
+  if (!value) return 'N/D';
+
+  const lower = value.toLowerCase();
+  if (lower === 'unknown' || lower === 'undefined' || lower === 'null' || lower === 'not set') {
+    return 'N/D';
+  }
+
+  return value;
 }
 
 function resolveGenderLabel(raw: string) {
@@ -768,7 +785,7 @@ export function MetaAdsDashboard() {
 
     for (const row of scopedAudienceRows) {
       if (row.breakdown_type !== 'age_gender') continue;
-      const key = row.breakdown_value_1 || 'N/D';
+      const key = normalizeAudienceLabel(row.breakdown_value_1 || 'N/D');
       const value = resolveAudienceMetricValue(row);
       grouped.set(key, (grouped.get(key) ?? 0) + value);
     }
@@ -817,7 +834,7 @@ export function MetaAdsDashboard() {
 
     for (const row of scopedAudienceRows) {
       if (row.breakdown_type !== 'publisher_platform') continue;
-      const key = row.breakdown_value_1 || 'N/D';
+      const key = normalizeAudienceLabel(row.breakdown_value_1 || 'N/D');
       const value = resolveAudienceMetricValue(row);
       grouped.set(key, (grouped.get(key) ?? 0) + value);
     }
@@ -833,7 +850,7 @@ export function MetaAdsDashboard() {
 
     for (const row of scopedAudienceRows) {
       if (row.breakdown_type !== 'region') continue;
-      const key = row.breakdown_value_1 || 'N/D';
+      const key = normalizeAudienceLabel(row.breakdown_value_1 || 'N/D');
       const value = resolveAudienceMetricValue(row);
       grouped.set(key, (grouped.get(key) ?? 0) + value);
     }
