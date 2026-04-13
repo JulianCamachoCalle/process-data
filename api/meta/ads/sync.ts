@@ -1600,7 +1600,7 @@ export default async function metaAdsSyncHandler(req: VercelRequest, res: Vercel
     const timeIncrement = getRequestParam(req, body, 'time_increment')?.trim() || '1';
     const limit = parsePositiveInt(getRequestParam(req, body, 'limit'), DEFAULT_LIMIT, 500);
     const maxPages = parsePositiveInt(getRequestParam(req, body, 'max_pages'), DEFAULT_MAX_PAGES);
-    const postLimit = parsePositiveInt(getRequestParam(req, body, 'post_limit'), limit, 500);
+    const postLimit = parsePositiveInt(getRequestParam(req, body, 'post_limit'), limit, 100);
     const postMaxPages = parsePositiveInt(getRequestParam(req, body, 'post_max_pages'), maxPages);
     const hourlyAdLimit = parsePositiveInt(getRequestParam(req, body, 'hourly_ad_limit'), 100, 500);
     const maxRuntimeMs = parsePositiveInt(

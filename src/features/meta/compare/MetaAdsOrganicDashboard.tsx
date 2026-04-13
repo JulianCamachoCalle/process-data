@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Activity, BarChart3, LineChart as LineChartIcon, MousePointerClick, SplitSquareHorizontal } from 'lucide-react';
+import { Activity, BarChart3, Eye, LineChart as LineChartIcon, MessageSquare, MousePointerClick, Share2, SplitSquareHorizontal, Target, ThumbsUp } from 'lucide-react';
 import { Bar, BarChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { formatNumberEs } from '../../../lib/tableHelpers';
 import { ChartCard, KpiCard, KpiGrid, MetaAdsFiltersPanel, MetaAdsPageHero, Section } from '../ads/metaAdsShared';
@@ -12,6 +12,14 @@ type ComparePoint = {
   organic_clicks: number;
   ads_impressions: number;
   organic_impressions: number;
+  ads_reactions: number;
+  organic_reactions: number;
+  ads_comments: number;
+  organic_comments: number;
+  ads_shares: number;
+  organic_shares: number;
+  ads_video_views: number;
+  organic_video_views: number;
 };
 
 const chartTooltipStyle = {
@@ -82,9 +90,21 @@ export function MetaAdsOrganicDashboard() {
         organic_clicks: 0,
         ads_impressions: 0,
         organic_impressions: 0,
+        ads_reactions: 0,
+        organic_reactions: 0,
+        ads_comments: 0,
+        organic_comments: 0,
+        ads_shares: 0,
+        organic_shares: 0,
+        ads_video_views: 0,
+        organic_video_views: 0,
       };
       current.ads_clicks += Number(row.clicks ?? 0);
       current.ads_impressions += Number(row.impressions ?? 0);
+      current.ads_reactions += Number(row.reactions ?? 0);
+      current.ads_comments += Number(row.comments ?? 0);
+      current.ads_shares += Number(row.shares ?? 0);
+      current.ads_video_views += Number(row.video_views ?? 0);
       byDate.set(date, current);
     }
 
@@ -97,9 +117,21 @@ export function MetaAdsOrganicDashboard() {
         organic_clicks: 0,
         ads_impressions: 0,
         organic_impressions: 0,
+        ads_reactions: 0,
+        organic_reactions: 0,
+        ads_comments: 0,
+        organic_comments: 0,
+        ads_shares: 0,
+        organic_shares: 0,
+        ads_video_views: 0,
+        organic_video_views: 0,
       };
       current.organic_clicks += latestByPostMetric.get(`${post.id}:post_clicks`) ?? 0;
       current.organic_impressions += latestByPostMetric.get(`${post.id}:post_impressions`) ?? 0;
+      current.organic_video_views += latestByPostMetric.get(`${post.id}:post_video_views`) ?? 0;
+      current.organic_reactions += Number(post.reactions ?? 0);
+      current.organic_comments += Number(post.comments ?? 0);
+      current.organic_shares += Number(post.shares ?? 0);
       byDate.set(date, current);
     }
 
@@ -113,10 +145,36 @@ export function MetaAdsOrganicDashboard() {
         organicClicks: acc.organicClicks + row.organic_clicks,
         adsImpressions: acc.adsImpressions + row.ads_impressions,
         organicImpressions: acc.organicImpressions + row.organic_impressions,
+        adsReactions: acc.adsReactions + row.ads_reactions,
+        organicReactions: acc.organicReactions + row.organic_reactions,
+        adsComments: acc.adsComments + row.ads_comments,
+        organicComments: acc.organicComments + row.organic_comments,
+        adsShares: acc.adsShares + row.ads_shares,
+        organicShares: acc.organicShares + row.organic_shares,
+        adsVideoViews: acc.adsVideoViews + row.ads_video_views,
+        organicVideoViews: acc.organicVideoViews + row.organic_video_views,
       }),
-      { adsClicks: 0, organicClicks: 0, adsImpressions: 0, organicImpressions: 0 },
+      {
+        adsClicks: 0,
+        organicClicks: 0,
+        adsImpressions: 0,
+        organicImpressions: 0,
+        adsReactions: 0,
+        organicReactions: 0,
+        adsComments: 0,
+        organicComments: 0,
+        adsShares: 0,
+        organicShares: 0,
+        adsVideoViews: 0,
+        organicVideoViews: 0,
+      },
     );
   }, [compareByDate]);
+
+  const retention = useMemo(() => ({
+    ads: totals.adsImpressions > 0 ? (totals.adsVideoViews * 100) / totals.adsImpressions : 0,
+    organic: totals.organicImpressions > 0 ? (totals.organicVideoViews * 100) / totals.organicImpressions : 0,
+  }), [totals.adsImpressions, totals.adsVideoViews, totals.organicImpressions, totals.organicVideoViews]);
 
   const isLoading = adsQuery.isLoading || organicQuery.isLoading;
   const error = adsQuery.error ?? organicQuery.error;
@@ -174,6 +232,16 @@ export function MetaAdsOrganicDashboard() {
           <KpiCard title="Clicks Orgánico" value={formatNumberEs(Math.round(totals.organicClicks))} helper="Total del periodo" icon={<MousePointerClick className="text-red-600" size={18} />} />
           <KpiCard title="Impresiones Ads" value={formatNumberEs(Math.round(totals.adsImpressions))} helper="Total del periodo" icon={<BarChart3 className="text-red-600" size={18} />} />
           <KpiCard title="Impresiones Orgánico" value={formatNumberEs(Math.round(totals.organicImpressions))} helper="Total del periodo" icon={<LineChartIcon className="text-red-600" size={18} />} />
+          <KpiCard title="Reacciones Ads" value={formatNumberEs(Math.round(totals.adsReactions))} helper="Total del periodo" icon={<ThumbsUp className="text-red-600" size={18} />} />
+          <KpiCard title="Reacciones Orgánico" value={formatNumberEs(Math.round(totals.organicReactions))} helper="Total del periodo" icon={<ThumbsUp className="text-red-600" size={18} />} />
+          <KpiCard title="Comentarios Ads" value={formatNumberEs(Math.round(totals.adsComments))} helper="Total del periodo" icon={<MessageSquare className="text-red-600" size={18} />} />
+          <KpiCard title="Comentarios Orgánico" value={formatNumberEs(Math.round(totals.organicComments))} helper="Total del periodo" icon={<MessageSquare className="text-red-600" size={18} />} />
+          <KpiCard title="Compartidos Ads" value={formatNumberEs(Math.round(totals.adsShares))} helper="Total del periodo" icon={<Share2 className="text-red-600" size={18} />} />
+          <KpiCard title="Compartidos Orgánico" value={formatNumberEs(Math.round(totals.organicShares))} helper="Total del periodo" icon={<Share2 className="text-red-600" size={18} />} />
+          <KpiCard title="Video Views Ads" value={formatNumberEs(Math.round(totals.adsVideoViews))} helper="Total del periodo" icon={<Eye className="text-red-600" size={18} />} />
+          <KpiCard title="Video Views Orgánico" value={formatNumberEs(Math.round(totals.organicVideoViews))} helper="Total del periodo" icon={<Eye className="text-red-600" size={18} />} />
+          <KpiCard title="Retención Ads" value={`${retention.ads.toFixed(2)}%`} helper="Video views / impresiones" icon={<Target className="text-red-600" size={18} />} />
+          <KpiCard title="Retención Orgánico" value={`${retention.organic.toFixed(2)}%`} helper="Video views / impresiones" icon={<Target className="text-red-600" size={18} />} />
         </KpiGrid>
       </Section>
 
