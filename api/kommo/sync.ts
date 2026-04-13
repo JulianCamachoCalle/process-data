@@ -166,6 +166,17 @@ function asArrayQueryParam(value: string | string[] | undefined) {
   return values.map((v) => v.trim()).filter(Boolean);
 }
 
+function getRequestSearchParams(req: VercelRequest) {
+  const hostHeader = req.headers.host;
+  const host = (Array.isArray(hostHeader) ? hostHeader[0] : hostHeader) || 'localhost';
+  const protoHeader = req.headers['x-forwarded-proto'];
+  const protoRaw = Array.isArray(protoHeader) ? protoHeader[0] : protoHeader;
+  const protocol = protoRaw?.split(',')[0]?.trim() || 'https';
+  const rawUrl = typeof req.url === 'string' && req.url.trim().length > 0 ? req.url : '/';
+
+  return new URL(rawUrl, `${protocol}://${host}`).searchParams;
+}
+
 function parseEnviosProbeLimit(value: string | undefined, fallback = 10, max = 2000) {
   if (!value) return fallback;
   const parsed = Number.parseInt(value, 10);
@@ -1598,12 +1609,13 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
       }
     }
 
-    const mode = asSingleQueryParam(req.query.mode)?.trim();
+    const searchParams = getRequestSearchParams(req);
+    const mode = searchParams.get('mode')?.trim();
     if (mode === 'dinsides_envios_probe') {
-      const limit = parseEnviosProbeLimit(asSingleQueryParam(req.query.limit), 10, 2000);
-      const searchNegocio = asSingleQueryParam(req.query.search_negocio)?.trim();
-      const searchTelefono = asSingleQueryParam(req.query.search_telefono)?.trim();
-      const searchIdPedido = asSingleQueryParam(req.query.search_id_pedido)?.trim();
+      const limit = parseEnviosProbeLimit(searchParams.get('limit') ?? undefined, 10, 2000);
+      const searchNegocio = searchParams.get('search_negocio')?.trim();
+      const searchTelefono = searchParams.get('search_telefono')?.trim();
+      const searchIdPedido = searchParams.get('search_id_pedido')?.trim();
       const { cookieHeader, loginRole } = await loginDinsidesAndGetCookieHeader();
       const rows = await fetchDinsidesEnviosRows({
         cookieHeader,
@@ -1629,13 +1641,13 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
     }
 
     if (mode === 'dinsides_envios_sync_from_leads') {
-      const limitBusinesses = parseEnviosProbeLimit(asSingleQueryParam(req.query.limit_businesses), 30, 300);
-      const limitRows = parseEnviosProbeLimit(asSingleQueryParam(req.query.limit_rows), 1000, 10000);
-      const sampleRows = parseEnviosProbeLimit(asSingleQueryParam(req.query.sample_rows), 1200, 10000);
-      const offsetRows = parseNonNegativeInt(asSingleQueryParam(req.query.offset_rows), 0, 1_000_000);
-      const singleBusiness = asSingleQueryParam(req.query.search_negocio)?.trim();
-      const singleSearchTipo = asSingleQueryParam(req.query.search_tipo)?.trim();
-      const debug = ['1', 'true', 'yes'].includes((asSingleQueryParam(req.query.debug) ?? '').toLowerCase());
+      const limitBusinesses = parseEnviosProbeLimit(searchParams.get('limit_businesses') ?? undefined, 30, 300);
+      const limitRows = parseEnviosProbeLimit(searchParams.get('limit_rows') ?? undefined, 1000, 10000);
+      const sampleRows = parseEnviosProbeLimit(searchParams.get('sample_rows') ?? undefined, 1200, 10000);
+      const offsetRows = parseNonNegativeInt(searchParams.get('offset_rows') ?? undefined, 0, 1_000_000);
+      const singleBusiness = searchParams.get('search_negocio')?.trim();
+      const singleSearchTipo = searchParams.get('search_tipo')?.trim();
+      const debug = ['1', 'true', 'yes'].includes((searchParams.get('debug') ?? '').toLowerCase());
 
       const supabase = getSupabaseAdminClient();
       const businessNames = singleBusiness
@@ -1755,9 +1767,9 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
 
       const finalRows = Array.from(dedupe.values()).slice(offsetRows, offsetRows + limitRows);
 
-      const persist = ['1', 'true', 'yes'].includes((asSingleQueryParam(req.query.persist) ?? '').toLowerCase());
+      const persist = ['1', 'true', 'yes'].includes((searchParams.get('persist') ?? '').toLowerCase());
       if (persist) {
-        const onlyRemaining = ['1', 'true', 'yes'].includes((asSingleQueryParam(req.query.only_remaining) ?? '').toLowerCase());
+        const onlyRemaining = ['1', 'true', 'yes'].includes((searchParams.get('only_remaining') ?? '').toLowerCase());
         const leadsResult = await supabase
           .from('leads_ganados' as never)
           .select('business_id,tienda_nombre_snapshot' as never)

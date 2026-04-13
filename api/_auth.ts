@@ -11,10 +11,13 @@ export const AUTH_MAX_AGE_SECONDS = 60 * 60 * 8;
 const JWT_ISSUER = 'process-data-admin';
 const JWT_AUDIENCE = 'process-data-api';
 const ADMIN_ROLE = 'admin';
+const USER_ROLE = 'user';
+
+export type AppRole = 'admin' | 'user';
 
 interface JwtClaims {
   sub: string;
-  role: string;
+  role: AppRole;
   iat?: number;
   exp?: number;
   iss?: string;
@@ -26,6 +29,10 @@ export interface AuthResult {
   status: number;
   error?: string;
   claims?: JwtClaims;
+}
+
+function isAppRole(value: unknown): value is AppRole {
+  return value === ADMIN_ROLE || value === USER_ROLE;
 }
 
 // Funciones para manejo de cookies, generación y verificación de JWT, y verificación de sesiones de admin
@@ -57,11 +64,11 @@ export function getJwtSecretOrThrow() {
   return jwtSecret;
 }
 
-// Genera un token JWT para un usuario admin con el ID proporcionado
-export function signAdminJwt(userId: string, jwtSecret: string) {
+// Genera un token JWT para un usuario autenticado con el ID y rol proporcionados
+export function signAuthJwt(userId: string, jwtSecret: string, role: AppRole) {
   return jwt.sign(
     {
-      role: ADMIN_ROLE,
+      role,
       sub: userId,
     },
     jwtSecret,
@@ -73,8 +80,13 @@ export function signAdminJwt(userId: string, jwtSecret: string) {
   );
 }
 
-// Verifica un token JWT de admin y devuelve sus claims si es válido, o lanza un error si no lo es
-export function verifyAdminToken(token: string, jwtSecret: string): JwtClaims {
+// Compatibilidad con código existente
+export function signAdminJwt(userId: string, jwtSecret: string) {
+  return signAuthJwt(userId, jwtSecret, ADMIN_ROLE);
+}
+
+// Verifica un token JWT y devuelve sus claims si es válido
+export function verifyAuthToken(token: string, jwtSecret: string, allowedRoles: AppRole[] = [ADMIN_ROLE, USER_ROLE]): JwtClaims {
   const decoded = jwt.verify(token, jwtSecret, {
     issuer: JWT_ISSUER,
     audience: JWT_AUDIENCE,
@@ -88,15 +100,24 @@ export function verifyAdminToken(token: string, jwtSecret: string): JwtClaims {
     throw new Error('Token inválido: falta sub');
   }
 
-  if (decoded.role !== ADMIN_ROLE) {
+  if (!isAppRole(decoded.role)) {
+    throw new Error('Token inválido: rol desconocido');
+  }
+
+  if (!allowedRoles.includes(decoded.role)) {
     throw new Error('Token inválido: rol no autorizado');
   }
 
   return decoded;
 }
 
-// Verifica la sesión de admin en la solicitud y devuelve un resultado con el estado de autenticación y los claims del token si es válido
-export function verifyAdminSession(req: VercelRequest): AuthResult {
+// Compatibilidad con código existente
+export function verifyAdminToken(token: string, jwtSecret: string): JwtClaims {
+  return verifyAuthToken(token, jwtSecret, [ADMIN_ROLE]);
+}
+
+// Verifica la sesión autenticada en la solicitud
+export function verifySession(req: VercelRequest, allowedRoles: AppRole[] = [ADMIN_ROLE, USER_ROLE]): AuthResult {
   let jwtSecret: string;
   try {
     jwtSecret = getJwtSecretOrThrow();
@@ -108,18 +129,23 @@ export function verifyAdminSession(req: VercelRequest): AuthResult {
     };
   }
 
-  // Verifica el token JWT de admin en la cookie de la solicitud
+  // Verifica el token JWT en la cookie de la solicitud
   const token = getAuthTokenFromRequest(req);
   if (!token) {
     return { ok: false, status: 401, error: 'No autorizado: falta la cookie auth_token' };
   }
 
   try {
-    const claims = verifyAdminToken(token, jwtSecret);
+    const claims = verifyAuthToken(token, jwtSecret, allowedRoles);
     return { ok: true, status: 200, claims };
   } catch {
     return { ok: false, status: 401, error: 'No autorizado: cookie auth_token inválida o expirada' };
   }
+}
+
+// Compatibilidad con código existente
+export function verifyAdminSession(req: VercelRequest): AuthResult {
+  return verifySession(req, [ADMIN_ROLE]);
 }
 
 export function buildAuthCookie(token: string) {

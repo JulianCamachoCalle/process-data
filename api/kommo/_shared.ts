@@ -3,7 +3,9 @@ import { createClient } from '@supabase/supabase-js';
 import { createRequire } from 'node:module';
 import {
   getJwtSecretOrThrow,
+  verifySession as verifySessionBase,
   verifyAdminSession as verifyAdminSessionBase,
+  type AppRole,
   type AuthResult,
 } from '../_auth.js';
 
@@ -47,6 +49,10 @@ interface KommoOauthState {
 
 export function verifyAdminSession(req: VercelRequest): AuthResult {
   return verifyAdminSessionBase(req);
+}
+
+export function verifySession(req: VercelRequest, allowedRoles?: AppRole[]): AuthResult {
+  return verifySessionBase(req, allowedRoles);
 }
 
 export function isSecretAuthorized(

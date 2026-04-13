@@ -6,8 +6,9 @@ import {
   buildLogoutCookie,
   getAuthTokenFromRequest,
   getJwtSecretOrThrow,
-  signAdminJwt,
-  verifyAdminToken,
+  signAuthJwt,
+  verifyAuthToken,
+  type AppRole,
 } from './_auth.js';
 import { verifyPasswordWithScrypt } from './_password.js';
 
@@ -106,7 +107,7 @@ interface AdminAccessUserRow {
   email: string;
   password_hash: string;
   is_active: boolean;
-  role: string;
+  role: AppRole | string;
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -120,8 +121,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
 
       try {
-        verifyAdminToken(token, jwtSecret);
-        return res.status(200).json({ authenticated: true });
+        const claims = verifyAuthToken(token, jwtSecret);
+        return res.status(200).json({ authenticated: true, role: claims.role });
       } catch {
         return res.status(401).json({ authenticated: false });
       }
@@ -171,22 +172,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const user = ((data ?? []) as AdminAccessUserRow[])[0] ?? null;
     const isUserActive = user?.is_active === true;
-    const hasAdminRole = user?.role === 'admin';
+    const role = user?.role === 'admin' || user?.role === 'user' ? user.role : null;
     const isValidPassword =
       typeof user?.password_hash === 'string' && user.password_hash.length > 0
         ? verifyPasswordWithScrypt(password, user.password_hash)
         : false;
 
-    if (!user || !isUserActive || !hasAdminRole || !isValidPassword) {
+    if (!user || !isUserActive || !role || !isValidPassword) {
       registerFailedLoginAttempt(rateKey, now);
       return res.status(401).json(getInvalidCredentialsError());
     }
 
     clearFailedLoginAttempts(rateKey);
 
-    const token = signAdminJwt(String(user.id), jwtSecret);
+    const token = signAuthJwt(String(user.id), jwtSecret, role);
     res.setHeader('Set-Cookie', buildAuthCookie(token));
-    return res.status(200).json({ success: true });
+    return res.status(200).json({ success: true, role });
   } catch (error: unknown) {
     if (error instanceof ZodError) {
       return res.status(400).json({ error: 'Cuerpo de solicitud inválido', details: error.issues });

@@ -1,4 +1,4 @@
-import { Routes, Route, Navigate, useNavigate, useParams } from 'react-router-dom';
+import { Routes, Route, Navigate, useLocation, useNavigate, useParams } from 'react-router-dom';
 import { useEffect, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { Menu } from 'lucide-react';
@@ -32,6 +32,18 @@ const SHEETS = [
   'RECOJOS',
   'LEADS GANADOS'
 ];
+
+type AppRole = 'admin' | 'user';
+
+const USER_ALLOWED_PATHS = new Set([
+  '/meta/ads',
+  '/meta/ads/dashboard',
+  '/meta/compare',
+  '/meta/compare/dashboard',
+  '/meta/pages',
+  '/meta/pages/dashboard',
+  '/kommo/leads-insights',
+]);
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
@@ -78,16 +90,57 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
 
 function Layout() {
   const queryClient = useQueryClient();
+  const location = useLocation();
   const navigate = useNavigate();
   const [showSecretPanel, setShowSecretPanel] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+  const [role, setRole] = useState<AppRole | null>(null);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const persisted = window.localStorage.getItem('sidebarCollapsed');
     setSidebarCollapsed(persisted === 'true');
   }, []);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const loadSessionRole = async () => {
+      try {
+        const response = await fetch('/api/auth', {
+          method: 'GET',
+          credentials: 'include',
+        });
+
+        if (!response.ok) {
+          if (isMounted) navigate('/login', { replace: true });
+          return;
+        }
+
+        const payload = (await response.json().catch(() => ({}))) as { authenticated?: boolean; role?: string };
+        const nextRole: AppRole = payload.role === 'user' ? 'user' : 'admin';
+
+        if (isMounted) {
+          setRole(nextRole);
+        }
+      } catch {
+        if (isMounted) navigate('/login', { replace: true });
+      }
+    };
+
+    void loadSessionRole();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [navigate]);
+
+  useEffect(() => {
+    if (role !== 'user') return;
+    if (USER_ALLOWED_PATHS.has(location.pathname)) return;
+    navigate('/meta/ads/dashboard', { replace: true });
+  }, [location.pathname, navigate, role]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -144,6 +197,18 @@ function Layout() {
     }
   };
 
+  if (role === null) {
+    return (
+      <div className="min-h-screen flex items-center justify-center text-sm text-gray-500">
+        Cargando permisos...
+      </div>
+    );
+  }
+
+  const adminOnly = (element: React.ReactElement) => (
+    role === 'admin' ? element : <Navigate to="/meta/ads/dashboard" replace />
+  );
+
   return (
     <div className="relative flex min-h-screen min-h-[100dvh] flex-col overflow-x-hidden bg-transparent text-gray-900 font-sans selection:bg-red-100 selection:text-red-900 md:h-screen md:flex-row md:overflow-hidden print:h-auto print:overflow-visible">
       {mobileSidebarOpen && (
@@ -156,6 +221,7 @@ function Layout() {
 
       <Sidebar
         sheets={SHEETS}
+        role={role}
         prefetchHandlers={{
           onSheetHover: prefetchSheet,
           onSheetFocus: prefetchSheet,
@@ -191,20 +257,20 @@ function Layout() {
         <main className="relative flex-1 overflow-x-hidden overflow-y-auto p-2 sm:p-4 md:p-6 lg:p-8 print:overflow-visible print:p-0">
           <div className="mx-auto w-full max-w-7xl print:max-w-none">
             <Routes>
-              <Route path="/" element={<DashboardOverview />} />
-              <Route path="/tabla/:sheetName" element={<SheetRouteWrapper />} />
-              <Route path="/sheet/:sheetName" element={<LegacySheetRedirect />} />
-              <Route path="/kommo" element={<KommoExplorer />} />
+              <Route path="/" element={adminOnly(<DashboardOverview />)} />
+              <Route path="/tabla/:sheetName" element={adminOnly(<SheetRouteWrapper />)} />
+              <Route path="/sheet/:sheetName" element={adminOnly(<LegacySheetRedirect />)} />
+              <Route path="/kommo" element={adminOnly(<KommoExplorer />)} />
               <Route path="/kommo/leads-insights" element={<KommoLeadsInsights />} />
-              <Route path="/kommo/:resource" element={<KommoExplorer />} />
+              <Route path="/kommo/:resource" element={adminOnly(<KommoExplorer />)} />
               <Route path="/meta/ads" element={<Navigate to="/meta/ads/dashboard" replace />} />
               <Route path="/meta/ads/dashboard" element={<MetaAdsDashboard />} />
-              <Route path="/meta/ads/data" element={<MetaAdsDataPage />} />
+              <Route path="/meta/ads/data" element={adminOnly(<MetaAdsDataPage />)} />
               <Route path="/meta/compare" element={<Navigate to="/meta/compare/dashboard" replace />} />
               <Route path="/meta/compare/dashboard" element={<MetaAdsOrganicDashboard />} />
               <Route path="/meta/pages" element={<Navigate to="/meta/pages/dashboard" replace />} />
               <Route path="/meta/pages/dashboard" element={<MetaPagesDashboard />} />
-              <Route path="/exports/google-sheets" element={<GoogleSheetsExportPage />} />
+              <Route path="/exports/google-sheets" element={adminOnly(<GoogleSheetsExportPage />)} />
             </Routes>
           </div>
         </main>

@@ -3,7 +3,7 @@ import {
   getSupabaseAdminClient,
   isSecretAuthorized,
   isVercelCronAuthorized,
-  verifyAdminSession,
+  verifySession,
 } from './_shared.js';
 
 const INSIGHTS_SECRET_HEADER = 'x-kommo-insights-secret';
@@ -414,7 +414,7 @@ export default async function kommoLeadsInsightsHandler(req: VercelRequest, res:
     const secretAuthorized = isSecretAuthorized(req, INSIGHTS_SECRET_ENV, INSIGHTS_SECRET_HEADER);
     const cronAuthorized = isVercelCronAuthorized(req);
     if (!secretAuthorized && !cronAuthorized) {
-      const auth = verifyAdminSession(req);
+      const auth = verifySession(req, ['admin', 'user']);
       if (!auth.ok) {
         return res.status(auth.status).json({ error: auth.error ?? 'No autorizado' });
       }
