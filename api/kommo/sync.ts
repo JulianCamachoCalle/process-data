@@ -2058,6 +2058,7 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
       let skipped = 0;
       let errors = 0;
       const errorDetails: string[] = [];
+      const skippedByReason: Record<string, number> = {};
 
       for (const leadId of leadIds) {
         processed += 1;
@@ -2067,6 +2068,8 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
             updated += 1;
           } else {
             skipped += 1;
+            const reason = String(result.reason ?? 'unknown');
+            skippedByReason[reason] = (skippedByReason[reason] ?? 0) + 1;
           }
         } catch (error: unknown) {
           errors += 1;
@@ -2085,6 +2088,7 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
         processed,
         updated,
         skipped,
+        skipped_by_reason: skippedByReason,
         errors,
         has_more: leadIds.length === limit,
         next_offset: offset + leadIds.length,
