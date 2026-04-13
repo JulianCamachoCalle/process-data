@@ -61,6 +61,15 @@ export function DynamicTable({ sheetName, columns, rows, onEdit }: DynamicTableP
   const [selectedFilterValue, setSelectedFilterValue] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
 
+  const visibleColumns = useMemo(() => {
+    if (sheetName !== 'RECOJOS') return columns;
+
+    return columns.filter((column) => {
+      const normalized = normalizeText(column);
+      return normalized !== normalizeText('Observaciones') && normalized !== normalizeText('observaciones');
+    });
+  }, [columns, sheetName]);
+
   const dateColumn = useMemo(() => {
     if (sheetName === 'LEADS GANADOS') {
       const fechaLeadGanado = columns.find(
@@ -108,7 +117,7 @@ export function DynamicTable({ sheetName, columns, rows, onEdit }: DynamicTableP
   }, [rows, typeColumn]);
 
   const filterableColumns = useMemo(() => {
-    return columns.filter((column) => {
+    return visibleColumns.filter((column) => {
       const normalized = normalizeText(column);
       if (!normalized || normalized === '__id' || normalized === '_id' || normalized === '_rownumber') {
         return false;
@@ -116,7 +125,7 @@ export function DynamicTable({ sheetName, columns, rows, onEdit }: DynamicTableP
 
       return rows.some((row) => String(row[column] ?? '').trim().length > 0);
     });
-  }, [columns, rows]);
+  }, [visibleColumns, rows]);
 
   const activeFilterColumn = useMemo(() => {
     if (!filterableColumns.length) return '';
@@ -271,6 +280,11 @@ export function DynamicTable({ sheetName, columns, rows, onEdit }: DynamicTableP
   );
 
   const shouldRenderAsCurrency = (columnName: string, rawValue: unknown) => {
+    const normalized = normalizeText(columnName);
+    if (normalized === normalizeText('Tipo de cobro') || normalized === normalizeText('Tipo de recojo')) {
+      return false;
+    }
+
     if (!currencyColumns.includes(columnName)) return false;
     return parseNumericValue(rawValue) !== null;
   };
@@ -698,7 +712,7 @@ export function DynamicTable({ sheetName, columns, rows, onEdit }: DynamicTableP
                 <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider whitespace-nowrap w-36">
                   Acciones
                 </th>
-                {columns.map((col) => (
+                {visibleColumns.map((col) => (
                   <th
                     key={col}
                     className="px-6 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider whitespace-nowrap"
@@ -711,7 +725,7 @@ export function DynamicTable({ sheetName, columns, rows, onEdit }: DynamicTableP
             <tbody className="bg-white divide-y divide-gray-100">
               {paginatedRows.length === 0 ? (
                 <tr>
-                  <td colSpan={columns.length + 1} className="px-6 py-10 text-center text-sm text-gray-500">
+                  <td colSpan={visibleColumns.length + 1} className="px-6 py-10 text-center text-sm text-gray-500">
                     No se encontraron resultados para los filtros aplicados.
                   </td>
                 </tr>
@@ -741,7 +755,7 @@ export function DynamicTable({ sheetName, columns, rows, onEdit }: DynamicTableP
                           </button>
                         </div>
                       </td>
-                      {columns.map((col) => (
+                      {visibleColumns.map((col) => (
                         <td key={`${key}-${col}`} className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">
                           {renderCellValue(col, row[col])}
                         </td>
