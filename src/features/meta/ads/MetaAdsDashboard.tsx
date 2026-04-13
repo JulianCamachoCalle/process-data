@@ -43,14 +43,41 @@ const chartTooltipStyle = {
   },
 } as const;
 
-type AudienceMetricKey = 'impressions' | 'reach' | 'clicks' | 'spend';
+type AudienceMetricKey = 'impressions' | 'reach' | 'clicks' | 'spend' | 'reactions' | 'comments' | 'shares' | 'video_views';
+
+type InsightChartMetricKey = 'clicks' | 'impressions' | 'spend' | 'reactions' | 'comments' | 'shares' | 'video_views';
 
 const audienceMetricMeta: Record<AudienceMetricKey, { label: string; format: 'number' | 'currency' }> = {
   impressions: { label: 'Vistas', format: 'number' },
   reach: { label: 'Alcance', format: 'number' },
   clicks: { label: 'Clicks', format: 'number' },
   spend: { label: 'Gasto', format: 'currency' },
+  reactions: { label: 'Reacciones', format: 'number' },
+  comments: { label: 'Comentarios', format: 'number' },
+  shares: { label: 'Compartidos', format: 'number' },
+  video_views: { label: 'Vistas de video', format: 'number' },
 };
+
+const insightChartMetricMeta: Record<InsightChartMetricKey, { label: string; format: 'number' | 'currency' }> = {
+  clicks: { label: 'Clicks', format: 'number' },
+  impressions: { label: 'Vistas', format: 'number' },
+  spend: { label: 'Gasto', format: 'currency' },
+  reactions: { label: 'Reacciones', format: 'number' },
+  comments: { label: 'Comentarios', format: 'number' },
+  shares: { label: 'Compartidos', format: 'number' },
+  video_views: { label: 'Vistas de video', format: 'number' },
+};
+
+function getAudienceMetricValue(row: { [key: string]: unknown }, metric: AudienceMetricKey) {
+  if (metric === 'clicks') return Number(row.clicks ?? 0);
+  if (metric === 'reach') return Number(row.reach ?? 0);
+  if (metric === 'spend') return Number(row.spend ?? 0);
+  if (metric === 'reactions') return Number(row.reactions ?? 0);
+  if (metric === 'comments') return Number(row.comments ?? 0);
+  if (metric === 'shares') return Number(row.shares ?? 0);
+  if (metric === 'video_views') return Number(row.video_views ?? 0);
+  return Number(row.impressions ?? 0);
+}
 
 function resolveCountryLabel(codeOrName: string) {
   const normalized = (codeOrName ?? '').trim();
@@ -100,6 +127,7 @@ export function MetaAdsDashboard() {
   const [campaignCompareIds, setCampaignCompareIds] = useState({ left: '', right: '' });
   const [adCompareIds, setAdCompareIds] = useState({ left: '', right: '' });
   const [audienceMetric, setAudienceMetric] = useState<AudienceMetricKey>('impressions');
+  const [insightChartMetric, setInsightChartMetric] = useState<InsightChartMetricKey>('clicks');
   const [interactiveDate, setInteractiveDate] = useState('');
 
   const toggleInteractiveDate = (nextDate: string | null) => {
@@ -458,6 +486,8 @@ export function MetaAdsDashboard() {
       hourlyTotalImpressions,
       hourlyAverageSpend,
       hourlyTotalSpend,
+      filteredRows,
+      hourlyRowsForTrend,
       hourlyRowsCount: hourlyRowsForTrend.length,
       hourlyRowsRawCount: hourlyRows.length,
     };
@@ -500,10 +530,79 @@ export function MetaAdsDashboard() {
     });
   }, [comparisonFilteredRows]);
 
-  const showHourlyLabels = dashboard.hourlyTotalClicks.length <= 25;
-  const showDailyLabels = dashboard.trend.length <= 25;
-  const showAverageDailyLabels = dashboard.trendAveragesByDay.length <= 25;
-  const showEfficiencyLabels = dashboard.trendEfficiency.length <= 25;
+  const selectedInsightMetricMeta = insightChartMetricMeta[insightChartMetric];
+
+  const selectedHourlyTotals = useMemo(() => {
+    const grouped = new Map<number, number>();
+    for (let hour = 0; hour < 24; hour += 1) grouped.set(hour, 0);
+
+    for (const row of dashboard.hourlyRowsForTrend) {
+      const hour = parseHourFromBucket(row.hour_bucket);
+      if (hour === null) continue;
+      const value = Number((row as unknown as Record<string, unknown>)[insightChartMetric] ?? 0);
+      grouped.set(hour, (grouped.get(hour) ?? 0) + value);
+    }
+
+    return Array.from(grouped.entries()).map(([hour, total]) => ({
+      hour,
+      label: `${String(hour).padStart(2, '0')}:00`,
+      total,
+    }));
+  }, [dashboard.hourlyRowsForTrend, insightChartMetric]);
+
+  const selectedHourlyAverages = useMemo(() => {
+    const byDate = new Map<string, number[]>();
+
+    for (const row of dashboard.hourlyRowsForTrend) {
+      const hour = parseHourFromBucket(row.hour_bucket);
+      if (hour === null) continue;
+
+      const value = Number((row as unknown as Record<string, unknown>)[insightChartMetric] ?? 0);
+      const current = byDate.get(row.date_start) ?? Array<number>(24).fill(0);
+      current[hour] += value;
+      byDate.set(row.date_start, current);
+    }
+
+    const dates = Array.from(byDate.keys());
+    return Array.from({ length: 24 }).map((_, hour) => {
+      const total = dates.reduce((acc, date) => acc + (byDate.get(date)?.[hour] ?? 0), 0);
+      const average = dates.length > 0 ? total / dates.length : 0;
+      return {
+        hour,
+        label: `${String(hour).padStart(2, '0')}:00`,
+        average,
+      };
+    });
+  }, [dashboard.hourlyRowsForTrend, insightChartMetric]);
+
+  const selectedDailyTotals = useMemo(() => {
+    const grouped = new Map<string, number>();
+    for (const row of dashboard.filteredRows) {
+      const date = row.date_start;
+      if (!date) continue;
+      const value = Number((row as unknown as Record<string, unknown>)[insightChartMetric] ?? 0);
+      grouped.set(date, (grouped.get(date) ?? 0) + value);
+    }
+
+    return Array.from(grouped.entries())
+      .map(([date_start, total]) => ({ date_start, total }))
+      .sort((a, b) => a.date_start.localeCompare(b.date_start));
+  }, [dashboard.filteredRows, insightChartMetric]);
+
+  const selectedDailyAverages = useMemo(() => {
+    let acc = 0;
+    return selectedDailyTotals.map((point, index) => {
+      acc += point.total;
+      return {
+        date_start: point.date_start,
+        average: acc / (index + 1),
+      };
+    });
+  }, [selectedDailyTotals]);
+
+  const showSelectedHourlyLabels = selectedHourlyTotals.length <= 25;
+  const showSelectedDailyLabels = selectedDailyTotals.length <= 25;
+  const showSelectedAverageDailyLabels = selectedDailyAverages.length <= 25;
 
   const resolvedCampaignCompareIds = useMemo(
     () => resolveComparisonSelection(comparisonCampaignPerformance, campaignCompareIds),
@@ -602,13 +701,7 @@ export function MetaAdsDashboard() {
     for (const row of scopedAudienceRows) {
       if (row.breakdown_type !== 'age_gender') continue;
       const key = row.breakdown_value_1 || 'N/D';
-      const value = audienceMetric === 'clicks'
-        ? Number(row.clicks ?? 0)
-        : audienceMetric === 'reach'
-          ? Number(row.reach ?? 0)
-          : audienceMetric === 'spend'
-            ? Number(row.spend ?? 0)
-            : Number(row.impressions ?? 0);
+      const value = getAudienceMetricValue(row, audienceMetric);
       grouped.set(key, (grouped.get(key) ?? 0) + value);
     }
 
@@ -625,13 +718,7 @@ export function MetaAdsDashboard() {
       if (row.breakdown_type !== 'age_gender') continue;
       const key = resolveGenderLabel(row.breakdown_value_2 || '');
       if (!key) continue;
-      const value = audienceMetric === 'clicks'
-        ? Number(row.clicks ?? 0)
-        : audienceMetric === 'reach'
-          ? Number(row.reach ?? 0)
-          : audienceMetric === 'spend'
-            ? Number(row.spend ?? 0)
-            : Number(row.impressions ?? 0);
+      const value = getAudienceMetricValue(row, audienceMetric);
       grouped.set(key, (grouped.get(key) ?? 0) + value);
     }
 
@@ -647,13 +734,7 @@ export function MetaAdsDashboard() {
     for (const row of scopedAudienceRows) {
       if (row.breakdown_type !== 'country') continue;
       const key = resolveCountryLabel(row.breakdown_value_1 || 'N/D');
-      const value = audienceMetric === 'clicks'
-        ? Number(row.clicks ?? 0)
-        : audienceMetric === 'reach'
-          ? Number(row.reach ?? 0)
-          : audienceMetric === 'spend'
-            ? Number(row.spend ?? 0)
-            : Number(row.impressions ?? 0);
+      const value = getAudienceMetricValue(row, audienceMetric);
       grouped.set(key, (grouped.get(key) ?? 0) + value);
     }
 
@@ -669,13 +750,7 @@ export function MetaAdsDashboard() {
     for (const row of scopedAudienceRows) {
       if (row.breakdown_type !== 'publisher_platform') continue;
       const key = row.breakdown_value_1 || 'N/D';
-      const value = audienceMetric === 'clicks'
-        ? Number(row.clicks ?? 0)
-        : audienceMetric === 'reach'
-          ? Number(row.reach ?? 0)
-          : audienceMetric === 'spend'
-            ? Number(row.spend ?? 0)
-            : Number(row.impressions ?? 0);
+      const value = getAudienceMetricValue(row, audienceMetric);
       grouped.set(key, (grouped.get(key) ?? 0) + value);
     }
 
@@ -691,13 +766,7 @@ export function MetaAdsDashboard() {
     for (const row of scopedAudienceRows) {
       if (row.breakdown_type !== 'region') continue;
       const key = row.breakdown_value_1 || 'N/D';
-      const value = audienceMetric === 'clicks'
-        ? Number(row.clicks ?? 0)
-        : audienceMetric === 'reach'
-          ? Number(row.reach ?? 0)
-          : audienceMetric === 'spend'
-            ? Number(row.spend ?? 0)
-            : Number(row.impressions ?? 0);
+      const value = getAudienceMetricValue(row, audienceMetric);
       grouped.set(key, (grouped.get(key) ?? 0) + value);
     }
 
@@ -713,13 +782,7 @@ export function MetaAdsDashboard() {
     for (const row of scopedAudienceRows) {
       if (row.breakdown_type !== 'device_platform') continue;
       const key = row.breakdown_value_1 || 'N/D';
-      const value = audienceMetric === 'clicks'
-        ? Number(row.clicks ?? 0)
-        : audienceMetric === 'reach'
-          ? Number(row.reach ?? 0)
-          : audienceMetric === 'spend'
-            ? Number(row.spend ?? 0)
-            : Number(row.impressions ?? 0);
+      const value = getAudienceMetricValue(row, audienceMetric);
       grouped.set(key, (grouped.get(key) ?? 0) + value);
     }
 
@@ -890,6 +953,10 @@ export function MetaAdsDashboard() {
             <option value="reach">Alcance</option>
             <option value="clicks">Clicks</option>
             <option value="spend">Gasto</option>
+            <option value="reactions">Reacciones</option>
+            <option value="comments">Comentarios</option>
+            <option value="shares">Compartidos</option>
+            <option value="video_views">Vistas de video</option>
           </select>
         </div>
 
@@ -1020,262 +1087,94 @@ export function MetaAdsDashboard() {
           ) : null}
         </div>
 
-        <div className="space-y-3">
-          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-gray-500">Clicks</p>
-          <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-            <ChartCard title="Clicks por hora (totales)" icon={<MousePointerClick size={16} className="text-red-600" />}>
-              {dashboard.hourlyRowsCount === 0 ? (
-                <div className="rounded-xl border border-dashed border-gray-200 bg-gray-50 px-4 py-6 text-sm text-gray-500">
-                  Sin data horaria para calcular clicks por hora. Filas en scope: {dashboard.hourlyRowsCount}. Filas horarias totales: {dashboard.hourlyRowsRawCount}
-                </div>
-              ) : (
-                <ResponsiveContainer width="100%" height={300}>
-                  <BarChart data={dashboard.hourlyTotalClicks}>
-                    <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                    <XAxis dataKey="label" tick={{ fontSize: 12 }} interval={1} />
-                    <YAxis tick={{ fontSize: 12 }} />
-                    <Tooltip {...chartTooltipStyle} formatter={(value) => formatCompactMetric(Number(value ?? 0), 'number')} />
-                    <Bar dataKey="total_clicks" name="Clicks totales" fill="#dc2626" radius={[8, 8, 0, 0]} isAnimationActive={false}>
-                      {showHourlyLabels ? <LabelList dataKey="total_clicks" position="top" formatter={(value) => formatCompactMetric(Number(value ?? 0), 'number')} className="fill-gray-600 text-[10px] font-semibold" /> : null}
-                    </Bar>
-                  </BarChart>
-                </ResponsiveContainer>
-              )}
-            </ChartCard>
+        <div className="rounded-2xl border border-gray-200 bg-white px-4 py-3">
+          <label className="text-xs font-semibold uppercase tracking-wide text-gray-500">Métrica de gráficos de insights</label>
+          <select
+            value={insightChartMetric}
+            onChange={(event) => setInsightChartMetric(event.target.value as InsightChartMetricKey)}
+            className="mt-2 w-full max-w-sm rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-800 outline-none transition focus:border-red-300 focus:ring-2 focus:ring-red-100"
+          >
+            <option value="clicks">Clicks</option>
+            <option value="impressions">Vistas</option>
+            <option value="spend">Gasto</option>
+            <option value="reactions">Reacciones</option>
+            <option value="comments">Comentarios</option>
+            <option value="shares">Compartidos</option>
+            <option value="video_views">Vistas de video</option>
+          </select>
+        </div>
 
-            <ChartCard title="Promedio de clicks por hora" icon={<LineChartIcon size={16} className="text-red-600" />}>
-              {dashboard.hourlyRowsCount === 0 ? (
-                <div className="rounded-xl border border-dashed border-gray-200 bg-gray-50 px-4 py-6 text-sm text-gray-500">
-                  Sin data horaria para calcular promedio por hora. Filas en scope: {dashboard.hourlyRowsCount}. Filas horarias totales: {dashboard.hourlyRowsRawCount}
-                </div>
-              ) : (
-                <ResponsiveContainer width="100%" height={300}>
-                  <LineChart data={dashboard.hourlyAverageClicks}>
-                    <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                    <XAxis dataKey="label" tick={{ fontSize: 12 }} interval={1} />
-                    <YAxis tick={{ fontSize: 12 }} />
-                    <Tooltip {...chartTooltipStyle} formatter={(value) => Number(value ?? 0).toFixed(2)} />
-                    <Line type="monotone" dataKey="avg_clicks" name="Promedio clicks" stroke="#f97316" strokeWidth={2.4} dot={{ r: 2 }} isAnimationActive={false}>
-                      {showHourlyLabels ? <LabelList dataKey="avg_clicks" position="top" formatter={(value) => Number(value ?? 0).toFixed(1)} className="fill-gray-600 text-[10px] font-semibold" /> : null}
-                    </Line>
-                  </LineChart>
-                </ResponsiveContainer>
-              )}
-            </ChartCard>
-
-            <ChartCard title="Clicks por día (totales)" icon={<MousePointerClick size={16} className="text-red-600" />}>
+        <div className="grid grid-cols-1 gap-4 xl:grid-cols-2 mt-4">
+          <ChartCard title={`${selectedInsightMetricMeta.label} por hora (totales)`} icon={<BarChart3 size={16} className="text-red-600" />}>
+            {dashboard.hourlyRowsCount === 0 ? (
+              <div className="rounded-xl border border-dashed border-gray-200 bg-gray-50 px-4 py-6 text-sm text-gray-500">
+                Sin data horaria para esta métrica. Filas en scope: {dashboard.hourlyRowsCount}. Filas horarias totales: {dashboard.hourlyRowsRawCount}
+              </div>
+            ) : (
               <ResponsiveContainer width="100%" height={300}>
-                <BarChart data={dashboard.trend}>
+                <BarChart data={selectedHourlyTotals}>
                   <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                  <XAxis dataKey="date_start" tick={{ fontSize: 12 }} />
+                  <XAxis dataKey="label" tick={{ fontSize: 12 }} interval={1} />
                   <YAxis tick={{ fontSize: 12 }} />
-                  <Tooltip {...chartTooltipStyle} formatter={(value) => formatCompactMetric(Number(value ?? 0), 'number')} />
-                  <Bar dataKey="clicks" name="Clicks" fill="#dc2626" radius={[8, 8, 0, 0]} isAnimationActive={false} onClick={handleDailyChartClick}>
-                    {dashboard.trend.map((row) => (
-                      <Cell key={`clicks-${row.date_start}`} fill={resolveDailyBarColor(row.date_start, '#dc2626', '#fca5a5')} />
-                    ))}
-                    {showDailyLabels ? <LabelList dataKey="clicks" position="top" formatter={(value) => formatCompactMetric(Number(value ?? 0), 'number')} className="fill-gray-600 text-[10px] font-semibold" /> : null}
+                  <Tooltip {...chartTooltipStyle} formatter={(value) => formatCompactMetric(Number(value ?? 0), selectedInsightMetricMeta.format)} />
+                  <Bar dataKey="total" name="Total" fill="#dc2626" radius={[8, 8, 0, 0]} isAnimationActive={false}>
+                    {showSelectedHourlyLabels ? <LabelList dataKey="total" position="top" formatter={(value) => formatCompactMetric(Number(value ?? 0), selectedInsightMetricMeta.format)} className="fill-gray-600 text-[10px] font-semibold" /> : null}
                   </Bar>
                 </BarChart>
               </ResponsiveContainer>
-            </ChartCard>
+            )}
+          </ChartCard>
 
-            <ChartCard title="Promedio diario de clicks" icon={<LineChartIcon size={16} className="text-red-600" />}>
+          <ChartCard title={`Promedio de ${selectedInsightMetricMeta.label.toLowerCase()} por hora`} icon={<LineChartIcon size={16} className="text-red-600" />}>
+            {dashboard.hourlyRowsCount === 0 ? (
+              <div className="rounded-xl border border-dashed border-gray-200 bg-gray-50 px-4 py-6 text-sm text-gray-500">
+                Sin data horaria para promedios de esta métrica.
+              </div>
+            ) : (
               <ResponsiveContainer width="100%" height={300}>
-                <LineChart data={dashboard.trendAveragesByDay}>
+                <LineChart data={selectedHourlyAverages}>
                   <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                  <XAxis dataKey="date_start" tick={{ fontSize: 12 }} />
+                  <XAxis dataKey="label" tick={{ fontSize: 12 }} interval={1} />
                   <YAxis tick={{ fontSize: 12 }} />
-                  <Tooltip {...chartTooltipStyle} formatter={(value) => Number(value ?? 0).toFixed(2)} />
-                  <Line type="monotone" dataKey="avg_clicks" name="Promedio clicks" stroke="#f97316" strokeWidth={2.4} dot={{ r: 2 }} activeDot={{ r: 4 }} isAnimationActive={false} onClick={handleDailyChartClick}>
-                    {showAverageDailyLabels ? <LabelList dataKey="avg_clicks" position="top" formatter={(value) => Number(value ?? 0).toFixed(1)} className="fill-gray-600 text-[10px] font-semibold" /> : null}
+                  <Tooltip {...chartTooltipStyle} formatter={(value) => formatCompactMetric(Number(value ?? 0), selectedInsightMetricMeta.format)} />
+                  <Line type="monotone" dataKey="average" name="Promedio" stroke="#f97316" strokeWidth={2.4} dot={{ r: 2 }} isAnimationActive={false}>
+                    {showSelectedHourlyLabels ? <LabelList dataKey="average" position="top" formatter={(value) => formatCompactMetric(Number(value ?? 0), selectedInsightMetricMeta.format)} className="fill-gray-600 text-[10px] font-semibold" /> : null}
                   </Line>
                 </LineChart>
               </ResponsiveContainer>
-            </ChartCard>
-          </div>
-        </div>
+            )}
+          </ChartCard>
 
-        <div className="space-y-3">
-          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-gray-500">Vistas</p>
-          <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-            <ChartCard title="Vistas por hora (totales)" icon={<Megaphone size={16} className="text-red-600" />}>
-              {dashboard.hourlyRowsCount === 0 ? (
-                <div className="rounded-xl border border-dashed border-gray-200 bg-gray-50 px-4 py-6 text-sm text-gray-500">
-                  Sin data horaria para calcular vistas por hora. Filas en scope: {dashboard.hourlyRowsCount}. Filas horarias totales: {dashboard.hourlyRowsRawCount}
-                </div>
-              ) : (
-                <ResponsiveContainer width="100%" height={300}>
-                  <BarChart data={dashboard.hourlyTotalImpressions}>
-                    <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                    <XAxis dataKey="label" tick={{ fontSize: 12 }} interval={1} />
-                    <YAxis tick={{ fontSize: 12 }} />
-                    <Tooltip {...chartTooltipStyle} formatter={(value) => formatCompactMetric(Number(value ?? 0), 'number')} />
-                    <Bar dataKey="total_impressions" name="Vistas totales" fill="#dc2626" radius={[8, 8, 0, 0]} isAnimationActive={false}>
-                      {showHourlyLabels ? <LabelList dataKey="total_impressions" position="top" formatter={(value) => formatCompactMetric(Number(value ?? 0), 'number')} className="fill-gray-600 text-[10px] font-semibold" /> : null}
-                    </Bar>
-                  </BarChart>
-                </ResponsiveContainer>
-              )}
-            </ChartCard>
+          <ChartCard title={`${selectedInsightMetricMeta.label} por día (totales)`} icon={<BarChart3 size={16} className="text-red-600" />}>
+            <ResponsiveContainer width="100%" height={300}>
+              <BarChart data={selectedDailyTotals}>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                <XAxis dataKey="date_start" tick={{ fontSize: 12 }} />
+                <YAxis tick={{ fontSize: 12 }} />
+                <Tooltip {...chartTooltipStyle} formatter={(value) => formatCompactMetric(Number(value ?? 0), selectedInsightMetricMeta.format)} />
+                <Bar dataKey="total" name="Total" fill="#dc2626" radius={[8, 8, 0, 0]} isAnimationActive={false} onClick={handleDailyChartClick}>
+                  {selectedDailyTotals.map((row) => (
+                    <Cell key={`selected-daily-${row.date_start}`} fill={resolveDailyBarColor(row.date_start, '#dc2626', '#fca5a5')} />
+                  ))}
+                  {showSelectedDailyLabels ? <LabelList dataKey="total" position="top" formatter={(value) => formatCompactMetric(Number(value ?? 0), selectedInsightMetricMeta.format)} className="fill-gray-600 text-[10px] font-semibold" /> : null}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          </ChartCard>
 
-            <ChartCard title="Promedio de vistas por hora" icon={<LineChartIcon size={16} className="text-red-600" />}>
-              {dashboard.hourlyRowsCount === 0 ? (
-                <div className="rounded-xl border border-dashed border-gray-200 bg-gray-50 px-4 py-6 text-sm text-gray-500">
-                  Sin data horaria para calcular promedio de vistas por hora. Filas en scope: {dashboard.hourlyRowsCount}. Filas horarias totales: {dashboard.hourlyRowsRawCount}
-                </div>
-              ) : (
-                <ResponsiveContainer width="100%" height={300}>
-                  <LineChart data={dashboard.hourlyAverageImpressions}>
-                    <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                    <XAxis dataKey="label" tick={{ fontSize: 12 }} interval={1} />
-                    <YAxis tick={{ fontSize: 12 }} />
-                    <Tooltip {...chartTooltipStyle} formatter={(value) => Number(value ?? 0).toFixed(2)} />
-                    <Line type="monotone" dataKey="avg_impressions" name="Promedio de vistas" stroke="#f97316" strokeWidth={2.4} dot={{ r: 2 }} isAnimationActive={false}>
-                      {showHourlyLabels ? <LabelList dataKey="avg_impressions" position="top" formatter={(value) => Number(value ?? 0).toFixed(1)} className="fill-gray-600 text-[10px] font-semibold" /> : null}
-                    </Line>
-                  </LineChart>
-                </ResponsiveContainer>
-              )}
-            </ChartCard>
-
-            <ChartCard title="Vistas por día (totales)" icon={<LineChartIcon size={16} className="text-red-600" />}>
-              <ResponsiveContainer width="100%" height={300}>
-                <BarChart data={dashboard.trend}>
-                  <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                  <XAxis dataKey="date_start" tick={{ fontSize: 12 }} />
-                  <YAxis tick={{ fontSize: 12 }} allowDecimals={false} />
-                  <Tooltip {...chartTooltipStyle} formatter={(value) => formatCompactMetric(Number(value ?? 0), 'number')} />
-                  <Bar dataKey="impressions" name="Vistas" fill="#dc2626" radius={[8, 8, 0, 0]} isAnimationActive={false} onClick={handleDailyChartClick}>
-                    {dashboard.trend.map((row) => (
-                      <Cell key={`impressions-${row.date_start}`} fill={resolveDailyBarColor(row.date_start, '#dc2626', '#fca5a5')} />
-                    ))}
-                    {showDailyLabels ? <LabelList dataKey="impressions" position="top" formatter={(value) => formatCompactMetric(Number(value ?? 0), 'number')} className="fill-gray-600 text-[10px] font-semibold" /> : null}
-                  </Bar>
-                </BarChart>
-              </ResponsiveContainer>
-            </ChartCard>
-
-            <ChartCard title="Promedio diario de vistas" icon={<LineChartIcon size={16} className="text-red-600" />}>
-              <ResponsiveContainer width="100%" height={300}>
-                <LineChart data={dashboard.trendAveragesByDay}>
-                  <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                  <XAxis dataKey="date_start" tick={{ fontSize: 12 }} />
-                  <YAxis tick={{ fontSize: 12 }} allowDecimals={false} />
-                  <Tooltip {...chartTooltipStyle} formatter={(value) => Number(value ?? 0).toFixed(2)} />
-                  <Line type="monotone" dataKey="avg_impressions" name="Promedio de vistas" stroke="#f97316" strokeWidth={2.4} dot={{ r: 2 }} activeDot={{ r: 4 }} isAnimationActive={false} onClick={handleDailyChartClick}>
-                    {showAverageDailyLabels ? <LabelList dataKey="avg_impressions" position="top" formatter={(value) => Number(value ?? 0).toFixed(1)} className="fill-gray-600 text-[10px] font-semibold" /> : null}
-                  </Line>
-                </LineChart>
-              </ResponsiveContainer>
-            </ChartCard>
-          </div>
-        </div>
-
-        <div className="space-y-3">
-          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-gray-500">Gasto</p>
-          <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-            <ChartCard title="Gasto por hora (total)" icon={<BadgeDollarSign size={16} className="text-red-600" />}>
-              {dashboard.hourlyRowsCount === 0 ? (
-                <div className="rounded-xl border border-dashed border-gray-200 bg-gray-50 px-4 py-6 text-sm text-gray-500">
-                  Sin data horaria para calcular gasto por hora. Filas en scope: {dashboard.hourlyRowsCount}. Filas horarias totales: {dashboard.hourlyRowsRawCount}
-                </div>
-              ) : (
-                <ResponsiveContainer width="100%" height={300}>
-                  <BarChart data={dashboard.hourlyTotalSpend}>
-                    <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                    <XAxis dataKey="label" tick={{ fontSize: 12 }} interval={1} />
-                    <YAxis tick={{ fontSize: 12 }} />
-                    <Tooltip {...chartTooltipStyle} formatter={(value) => formatCompactMetric(Number(value ?? 0), 'currency')} />
-                    <Bar dataKey="total_spend" name="Gasto total" fill="#dc2626" radius={[8, 8, 0, 0]} isAnimationActive={false}>
-                      {showHourlyLabels ? <LabelList dataKey="total_spend" position="top" formatter={(value) => formatCompactMetric(Number(value ?? 0), 'currency')} className="fill-gray-600 text-[10px] font-semibold" /> : null}
-                    </Bar>
-                  </BarChart>
-                </ResponsiveContainer>
-              )}
-            </ChartCard>
-
-            <ChartCard title="Promedio de gasto por hora" icon={<LineChartIcon size={16} className="text-red-600" />}>
-              {dashboard.hourlyRowsCount === 0 ? (
-                <div className="rounded-xl border border-dashed border-gray-200 bg-gray-50 px-4 py-6 text-sm text-gray-500">
-                  Sin data horaria para calcular promedio de gasto por hora. Filas en scope: {dashboard.hourlyRowsCount}. Filas horarias totales: {dashboard.hourlyRowsRawCount}
-                </div>
-              ) : (
-                <ResponsiveContainer width="100%" height={300}>
-                  <LineChart data={dashboard.hourlyAverageSpend}>
-                    <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                    <XAxis dataKey="label" tick={{ fontSize: 12 }} interval={1} />
-                    <YAxis tick={{ fontSize: 12 }} />
-                    <Tooltip {...chartTooltipStyle} formatter={(value) => formatCompactMetric(Number(value ?? 0), 'currency')} />
-                    <Line type="monotone" dataKey="avg_spend" name="Promedio gasto" stroke="#f97316" strokeWidth={2.4} dot={{ r: 2 }} isAnimationActive={false}>
-                      {showHourlyLabels ? <LabelList dataKey="avg_spend" position="top" formatter={(value) => formatCompactMetric(Number(value ?? 0), 'currency')} className="fill-gray-600 text-[10px] font-semibold" /> : null}
-                    </Line>
-                  </LineChart>
-                </ResponsiveContainer>
-              )}
-            </ChartCard>
-
-            <ChartCard title="Gasto por día (total)" icon={<BadgeDollarSign size={16} className="text-red-600" />}>
-              <ResponsiveContainer width="100%" height={300}>
-                <BarChart data={dashboard.trend}>
-                  <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                  <XAxis dataKey="date_start" tick={{ fontSize: 12 }} />
-                  <YAxis tick={{ fontSize: 12 }} />
-                  <Tooltip {...chartTooltipStyle} formatter={(value) => formatCompactMetric(Number(value ?? 0), 'currency')} />
-                  <Bar dataKey="spend" name="Gasto" fill="#dc2626" radius={[8, 8, 0, 0]} isAnimationActive={false} onClick={handleDailyChartClick}>
-                    {dashboard.trend.map((row) => (
-                      <Cell key={`spend-${row.date_start}`} fill={resolveDailyBarColor(row.date_start, '#dc2626', '#fca5a5')} />
-                    ))}
-                    {showDailyLabels ? <LabelList dataKey="spend" position="top" formatter={(value) => formatCompactMetric(Number(value ?? 0), 'currency')} className="fill-gray-600 text-[10px] font-semibold" /> : null}
-                  </Bar>
-                </BarChart>
-              </ResponsiveContainer>
-            </ChartCard>
-
-            <ChartCard title="Promedio diario de gasto" icon={<LineChartIcon size={16} className="text-red-600" />}>
-              <ResponsiveContainer width="100%" height={300}>
-                <LineChart data={dashboard.trendAveragesByDay}>
-                  <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                  <XAxis dataKey="date_start" tick={{ fontSize: 12 }} />
-                  <YAxis tick={{ fontSize: 12 }} />
-                  <Tooltip {...chartTooltipStyle} formatter={(value) => formatCompactMetric(Number(value ?? 0), 'currency')} />
-                  <Line type="monotone" dataKey="avg_spend" name="Promedio gasto" stroke="#f97316" strokeWidth={2.4} dot={{ r: 2 }} activeDot={{ r: 4 }} isAnimationActive={false} onClick={handleDailyChartClick}>
-                    {showAverageDailyLabels ? <LabelList dataKey="avg_spend" position="top" formatter={(value) => formatCompactMetric(Number(value ?? 0), 'currency')} className="fill-gray-600 text-[10px] font-semibold" /> : null}
-                  </Line>
-                </LineChart>
-              </ResponsiveContainer>
-            </ChartCard>
-          </div>
-        </div>
-
-        <div className="space-y-3">
-          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-gray-500">Eficiencia</p>
-          <div className="grid grid-cols-1 gap-4 xl:grid-cols-1">
-            <ChartCard title="Tendencia diaria de CTR y CPC" icon={<PieChartIcon size={16} className="text-red-600" />}>
-              <ResponsiveContainer width="100%" height={300}>
-                <LineChart data={dashboard.trendEfficiency}>
-                  <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                  <XAxis dataKey="date_start" tick={{ fontSize: 12 }} />
-                  <YAxis yAxisId="left" tick={{ fontSize: 12 }} tickFormatter={(value) => `${Number(value).toFixed(1)}%`} />
-                  <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 12 }} tickFormatter={(value) => `S/ ${Number(value).toFixed(1)}`} />
-                  <Tooltip
-                    {...chartTooltipStyle}
-                    formatter={(value, key) => {
-                      const numeric = Number(value ?? 0);
-                      if (key === 'ctr') return formatCompactMetric(numeric, 'percent');
-                      return formatCompactMetric(numeric, 'currency');
-                    }}
-                  />
-                  <Line yAxisId="left" type="monotone" dataKey="ctr" name="CTR" stroke="#dc2626" strokeWidth={2.5} dot={{ r: 2 }} activeDot={{ r: 4 }} isAnimationActive={false} onClick={handleDailyChartClick}>
-                    {showEfficiencyLabels ? <LabelList dataKey="ctr" position="top" formatter={(value) => `${Number(value ?? 0).toFixed(1)}%`} className="fill-gray-600 text-[10px] font-semibold" /> : null}
-                  </Line>
-                  <Line yAxisId="right" type="monotone" dataKey="cpc" name="CPC" stroke="#f97316" strokeWidth={2.2} dot={{ r: 2 }} activeDot={{ r: 4 }} isAnimationActive={false} onClick={handleDailyChartClick}>
-                    {showEfficiencyLabels ? <LabelList dataKey="cpc" position="top" formatter={(value) => formatCompactMetric(Number(value ?? 0), 'currency')} className="fill-gray-600 text-[10px] font-semibold" /> : null}
-                  </Line>
-                </LineChart>
-              </ResponsiveContainer>
-            </ChartCard>
-          </div>
+          <ChartCard title={`Promedio diario de ${selectedInsightMetricMeta.label.toLowerCase()}`} icon={<LineChartIcon size={16} className="text-red-600" />}>
+            <ResponsiveContainer width="100%" height={300}>
+              <LineChart data={selectedDailyAverages}>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                <XAxis dataKey="date_start" tick={{ fontSize: 12 }} />
+                <YAxis tick={{ fontSize: 12 }} />
+                <Tooltip {...chartTooltipStyle} formatter={(value) => formatCompactMetric(Number(value ?? 0), selectedInsightMetricMeta.format)} />
+                <Line type="monotone" dataKey="average" name="Promedio" stroke="#f97316" strokeWidth={2.4} dot={{ r: 2 }} activeDot={{ r: 4 }} isAnimationActive={false} onClick={handleDailyChartClick}>
+                  {showSelectedAverageDailyLabels ? <LabelList dataKey="average" position="top" formatter={(value) => formatCompactMetric(Number(value ?? 0), selectedInsightMetricMeta.format)} className="fill-gray-600 text-[10px] font-semibold" /> : null}
+                </Line>
+              </LineChart>
+            </ResponsiveContainer>
+          </ChartCard>
         </div>
       </Section>
 

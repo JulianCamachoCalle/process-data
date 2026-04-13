@@ -201,6 +201,15 @@ type MetaAdInsightBreakdownRow = {
   impressions: number;
   reach: number;
   clicks: number;
+  reactions: number;
+  comments: number;
+  shares: number;
+  video_views: number;
+  video_p25_views: number;
+  video_p50_views: number;
+  video_p75_views: number;
+  video_p95_views: number;
+  video_p100_views: number;
   ctr: number | null;
   cpc: number | null;
   raw_payload: JsonRecord;
@@ -1276,6 +1285,18 @@ function mapInsightBreakdownRow(
     impressions: Math.trunc(toNumberOrZero(payload.impressions)),
     reach: Math.trunc(toNumberOrZero(payload.reach)),
     clicks: Math.trunc(toNumberOrZero(payload.clicks)),
+    reactions: getActionMetricValue(payload, 'post_reaction'),
+    comments: getActionMetricValue(payload, 'comment'),
+    shares: getActionMetricValue(payload, 'post'),
+    video_views: Math.max(
+      getActionMetricValue(payload, 'video_view'),
+      getArrayMetricValue(payload, 'video_play_actions'),
+    ),
+    video_p25_views: getArrayMetricValue(payload, 'video_p25_watched_actions'),
+    video_p50_views: getArrayMetricValue(payload, 'video_p50_watched_actions'),
+    video_p75_views: getArrayMetricValue(payload, 'video_p75_watched_actions'),
+    video_p95_views: getArrayMetricValue(payload, 'video_p95_watched_actions'),
+    video_p100_views: getArrayMetricValue(payload, 'video_p100_watched_actions'),
     ctr: toNullableNumber(payload.ctr),
     cpc: toNullableNumber(payload.cpc),
     raw_payload: payload,
@@ -1533,7 +1554,7 @@ export default async function metaAdsSyncHandler(req: VercelRequest, res: Vercel
 
       let audienceQuery = supabase
         .from('meta_ad_insights_breakdown_daily' as never)
-        .select('ad_business_id,date_start,date_stop,breakdown_type,breakdown_value_1,breakdown_value_2,spend,impressions,reach,clicks,ctr,cpc' as never)
+        .select('ad_business_id,date_start,date_stop,breakdown_type,breakdown_value_1,breakdown_value_2,spend,impressions,reach,clicks,reactions,comments,shares,video_views,video_p25_views,video_p50_views,video_p75_views,video_p95_views,video_p100_views,ctr,cpc' as never)
         .order('date_start' as never, { ascending: false });
 
       if (dateFrom) {
@@ -1564,6 +1585,15 @@ export default async function metaAdsSyncHandler(req: VercelRequest, res: Vercel
           impressions: toNullableNumber((item as JsonRecord).impressions),
           reach: toNullableNumber((item as JsonRecord).reach),
           clicks: toNullableNumber((item as JsonRecord).clicks),
+          reactions: toNullableNumber((item as JsonRecord).reactions),
+          comments: toNullableNumber((item as JsonRecord).comments),
+          shares: toNullableNumber((item as JsonRecord).shares),
+          video_views: toNullableNumber((item as JsonRecord).video_views),
+          video_p25_views: toNullableNumber((item as JsonRecord).video_p25_views),
+          video_p50_views: toNullableNumber((item as JsonRecord).video_p50_views),
+          video_p75_views: toNullableNumber((item as JsonRecord).video_p75_views),
+          video_p95_views: toNullableNumber((item as JsonRecord).video_p95_views),
+          video_p100_views: toNullableNumber((item as JsonRecord).video_p100_views),
           ctr: toNullableNumber((item as JsonRecord).ctr),
           cpc: toNullableNumber((item as JsonRecord).cpc),
         })),
