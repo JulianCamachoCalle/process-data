@@ -7,14 +7,27 @@ import {
   getAuthTokenFromRequest,
   getJwtSecretOrThrow,
   signAuthJwt,
+  verifyAdminSession,
   verifyAuthToken,
   type AppRole,
 } from './_auth.js';
-import { verifyPasswordWithScrypt } from './_password.js';
+import { generateScryptPasswordHash, verifyPasswordWithScrypt } from './_password.js';
 
 const authBodySchema = z.object({
   email: z.string().trim().email('El email es inválido'),
   password: z.string().min(8, 'La contraseña debe tener al menos 8 caracteres'),
+});
+
+const createUserSchema = z.object({
+  email: z.string().trim().email('El email es inválido'),
+  password: z.string().min(8, 'La contraseña debe tener al menos 8 caracteres'),
+  role: z.enum(['admin', 'user']),
+  is_active: z.boolean().optional(),
+});
+
+const updateUserStatusSchema = z.object({
+  id: z.union([z.string().trim().min(1, 'id requerido'), z.number()]),
+  is_active: z.boolean(),
 });
 
 const ADMIN_LOGIN_RATE_WINDOW_MS = 15 * 60 * 1000;
@@ -110,9 +123,154 @@ interface AdminAccessUserRow {
   role: AppRole | string;
 }
 
+interface AdminAccessUserListRow {
+  id: string | number;
+  email: string;
+  role: AppRole | string;
+  is_active: boolean;
+}
+
+function isDuplicateEmailError(error: unknown) {
+  if (!error || typeof error !== 'object') return false;
+
+  const code = (error as { code?: unknown }).code;
+  const message = String((error as { message?: unknown }).message ?? '').toLowerCase();
+  return code === '23505' || message.includes('duplicate key') || message.includes('already exists');
+}
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
     const jwtSecret = getJwtSecretOrThrow();
+    const modeRaw = req.query.mode;
+    const mode = Array.isArray(modeRaw) ? modeRaw[0] : modeRaw;
+
+    if (mode === 'admin_users') {
+      const auth = verifyAdminSession(req);
+      if (!auth.ok) {
+        return res.status(auth.status).json({ success: false, error: auth.error ?? 'No autorizado' });
+      }
+
+      const supabase = getSupabaseAdminClient();
+
+      if (req.method === 'GET') {
+        const { data, error } = await supabase
+          .from('admin_access_users' as never)
+          .select('id,email,role,is_active' as never)
+          .order('email', { ascending: true });
+
+        if (error) {
+          if (isMissingAdminUsersTableError(error)) {
+            return res.status(500).json({
+              success: false,
+              error: 'No existe la tabla admin_access_users. Ejecutá la configuración de seguridad en la base de datos.',
+            });
+          }
+
+          throw new Error(error.message || 'No se pudo listar usuarios');
+        }
+
+        const users = ((data ?? []) as AdminAccessUserListRow[]).map((row) => ({
+          id: String(row.id),
+          email: normalizeEmail(row.email),
+          role: row.role === 'user' ? 'user' : 'admin',
+          is_active: row.is_active === true,
+        }));
+
+        return res.status(200).json({ success: true, users });
+      }
+
+      if (req.method !== 'POST') {
+        if (req.method !== 'PATCH') {
+          return res.status(405).json({ success: false, error: 'Método no permitido' });
+        }
+
+        const rawBody = typeof req.body === 'string' ? JSON.parse(req.body) : req.body;
+        const parsed = updateUserStatusSchema.parse(rawBody ?? {});
+        const userId = String(parsed.id).trim();
+
+        const { data, error } = await supabase
+          .from('admin_access_users' as never)
+          .update({ is_active: parsed.is_active } as never)
+          .eq('id' as never, userId as never)
+          .select('id,email,role,is_active' as never)
+          .limit(1);
+
+        if (error) {
+          if (isMissingAdminUsersTableError(error)) {
+            return res.status(500).json({
+              success: false,
+              error: 'No existe la tabla admin_access_users. Ejecutá la configuración de seguridad en la base de datos.',
+            });
+          }
+
+          throw new Error(error.message || 'No se pudo actualizar el usuario');
+        }
+
+        const updated = ((data ?? []) as AdminAccessUserListRow[])[0] ?? null;
+        if (!updated) {
+          return res.status(404).json({ success: false, error: 'Usuario no encontrado.' });
+        }
+
+        return res.status(200).json({
+          success: true,
+          user: {
+            id: String(updated.id),
+            email: normalizeEmail(updated.email),
+            role: updated.role === 'user' ? 'user' : 'admin',
+            is_active: updated.is_active === true,
+          },
+        });
+      }
+
+      const rawBody = typeof req.body === 'string' ? JSON.parse(req.body) : req.body;
+      const parsed = createUserSchema.parse(rawBody ?? {});
+
+      const email = normalizeEmail(parsed.email);
+      const passwordHash = generateScryptPasswordHash(parsed.password);
+      const role = parsed.role;
+      const isActive = parsed.is_active ?? true;
+
+      const { data, error } = await supabase
+        .from('admin_access_users' as never)
+        .insert({
+          email,
+          password_hash: passwordHash,
+          role,
+          is_active: isActive,
+        } as never)
+        .select('id,email,role,is_active' as never)
+        .limit(1);
+
+      if (error) {
+        if (isMissingAdminUsersTableError(error)) {
+          return res.status(500).json({
+            success: false,
+            error: 'No existe la tabla admin_access_users. Ejecutá la configuración de seguridad en la base de datos.',
+          });
+        }
+
+        if (isDuplicateEmailError(error)) {
+          return res.status(409).json({ success: false, error: 'Ya existe un usuario con ese email.' });
+        }
+
+        throw new Error(error.message || 'No se pudo crear el usuario');
+      }
+
+      const created = ((data ?? []) as AdminAccessUserListRow[])[0];
+      if (!created) {
+        throw new Error('No se pudo confirmar la creación del usuario');
+      }
+
+      return res.status(201).json({
+        success: true,
+        user: {
+          id: String(created.id),
+          email: normalizeEmail(created.email),
+          role: created.role === 'user' ? 'user' : 'admin',
+          is_active: created.is_active === true,
+        },
+      });
+    }
 
     if (req.method === 'GET') {
       const token = getAuthTokenFromRequest(req);

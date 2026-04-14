@@ -17,6 +17,7 @@ export function AdminUsersPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [togglingUserId, setTogglingUserId] = useState<string | null>(null);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [role, setRole] = useState<AppRole>('user');
@@ -34,7 +35,7 @@ export function AdminUsersPage() {
     setError('');
 
     try {
-      const response = await fetch('/api/admin/users', {
+      const response = await fetch('/api/auth?mode=admin_users', {
         method: 'GET',
         credentials: 'include',
       });
@@ -74,7 +75,7 @@ export function AdminUsersPage() {
 
     setIsSubmitting(true);
     try {
-      const response = await fetch('/api/admin/users', {
+      const response = await fetch('/api/auth?mode=admin_users', {
         method: 'POST',
         credentials: 'include',
         headers: {
@@ -102,6 +103,37 @@ export function AdminUsersPage() {
       setError('No se pudo conectar con el servidor');
     } finally {
       setIsSubmitting(false);
+    }
+  };
+
+  const handleToggleUserStatus = async (user: AdminUser) => {
+    setError('');
+    setTogglingUserId(user.id);
+
+    try {
+      const response = await fetch('/api/auth?mode=admin_users', {
+        method: 'PATCH',
+        credentials: 'include',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          id: user.id,
+          is_active: !user.is_active,
+        }),
+      });
+
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || !payload?.success) {
+        setError(String(payload?.error ?? 'No se pudo actualizar el usuario'));
+        return;
+      }
+
+      setUsers((prev) => prev.map((item) => (item.id === user.id ? { ...item, is_active: !item.is_active } : item)));
+    } catch {
+      setError('No se pudo conectar con el servidor');
+    } finally {
+      setTogglingUserId(null);
     }
   };
 
@@ -187,6 +219,7 @@ export function AdminUsersPage() {
                   <th className="px-3 py-2">Email</th>
                   <th className="px-3 py-2">Rol</th>
                   <th className="px-3 py-2">Estado</th>
+                  <th className="px-3 py-2">Acción</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
@@ -195,6 +228,23 @@ export function AdminUsersPage() {
                     <td className="px-3 py-2 font-medium">{user.email}</td>
                     <td className="px-3 py-2">{user.role}</td>
                     <td className="px-3 py-2">{user.is_active ? 'Activo' : 'Inactivo'}</td>
+                    <td className="px-3 py-2">
+                      <button
+                        type="button"
+                        onClick={() => handleToggleUserStatus(user)}
+                        disabled={togglingUserId === user.id}
+                        className={`rounded-lg px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.08em] transition ${user.is_active
+                          ? 'border border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100'
+                          : 'border border-emerald-300 bg-emerald-50 text-emerald-800 hover:bg-emerald-100'
+                          } disabled:opacity-60`}
+                      >
+                        {togglingUserId === user.id
+                          ? 'Guardando...'
+                          : user.is_active
+                            ? 'Desactivar'
+                            : 'Activar'}
+                      </button>
+                    </td>
                   </tr>
                 ))}
               </tbody>
