@@ -1,27 +1,38 @@
 {
   "createdAt": "2026-04-14T12:50:28.246Z",
-  "updatedAt": "2026-04-14T13:02:30.225Z",
+  "updatedAt": "2026-04-14T16:54:18.869Z",
   "envios": {
-    "cursor": 93,
-    "done": false,
-    "iterations": 93,
+    "cursor": 514,
+    "done": true,
+    "iterations": 515,
     "lastResponse": {
       "mode": "envios",
-      "cursor": 92,
-      "next_cursor": 93,
-      "has_more": true,
+      "cursor": 514,
+      "next_cursor": 514,
+      "has_more": false,
       "scanned_leads": 0,
       "processed_leads": 0,
-      "pulled": 2,
+      "pulled": 0,
       "grouped_rows": 0,
       "upserted": 0,
       "queries_used": 0
     }
   },
   "recojos": {
-    "cursor": 0,
+    "cursor": 169,
     "done": false,
-    "iterations": 0,
-    "lastResponse": null
+    "iterations": 169,
+    "lastResponse": {
+      "mode": "recojos",
+      "cursor": 168,
+      "next_cursor": 169,
+      "has_more": true,
+      "scanned_leads": 1,
+      "processed_leads": 1,
+      "pulled": 0,
+      "grouped_rows": 0,
+      "upserted": 0,
+      "queries_used": 0
+    }
   }
 }

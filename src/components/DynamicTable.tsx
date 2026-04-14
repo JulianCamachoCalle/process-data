@@ -171,9 +171,17 @@ export function DynamicTable({ sheetName, columns, rows, onEdit }: DynamicTableP
         const rowDate = parseDateValue(row[dateColumn]);
         if (!rowDate) return false;
 
+        const requiresLeadGanadoDate = sheetName === 'ENVIOS' || sheetName === 'RECOJOS';
+        const leadGanadoDate = requiresLeadGanadoDate
+          ? parseDateValue(row.__fecha_lead_ganado)
+          : null;
+
         if (dateFrom) {
           const fromDate = parseDateValue(dateFrom);
-          if (fromDate && rowDate < fromDate) return false;
+          if (fromDate) {
+            if (rowDate < fromDate) return false;
+            if (requiresLeadGanadoDate && (!leadGanadoDate || leadGanadoDate < fromDate)) return false;
+          }
         }
 
         if (dateTo) {
@@ -182,13 +190,14 @@ export function DynamicTable({ sheetName, columns, rows, onEdit }: DynamicTableP
             const inclusiveTo = new Date(toDate);
             inclusiveTo.setHours(23, 59, 59, 999);
             if (rowDate > inclusiveTo) return false;
+            if (requiresLeadGanadoDate && (!leadGanadoDate || leadGanadoDate > inclusiveTo)) return false;
           }
         }
       }
 
       return true;
     });
-  }, [rows, columns, searchTerm, activeFilterColumn, selectedFilterValue, hasSelectedFilterValue, dateColumn, dateFrom, dateTo]);
+  }, [rows, columns, searchTerm, activeFilterColumn, selectedFilterValue, hasSelectedFilterValue, dateColumn, dateFrom, dateTo, sheetName]);
 
   const totalPages = Math.max(1, Math.ceil(filteredRows.length / PAGE_SIZE));
   const safeCurrentPage = Math.min(currentPage, totalPages);
@@ -611,10 +620,9 @@ export function DynamicTable({ sheetName, columns, rows, onEdit }: DynamicTableP
                   startLabel="Fecha desde"
                   endLabel="Fecha hasta"
                   className="xl:col-span-5"
-                  layoutClassName="grid-cols-1 gap-3 sm:grid-cols-2"
-                  fieldClassName="rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm text-gray-600 shadow-none"
-                  labelClassName="sr-only"
-                  inputWrapperClassName="mt-0 border-0 bg-transparent px-0 py-0"
+                  layoutClassName="grid-cols-1 gap-2 sm:grid-cols-2"
+                  fieldClassName="rounded-xl border border-gray-200 bg-white px-2.5 py-2 text-sm text-gray-600 shadow-none"
+                  inputWrapperClassName="mt-0 border-0 bg-transparent p-0"
                   inputClassName="text-sm"
                   helperClassName="tracking-normal"
                   startAdornment={<CalendarRange size={15} className="text-gray-400" />}

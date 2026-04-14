@@ -188,6 +188,27 @@ function compactSummary(mode, payload) {
   };
 }
 
+function parseRecojosSizingError(message) {
+  const match = String(message).match(/dias=(\d+),\s*client_ids=(\d+),\s*max_queries=(\d+)/i);
+  if (!match) return null;
+
+  const days = Number.parseInt(match[1], 10);
+  const clientIds = Number.parseInt(match[2], 10);
+  const currentMaxQueries = Number.parseInt(match[3], 10);
+
+  if (!Number.isFinite(days) || !Number.isFinite(clientIds) || !Number.isFinite(currentMaxQueries)) {
+    return null;
+  }
+
+  const requiredQueries = Math.max(1, days * clientIds);
+  return {
+    days,
+    clientIds,
+    currentMaxQueries,
+    requiredQueries,
+  };
+}
+
 async function processEnvios({ baseUrl, headers, state, sleepMs, maxRetries, dateFrom, dateTo, onProgress }) {
   while (!state.envios.done) {
     const params = {
@@ -223,6 +244,8 @@ async function processEnvios({ baseUrl, headers, state, sleepMs, maxRetries, dat
 }
 
 async function processRecojos({ baseUrl, headers, state, sleepMs, maxRetries, dateFrom, dateTo, onProgress }) {
+  let dynamicMaxQueries = DEFAULTS.recojosMaxQueries;
+
   while (!state.recojos.done) {
     const params = {
       mode: 'dinsides_recojos_sync_cursor',
@@ -230,16 +253,50 @@ async function processRecojos({ baseUrl, headers, state, sleepMs, maxRetries, da
       cursor: state.recojos.cursor,
       batch_leads: DEFAULTS.recojosBatchLeads,
       limit_rows: DEFAULTS.recojosLimitRows,
-      max_queries: DEFAULTS.recojosMaxQueries,
+      max_queries: dynamicMaxQueries,
       date_from: dateFrom,
       date_to: dateTo,
     };
 
-    const payload = await runWithRetry(
-      'recojos',
-      () => callSyncEndpoint({ baseUrl, headers, params }),
-      maxRetries,
-    );
+    let payload;
+    let attempt = 0;
+    while (attempt <= maxRetries) {
+      try {
+        payload = await callSyncEndpoint({ baseUrl, headers, params });
+        break;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        const sizing = parseRecojosSizingError(message);
+
+        if (sizing) {
+          const upperBound = 800;
+          const nextMaxQueries = Math.min(
+            upperBound,
+            Math.max(dynamicMaxQueries, sizing.requiredQueries),
+          );
+
+          if (nextMaxQueries > dynamicMaxQueries) {
+            dynamicMaxQueries = nextMaxQueries;
+            params.max_queries = dynamicMaxQueries;
+            console.warn(`[recojos] ajustando max_queries -> ${dynamicMaxQueries} (dias=${sizing.days}, client_ids=${sizing.clientIds})`);
+          }
+        }
+
+        if (attempt >= maxRetries) {
+          throw new Error(`[recojos] falló tras ${maxRetries + 1} intentos: ${message}`);
+        }
+
+        const backoffMs = Math.min(20_000, 1_500 * (attempt + 1));
+        console.warn(`[recojos] intento ${attempt + 1} falló: ${message}`);
+        console.warn(`[recojos] reintentando en ${backoffMs}ms...`);
+        await sleep(backoffMs);
+        attempt += 1;
+      }
+    }
+
+    if (!payload) {
+      throw new Error('[recojos] no se recibió payload del endpoint.');
+    }
 
     const summary = compactSummary('recojos', payload);
     state.recojos.iterations += 1;
