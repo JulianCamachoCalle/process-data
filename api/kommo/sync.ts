@@ -479,11 +479,33 @@ function parseNumeric(value: unknown) {
 function parseDateOnlyFromUnknown(value: unknown) {
   const raw = String(value ?? '').trim();
   if (!raw) return null;
+
+  const candidate = raw.slice(0, 10).replace(/\//g, '-');
+  const match = candidate.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (match) {
+    const year = Number.parseInt(match[1] ?? '', 10);
+    const month = Number.parseInt(match[2] ?? '', 10);
+    const day = Number.parseInt(match[3] ?? '', 10);
+
+    if (year > 0 && month >= 1 && month <= 12 && day >= 1 && day <= 31) {
+      const date = new Date(Date.UTC(year, month - 1, day));
+      const isSameDate = date.getUTCFullYear() === year
+        && (date.getUTCMonth() + 1) === month
+        && date.getUTCDate() === day;
+
+      if (isSameDate) {
+        return `${String(year).padStart(4, '0')}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+      }
+    }
+  }
+
   const parsed = new Date(raw.replace(' ', 'T'));
   if (Number.isNaN(parsed.getTime())) {
-    return raw.slice(0, 10) || null;
+    return null;
   }
-  return parsed.toISOString().slice(0, 10);
+
+  const isoDate = parsed.toISOString().slice(0, 10);
+  return isoDate === '0000-00-00' ? null : isoDate;
 }
 
 function normalizeLookupKey(value: unknown) {
@@ -1901,6 +1923,7 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
         let skippedMissingTarifa = 0;
         let skippedByEstado = 0;
         let skippedExisting = 0;
+        let skippedInvalidDate = 0;
 
         const existingStableIds = new Set<string>();
         if (onlyRemaining && finalRows.length > 0) {
@@ -1972,6 +1995,10 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
           const pagoMoto = Number((tarifa.pagoMoto ?? 0).toFixed(2));
           const cobroEntrega = Number((tarifa.cobroEntrega ?? 0).toFixed(2));
           const fechaEnvio = parseDateOnlyFromUnknown(row.fecha_entrega) ?? parseDateOnlyFromUnknown(row.fecha_pedido);
+          if (!fechaEnvio) {
+            skippedInvalidDate += 1;
+            continue;
+          }
 
           rowsToUpsert.push({
             stable_id: stableId,
@@ -2031,6 +2058,7 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
           skipped_missing_lead: skippedMissingLead,
           skipped_missing_destino: skippedMissingDestino,
           skipped_missing_tarifa: skippedMissingTarifa,
+          skipped_invalid_date: skippedInvalidDate,
           recalculated_leads: recalculatedLeads,
           recalculate_errors: recalculateErrors,
         });
@@ -2280,6 +2308,7 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
         let skippedMissingTarifa = 0;
         let skippedByEstado = 0;
         let skippedExisting = 0;
+        let skippedInvalidDate = 0;
 
         const existingStableIds = new Set<string>();
         if (onlyRemaining && finalRows.length > 0) {
@@ -2351,6 +2380,10 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
           const pagoMoto = Number((tarifa.pagoMoto ?? 0).toFixed(2));
           const cobroEntrega = Number((tarifa.cobroEntrega ?? 0).toFixed(2));
           const fechaEnvio = parseDateOnlyFromUnknown(row.fecha_entrega) ?? parseDateOnlyFromUnknown(row.fecha_pedido);
+          if (!fechaEnvio) {
+            skippedInvalidDate += 1;
+            continue;
+          }
 
           rowsToUpsert.push({
             stable_id: stableId,
@@ -2414,6 +2447,7 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
           skipped_missing_lead: skippedMissingLead,
           skipped_missing_destino: skippedMissingDestino,
           skipped_missing_tarifa: skippedMissingTarifa,
+          skipped_invalid_date: skippedInvalidDate,
           recalculated_leads: recalculatedLeads,
           recalculate_errors: recalculateErrors,
         });
