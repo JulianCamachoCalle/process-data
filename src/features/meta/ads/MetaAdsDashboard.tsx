@@ -483,6 +483,92 @@ export function MetaAdsDashboard() {
 
   const comparisonRows = useMemo(() => comparisonQuery.data?.rows ?? [], [comparisonQuery.data?.rows]);
 
+  const audienceScopeKeysForGlobal = useMemo(() => {
+    const audienceRows = audienceQuery.data ?? [];
+    const reportRows = reportingQuery.data?.rows ?? [];
+
+    const filteredReportRows = reportRows.filter((row) => {
+      if (campaignId && row.campaign_business_id !== campaignId) return false;
+      if (adsetId && row.adset_business_id !== adsetId) return false;
+      if (adId && row.ad_business_id !== adId) return false;
+      if (interactiveDate && row.date_start !== interactiveDate) return false;
+      return true;
+    });
+
+    const audienceRowsInDateScope = interactiveDate
+      ? audienceRows.filter((row) => row.date_start === interactiveDate)
+      : audienceRows;
+
+    const scopedAdIds = new Set(
+      filteredReportRows
+        .map((row) => row.ad_business_id)
+        .filter((value): value is string => Boolean(value)),
+    );
+
+    const scopedAudienceRowsBase = scopedAdIds.size === 0
+      ? (adId || adsetId || campaignId ? [] : audienceRowsInDateScope)
+      : audienceRowsInDateScope.filter((row) => scopedAdIds.has(row.ad_business_id));
+
+    const activeSelections = Object.entries(audienceSelection)
+      .filter(([, value]) => Boolean(value)) as Array<[keyof AudienceInteractionSelection, string]>;
+
+    if (activeSelections.length === 0) return null;
+
+    const keySets: Array<Set<string>> = [];
+
+    for (const [selectionKey, selectedValue] of activeSelections) {
+      const currentSet = new Set<string>();
+
+      for (const row of scopedAudienceRowsBase) {
+        const rowKey = `${row.ad_business_id}__${row.date_start}`;
+        if (!row.ad_business_id || !row.date_start) continue;
+
+        if (selectionKey === 'age' && row.breakdown_type === 'age_gender') {
+          const ageLabel = normalizeAudienceLabel(row.breakdown_value_1 || 'N/D');
+          if (ageLabel === selectedValue) currentSet.add(rowKey);
+        }
+
+        if (selectionKey === 'gender' && row.breakdown_type === 'age_gender') {
+          const genderLabel = resolveGenderLabel(row.breakdown_value_2 || '');
+          if (genderLabel === selectedValue) currentSet.add(rowKey);
+        }
+
+        if (selectionKey === 'country' && row.breakdown_type === 'country') {
+          const countryLabel = resolveCountryLabel(row.breakdown_value_1 || 'N/D');
+          if (countryLabel === selectedValue) currentSet.add(rowKey);
+        }
+
+        if (selectionKey === 'platform' && row.breakdown_type === 'publisher_platform') {
+          const platformLabel = normalizeAudienceLabel(row.breakdown_value_1 || 'N/D');
+          if (platformLabel === selectedValue) currentSet.add(rowKey);
+        }
+
+        if (selectionKey === 'region' && row.breakdown_type === 'region') {
+          const regionLabel = normalizeAudienceLabel(row.breakdown_value_1 || 'N/D');
+          if (regionLabel === selectedValue) currentSet.add(rowKey);
+        }
+
+        if (selectionKey === 'device' && row.breakdown_type === 'device_platform') {
+          const deviceLabel = normalizeAudienceLabel(row.breakdown_value_1 || 'N/D');
+          if (deviceLabel === selectedValue) currentSet.add(rowKey);
+        }
+      }
+
+      keySets.push(currentSet);
+    }
+
+    if (keySets.length === 0) return null;
+    if (keySets.some((set) => set.size === 0)) return new Set<string>();
+
+    const [firstSet, ...restSets] = keySets;
+    const intersection = new Set<string>(firstSet);
+    for (const key of intersection) {
+      if (restSets.some((set) => !set.has(key))) intersection.delete(key);
+    }
+
+    return intersection;
+  }, [audienceQuery.data, reportingQuery.data?.rows, campaignId, adsetId, adId, interactiveDate, audienceSelection]);
+
   const comparisonCampaignOptions = useMemo(() => {
     const optionsMap = new Map<string, { id: string; label: string }>();
 
@@ -526,6 +612,10 @@ export function MetaAdsDashboard() {
       if (adsetId && row.adset_business_id !== adsetId) return false;
       if (adId && row.ad_business_id !== adId) return false;
       if (interactiveDate && row.date_start !== interactiveDate) return false;
+      if (audienceScopeKeysForGlobal) {
+        const key = `${row.ad_business_id}__${row.date_start}`;
+        if (!audienceScopeKeysForGlobal.has(key)) return false;
+      }
       return true;
     });
 
@@ -739,7 +829,7 @@ export function MetaAdsDashboard() {
       hourlyRowsCount: hourlyRowsForTrend.length,
       hourlyRowsRawCount: hourlyRows.length,
     };
-  }, [adId, adsetId, campaignId, interactiveDate, reportingQuery.data?.hourlyRows, reportingQuery.data?.rows]);
+  }, [adId, adsetId, audienceScopeKeysForGlobal, campaignId, interactiveDate, reportingQuery.data?.hourlyRows, reportingQuery.data?.rows]);
 
   const isFiltersDirty = campaignId !== draftCampaignId
     || adsetId !== draftAdsetId
@@ -1151,6 +1241,7 @@ export function MetaAdsDashboard() {
     for (const row of scopedAudienceRowsWithInteractions) {
       if (row.breakdown_type !== 'age_gender') continue;
       const key = normalizeAudienceLabel(row.breakdown_value_1 || 'N/D');
+      if (key === 'N/D') continue;
       const value = resolveAudienceMetricValue(row);
       grouped.set(key, (grouped.get(key) ?? 0) + value);
     }
@@ -1759,12 +1850,12 @@ export function MetaAdsDashboard() {
                 </div>
               ) : (
                 <ResponsiveContainer width="100%" height={280}>
-                  <BarChart data={dailyDrillCampaignData}>
+                  <BarChart data={dailyDrillCampaignData} onClick={(entry) => handleDrillCampaignClick(extractIdFromChartClick(entry, 'id'))}>
                     <CartesianGrid strokeDasharray="3 3" vertical={false} />
                     <XAxis dataKey="label" tick={{ fontSize: 11 }} interval={0} angle={-20} textAnchor="end" height={60} />
                     <YAxis tick={{ fontSize: 12 }} />
                     <Tooltip {...chartTooltipStyle} formatter={(value) => formatCompactMetric(Number(value ?? 0), selectedInsightMetricMeta.format)} />
-                    <Bar dataKey="total" fill="#dc2626" radius={[8, 8, 0, 0]} isAnimationActive={false} onClick={(entry) => handleDrillCampaignClick(extractIdFromChartClick(entry, 'id'))}>
+                    <Bar dataKey="total" fill="#dc2626" radius={[8, 8, 0, 0]} isAnimationActive={false}>
                       {dailyDrillCampaignData.map((row) => (
                         <Cell key={`drill-campaign-${row.id}`} fill={campaignId && campaignId !== row.id ? '#fca5a5' : '#dc2626'} />
                       ))}
@@ -1781,12 +1872,12 @@ export function MetaAdsDashboard() {
                 </div>
               ) : (
                 <ResponsiveContainer width="100%" height={280}>
-                  <BarChart data={dailyDrillAdsetData}>
+                  <BarChart data={dailyDrillAdsetData} onClick={(entry) => handleDrillAdsetClick(extractIdFromChartClick(entry, 'id'))}>
                     <CartesianGrid strokeDasharray="3 3" vertical={false} />
                     <XAxis dataKey="label" tick={{ fontSize: 11 }} interval={0} angle={-20} textAnchor="end" height={60} />
                     <YAxis tick={{ fontSize: 12 }} />
                     <Tooltip {...chartTooltipStyle} formatter={(value) => formatCompactMetric(Number(value ?? 0), selectedInsightMetricMeta.format)} />
-                    <Bar dataKey="total" fill="#dc2626" radius={[8, 8, 0, 0]} isAnimationActive={false} onClick={(entry) => handleDrillAdsetClick(extractIdFromChartClick(entry, 'id'))}>
+                    <Bar dataKey="total" fill="#dc2626" radius={[8, 8, 0, 0]} isAnimationActive={false}>
                       {dailyDrillAdsetData.map((row) => (
                         <Cell key={`drill-adset-${row.id}`} fill={adsetId && adsetId !== row.id ? '#fca5a5' : '#dc2626'} />
                       ))}
@@ -1803,12 +1894,12 @@ export function MetaAdsDashboard() {
                 </div>
               ) : (
                 <ResponsiveContainer width="100%" height={280}>
-                  <BarChart data={dailyDrillAdData}>
+                  <BarChart data={dailyDrillAdData} onClick={(entry) => handleDrillAdClick(extractIdFromChartClick(entry, 'id'))}>
                     <CartesianGrid strokeDasharray="3 3" vertical={false} />
                     <XAxis dataKey="label" tick={{ fontSize: 11 }} interval={0} angle={-20} textAnchor="end" height={60} />
                     <YAxis tick={{ fontSize: 12 }} />
                     <Tooltip {...chartTooltipStyle} formatter={(value) => formatCompactMetric(Number(value ?? 0), selectedInsightMetricMeta.format)} />
-                    <Bar dataKey="total" fill="#dc2626" radius={[8, 8, 0, 0]} isAnimationActive={false} onClick={(entry) => handleDrillAdClick(extractIdFromChartClick(entry, 'id'))}>
+                    <Bar dataKey="total" fill="#dc2626" radius={[8, 8, 0, 0]} isAnimationActive={false}>
                       {dailyDrillAdData.map((row) => (
                         <Cell key={`drill-ad-${row.id}`} fill={adId && adId !== row.id ? '#fca5a5' : '#dc2626'} />
                       ))}
@@ -1863,12 +1954,12 @@ export function MetaAdsDashboard() {
 
           <ChartCard title={`${selectedInsightMetricMeta.label} por día (totales)`} icon={<BarChart3 size={16} className="text-red-600" />}>
             <ResponsiveContainer width="100%" height={300}>
-              <BarChart data={selectedDailyTotals}>
+              <BarChart data={selectedDailyTotals} onClick={handleDailyChartClick}>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} />
                 <XAxis dataKey="date_start" tick={{ fontSize: 12 }} />
                 <YAxis tick={{ fontSize: 12 }} />
                 <Tooltip {...chartTooltipStyle} formatter={(value) => formatCompactMetric(Number(value ?? 0), selectedInsightMetricMeta.format)} />
-                <Bar dataKey="total" name="Total" fill="#dc2626" radius={[8, 8, 0, 0]} isAnimationActive={false} onClick={handleDailyChartClick}>
+                <Bar dataKey="total" name="Total" fill="#dc2626" radius={[8, 8, 0, 0]} isAnimationActive={false}>
                   {selectedDailyTotals.map((row) => (
                     <Cell key={`selected-daily-${row.date_start}`} fill={resolveDailyBarColor(row.date_start, '#dc2626', '#fca5a5')} />
                   ))}
@@ -1880,12 +1971,12 @@ export function MetaAdsDashboard() {
 
           <ChartCard title={`Promedio diario de ${selectedInsightMetricMeta.label.toLowerCase()}`} icon={<LineChartIcon size={16} className="text-red-600" />}>
             <ResponsiveContainer width="100%" height={300}>
-              <LineChart data={selectedDailyAverages}>
+              <LineChart data={selectedDailyAverages} onClick={handleDailyChartClick}>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} />
                 <XAxis dataKey="date_start" tick={{ fontSize: 12 }} />
                 <YAxis tick={{ fontSize: 12 }} />
                 <Tooltip {...chartTooltipStyle} formatter={(value) => formatCompactMetric(Number(value ?? 0), selectedInsightMetricMeta.format)} />
-                <Line type="monotone" dataKey="average" name="Promedio" stroke="#f97316" strokeWidth={2.4} dot={{ r: 2 }} activeDot={{ r: 4 }} isAnimationActive={false} onClick={handleDailyChartClick}>
+                <Line type="monotone" dataKey="average" name="Promedio" stroke="#f97316" strokeWidth={2.4} dot={{ r: 2 }} activeDot={{ r: 4 }} isAnimationActive={false}>
                   {showSelectedAverageDailyLabels ? <LabelList dataKey="average" position="top" formatter={(value) => formatCompactMetric(Number(value ?? 0), selectedInsightMetricMeta.format)} className="fill-gray-600 text-[10px] font-semibold" /> : null}
                 </Line>
               </LineChart>
