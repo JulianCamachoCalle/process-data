@@ -517,40 +517,79 @@ export function MetaAdsDashboard() {
     const keySets: Array<Set<string>> = [];
 
     for (const [selectionKey, selectedValue] of activeSelections) {
-      const currentSet = new Set<string>();
+      const totalsByKey = new Map<string, number>();
+      const selectedByKey = new Map<string, number>();
 
       for (const row of scopedAudienceRowsBase) {
-        const rowKey = `${row.ad_business_id}__${row.date_start}`;
         if (!row.ad_business_id || !row.date_start) continue;
 
+        let rowLabel: string | null = null;
+        let isRelevantBreakdown = false;
+
         if (selectionKey === 'age' && row.breakdown_type === 'age_gender') {
-          const ageLabel = normalizeAudienceLabel(row.breakdown_value_1 || 'N/D');
-          if (ageLabel === selectedValue) currentSet.add(rowKey);
+          rowLabel = normalizeAudienceLabel(row.breakdown_value_1 || 'N/D');
+          isRelevantBreakdown = rowLabel !== 'N/D';
         }
 
         if (selectionKey === 'gender' && row.breakdown_type === 'age_gender') {
-          const genderLabel = resolveGenderLabel(row.breakdown_value_2 || '');
-          if (genderLabel === selectedValue) currentSet.add(rowKey);
+          rowLabel = resolveGenderLabel(row.breakdown_value_2 || '');
+          isRelevantBreakdown = Boolean(rowLabel);
         }
 
         if (selectionKey === 'country' && row.breakdown_type === 'country') {
-          const countryLabel = resolveCountryLabel(row.breakdown_value_1 || 'N/D');
-          if (countryLabel === selectedValue) currentSet.add(rowKey);
+          rowLabel = resolveCountryLabel(row.breakdown_value_1 || 'N/D');
+          isRelevantBreakdown = true;
         }
 
         if (selectionKey === 'platform' && row.breakdown_type === 'publisher_platform') {
-          const platformLabel = normalizeAudienceLabel(row.breakdown_value_1 || 'N/D');
-          if (platformLabel === selectedValue) currentSet.add(rowKey);
+          rowLabel = normalizeAudienceLabel(row.breakdown_value_1 || 'N/D');
+          isRelevantBreakdown = true;
         }
 
         if (selectionKey === 'region' && row.breakdown_type === 'region') {
-          const regionLabel = normalizeAudienceLabel(row.breakdown_value_1 || 'N/D');
-          if (regionLabel === selectedValue) currentSet.add(rowKey);
+          rowLabel = normalizeAudienceLabel(row.breakdown_value_1 || 'N/D');
+          isRelevantBreakdown = true;
         }
 
         if (selectionKey === 'device' && row.breakdown_type === 'device_platform') {
-          const deviceLabel = normalizeAudienceLabel(row.breakdown_value_1 || 'N/D');
-          if (deviceLabel === selectedValue) currentSet.add(rowKey);
+          rowLabel = normalizeAudienceLabel(row.breakdown_value_1 || 'N/D');
+          isRelevantBreakdown = true;
+        }
+
+        if (!isRelevantBreakdown || !rowLabel) continue;
+
+        const rowKey = `${row.ad_business_id}__${row.date_start}`;
+        const metric = Number(row.impressions ?? 0);
+        if (!Number.isFinite(metric) || metric <= 0) continue;
+
+        totalsByKey.set(rowKey, (totalsByKey.get(rowKey) ?? 0) + metric);
+        if (rowLabel === selectedValue) {
+          selectedByKey.set(rowKey, (selectedByKey.get(rowKey) ?? 0) + metric);
+        }
+      }
+
+      const ratios: number[] = [];
+      for (const [rowKey, selectedMetric] of selectedByKey.entries()) {
+        const totalMetric = totalsByKey.get(rowKey) ?? 0;
+        if (totalMetric <= 0 || selectedMetric <= 0) continue;
+        ratios.push(selectedMetric / totalMetric);
+      }
+
+      const currentSet = new Set<string>();
+      if (ratios.length > 0) {
+        const sortedRatios = [...ratios].sort((a, b) => a - b);
+        const q3Index = Math.floor((sortedRatios.length - 1) * 0.75);
+        const threshold = sortedRatios[q3Index] ?? 0;
+
+        for (const [rowKey, selectedMetric] of selectedByKey.entries()) {
+          const totalMetric = totalsByKey.get(rowKey) ?? 0;
+          if (totalMetric <= 0 || selectedMetric <= 0) continue;
+          const ratio = selectedMetric / totalMetric;
+          if (ratio >= threshold) currentSet.add(rowKey);
+        }
+
+        if (currentSet.size === 0) {
+          for (const rowKey of selectedByKey.keys()) currentSet.add(rowKey);
         }
       }
 
@@ -1109,70 +1148,7 @@ export function MetaAdsDashboard() {
     return audienceRowsInDateScope.filter((row) => scopedAdIds.has(row.ad_business_id));
   }, [audienceQuery.data, reportingQuery.data?.rows, campaignId, adsetId, adId, interactiveDate]);
 
-  const audienceScopeKeys = useMemo(() => {
-    const activeSelections = Object.entries(audienceSelection)
-      .filter(([, value]) => Boolean(value)) as Array<[keyof AudienceInteractionSelection, string]>;
-
-    if (activeSelections.length === 0) {
-      return null;
-    }
-
-    const keySets: Array<Set<string>> = [];
-
-    for (const [selectionKey, selectedValue] of activeSelections) {
-      const currentSet = new Set<string>();
-
-      for (const row of scopedAudienceRows) {
-        const rowKey = `${row.ad_business_id}__${row.date_start}`;
-        if (!row.ad_business_id || !row.date_start) continue;
-
-        if (selectionKey === 'age' && row.breakdown_type === 'age_gender') {
-          const ageLabel = normalizeAudienceLabel(row.breakdown_value_1 || 'N/D');
-          if (ageLabel === selectedValue) currentSet.add(rowKey);
-        }
-
-        if (selectionKey === 'gender' && row.breakdown_type === 'age_gender') {
-          const genderLabel = resolveGenderLabel(row.breakdown_value_2 || '');
-          if (genderLabel === selectedValue) currentSet.add(rowKey);
-        }
-
-        if (selectionKey === 'country' && row.breakdown_type === 'country') {
-          const countryLabel = resolveCountryLabel(row.breakdown_value_1 || 'N/D');
-          if (countryLabel === selectedValue) currentSet.add(rowKey);
-        }
-
-        if (selectionKey === 'platform' && row.breakdown_type === 'publisher_platform') {
-          const platformLabel = normalizeAudienceLabel(row.breakdown_value_1 || 'N/D');
-          if (platformLabel === selectedValue) currentSet.add(rowKey);
-        }
-
-        if (selectionKey === 'region' && row.breakdown_type === 'region') {
-          const regionLabel = normalizeAudienceLabel(row.breakdown_value_1 || 'N/D');
-          if (regionLabel === selectedValue) currentSet.add(rowKey);
-        }
-
-        if (selectionKey === 'device' && row.breakdown_type === 'device_platform') {
-          const deviceLabel = normalizeAudienceLabel(row.breakdown_value_1 || 'N/D');
-          if (deviceLabel === selectedValue) currentSet.add(rowKey);
-        }
-      }
-
-      keySets.push(currentSet);
-    }
-
-    if (keySets.length === 0) return null;
-    if (keySets.some((set) => set.size === 0)) return new Set<string>();
-
-    const [firstSet, ...restSets] = keySets;
-    const intersection = new Set<string>(firstSet);
-    for (const key of intersection) {
-      if (restSets.some((set) => !set.has(key))) {
-        intersection.delete(key);
-      }
-    }
-
-    return intersection;
-  }, [audienceSelection, scopedAudienceRows]);
+  const audienceScopeKeys = audienceScopeKeysForGlobal;
 
   const scopedAudienceRowsWithInteractions = useMemo(() => {
     if (!audienceScopeKeys) return scopedAudienceRows;
