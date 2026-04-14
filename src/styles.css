@@ -81,3 +81,31 @@ h3 {
 	width: min(100%, 22rem);
 	background: linear-gradient(90deg, rgba(230, 0, 0, 0.9), rgba(255, 255, 255, 0.22), transparent);
 }
+
+/* ── Scroll reveal ─────────────────────────────────────── */
+.reveal {
+	opacity: 0;
+	transform: translateY(28px);
+	transition:
+		opacity 0.65s cubic-bezier(0.22, 1, 0.36, 1),
+		transform 0.65s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.reveal.in-view {
+	opacity: 1;
+	transform: none;
+}
+
+.reveal-delay-1 { transition-delay: 80ms; }
+.reveal-delay-2 { transition-delay: 160ms; }
+.reveal-delay-3 { transition-delay: 240ms; }
+
+/* ── Landing root scrollbar ────────────────────────────── */
+.landing-root {
+	scrollbar-color: rgba(220, 38, 38, 0.35) transparent;
+}
+
+/* ── Hero parallax wrapper ─────────────────────────────── */
+.hero-parallax {
+	will-change: transform;
+}
