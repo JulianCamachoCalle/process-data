@@ -1148,15 +1148,6 @@ export function MetaAdsDashboard() {
     return audienceRowsInDateScope.filter((row) => scopedAdIds.has(row.ad_business_id));
   }, [audienceQuery.data, reportingQuery.data?.rows, campaignId, adsetId, adId, interactiveDate]);
 
-  const audienceScopeKeys = audienceScopeKeysForGlobal;
-
-  const scopedAudienceRowsWithInteractions = useMemo(() => {
-    if (!audienceScopeKeys) return scopedAudienceRows;
-    if (audienceScopeKeys.size === 0) return [];
-
-    return scopedAudienceRows.filter((row) => audienceScopeKeys.has(`${row.ad_business_id}__${row.date_start}`));
-  }, [audienceScopeKeys, scopedAudienceRows]);
-
   const metricLabel = audienceMetricMeta[audienceMetric].label;
   const metricFormat = audienceMetricMeta[audienceMetric].format;
 
@@ -1214,7 +1205,7 @@ export function MetaAdsDashboard() {
   const audienceByAge = useMemo(() => {
     const grouped = new Map<string, number>();
 
-    for (const row of scopedAudienceRowsWithInteractions) {
+    for (const row of scopedAudienceRows) {
       if (row.breakdown_type !== 'age_gender') continue;
       const key = normalizeAudienceLabel(row.breakdown_value_1 || 'N/D');
       if (key === 'N/D') continue;
@@ -1226,12 +1217,12 @@ export function MetaAdsDashboard() {
       .map(([label, total]) => ({ label, total: Math.round(total) }))
       .sort((a, b) => b.total - a.total)
       .slice(0, 12);
-  }, [scopedAudienceRowsWithInteractions, audienceMetric]);
+  }, [scopedAudienceRows, audienceMetric]);
 
   const audienceByGender = useMemo(() => {
     const grouped = new Map<string, number>();
 
-    for (const row of scopedAudienceRowsWithInteractions) {
+    for (const row of scopedAudienceRows) {
       if (row.breakdown_type !== 'age_gender') continue;
       const key = resolveGenderLabel(row.breakdown_value_2 || '');
       if (!key) continue;
@@ -1243,12 +1234,12 @@ export function MetaAdsDashboard() {
       .map(([label, total]) => ({ label, total: Math.round(total) }))
       .sort((a, b) => b.total - a.total)
       .slice(0, 12);
-  }, [scopedAudienceRowsWithInteractions, audienceMetric]);
+  }, [scopedAudienceRows, audienceMetric]);
 
   const audienceByCountry = useMemo(() => {
     const grouped = new Map<string, number>();
 
-    for (const row of scopedAudienceRowsWithInteractions) {
+    for (const row of scopedAudienceRows) {
       if (row.breakdown_type !== 'country') continue;
       const key = resolveCountryLabel(row.breakdown_value_1 || 'N/D');
       const value = resolveAudienceMetricValue(row);
@@ -1259,12 +1250,12 @@ export function MetaAdsDashboard() {
       .map(([label, total]) => ({ label, total: Math.round(total) }))
       .sort((a, b) => b.total - a.total)
       .slice(0, 10);
-  }, [scopedAudienceRowsWithInteractions, audienceMetric]);
+  }, [scopedAudienceRows, audienceMetric]);
 
   const audienceByPlatform = useMemo(() => {
     const grouped = new Map<string, number>();
 
-    for (const row of scopedAudienceRowsWithInteractions) {
+    for (const row of scopedAudienceRows) {
       if (row.breakdown_type !== 'publisher_platform') continue;
       const key = normalizeAudienceLabel(row.breakdown_value_1 || 'N/D');
       const value = resolveAudienceMetricValue(row);
@@ -1275,12 +1266,12 @@ export function MetaAdsDashboard() {
       .map(([label, total]) => ({ label, total: Math.round(total) }))
       .sort((a, b) => b.total - a.total)
       .slice(0, 10);
-  }, [scopedAudienceRowsWithInteractions, audienceMetric]);
+  }, [scopedAudienceRows, audienceMetric]);
 
   const audienceByRegion = useMemo(() => {
     const grouped = new Map<string, number>();
 
-    for (const row of scopedAudienceRowsWithInteractions) {
+    for (const row of scopedAudienceRows) {
       if (row.breakdown_type !== 'region') continue;
       const key = normalizeAudienceLabel(row.breakdown_value_1 || 'N/D');
       const value = resolveAudienceMetricValue(row);
@@ -1291,12 +1282,12 @@ export function MetaAdsDashboard() {
       .map(([label, total]) => ({ label, total: Math.round(total) }))
       .sort((a, b) => b.total - a.total)
       .slice(0, 12);
-  }, [scopedAudienceRowsWithInteractions, audienceMetric]);
+  }, [scopedAudienceRows, audienceMetric]);
 
   const audienceByDevicePlatform = useMemo(() => {
     const grouped = new Map<string, number>();
 
-    for (const row of scopedAudienceRowsWithInteractions) {
+    for (const row of scopedAudienceRows) {
       if (row.breakdown_type !== 'device_platform') continue;
       const key = row.breakdown_value_1 || 'N/D';
       const value = resolveAudienceMetricValue(row);
@@ -1307,7 +1298,7 @@ export function MetaAdsDashboard() {
       .map(([label, total]) => ({ label, total: Math.round(total) }))
       .sort((a, b) => b.total - a.total)
       .slice(0, 12);
-  }, [scopedAudienceRowsWithInteractions, audienceMetric]);
+  }, [scopedAudienceRows, audienceMetric]);
 
   const activeAudienceSelectionChips = useMemo(() => {
     const chips: Array<{ key: keyof AudienceInteractionSelection; label: string; value: string }> = [];
