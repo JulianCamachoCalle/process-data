@@ -13,6 +13,8 @@ const DEFAULTS = {
   recojosBatchLeads: parsePositiveInt(process.env.RECOJOS_BATCH_LEADS, 1),
   recojosLimitRows: parsePositiveInt(process.env.RECOJOS_LIMIT_ROWS, 1000),
   recojosMaxQueries: parsePositiveInt(process.env.RECOJOS_MAX_QUERIES, 450),
+  recojosMaxQueriesCap: parsePositiveInt(process.env.RECOJOS_MAX_QUERIES_CAP, 800),
+  recojosQueriesSafetyBuffer: parsePositiveInt(process.env.RECOJOS_QUERIES_SAFETY_BUFFER, 25),
 };
 
 function parsePositiveInt(value, fallback) {
@@ -200,11 +202,13 @@ function parseRecojosSizingError(message) {
     return null;
   }
 
-  const requiredQueries = Math.max(1, days * clientIds);
+  const baseQueries = Math.max(1, days * clientIds);
+  const requiredQueries = baseQueries + Math.max(1, DEFAULTS.recojosQueriesSafetyBuffer);
   return {
     days,
     clientIds,
     currentMaxQueries,
+    baseQueries,
     requiredQueries,
   };
 }
@@ -269,7 +273,7 @@ async function processRecojos({ baseUrl, headers, state, sleepMs, maxRetries, da
         const sizing = parseRecojosSizingError(message);
 
         if (sizing) {
-          const upperBound = 800;
+          const upperBound = DEFAULTS.recojosMaxQueriesCap;
           const nextMaxQueries = Math.min(
             upperBound,
             Math.max(dynamicMaxQueries, sizing.requiredQueries),
@@ -278,7 +282,7 @@ async function processRecojos({ baseUrl, headers, state, sleepMs, maxRetries, da
           if (nextMaxQueries > dynamicMaxQueries) {
             dynamicMaxQueries = nextMaxQueries;
             params.max_queries = dynamicMaxQueries;
-            console.warn(`[recojos] ajustando max_queries -> ${dynamicMaxQueries} (dias=${sizing.days}, client_ids=${sizing.clientIds})`);
+            console.warn(`[recojos] ajustando max_queries -> ${dynamicMaxQueries} (base=${sizing.baseQueries}, buffer=${DEFAULTS.recojosQueriesSafetyBuffer}, dias=${sizing.days}, client_ids=${sizing.clientIds})`);
           }
         }
 
