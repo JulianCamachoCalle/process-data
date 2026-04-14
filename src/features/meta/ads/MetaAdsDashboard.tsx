@@ -47,6 +47,24 @@ type AudienceMetricKey = 'impressions' | 'reach' | 'clicks' | 'spend' | 'reactio
 
 type InsightChartMetricKey = 'clicks' | 'impressions' | 'spend' | 'reactions' | 'comments' | 'shares' | 'video_views';
 
+type AudienceInteractionSelection = {
+  age: string;
+  gender: string;
+  country: string;
+  platform: string;
+  region: string;
+  device: string;
+};
+
+const EMPTY_AUDIENCE_SELECTION: AudienceInteractionSelection = {
+  age: '',
+  gender: '',
+  country: '',
+  platform: '',
+  region: '',
+  device: '',
+};
+
 const audienceMetricMeta: Record<AudienceMetricKey, { label: string; format: 'number' | 'currency' }> = {
   impressions: { label: 'Vistas', format: 'number' },
   reach: { label: 'Alcance', format: 'number' },
@@ -154,6 +172,7 @@ export function MetaAdsDashboard() {
   const [audienceMetric, setAudienceMetric] = useState<AudienceMetricKey>('impressions');
   const [insightChartMetric, setInsightChartMetric] = useState<InsightChartMetricKey>('clicks');
   const [interactiveDate, setInteractiveDate] = useState('');
+  const [audienceSelection, setAudienceSelection] = useState<AudienceInteractionSelection>(EMPTY_AUDIENCE_SELECTION);
 
   const toggleInteractiveDate = (nextDate: string | null) => {
     if (!nextDate) return;
@@ -188,6 +207,52 @@ export function MetaAdsDashboard() {
 
   const handleDailyChartClick = (input: unknown) => {
     toggleInteractiveDate(extractDateFromChartClick(input));
+  };
+
+  const extractLabelFromChartClick = (input: unknown, key = 'label'): string | null => {
+    if (!input || typeof input !== 'object') return null;
+    const record = input as Record<string, unknown>;
+
+    const direct = record[key];
+    if (typeof direct === 'string' && direct.trim()) return direct.trim();
+
+    const payload = record.payload;
+    if (payload && typeof payload === 'object') {
+      const payloadValue = (payload as Record<string, unknown>)[key];
+      if (typeof payloadValue === 'string' && payloadValue.trim()) return payloadValue.trim();
+    }
+
+    return null;
+  };
+
+  const extractIdFromChartClick = (input: unknown, key = 'id'): string | null => {
+    if (!input || typeof input !== 'object') return null;
+    const record = input as Record<string, unknown>;
+
+    const direct = record[key];
+    if (typeof direct === 'string' && direct.trim()) return direct.trim();
+
+    const payload = record.payload;
+    if (payload && typeof payload === 'object') {
+      const payloadValue = (payload as Record<string, unknown>)[key];
+      if (typeof payloadValue === 'string' && payloadValue.trim()) return payloadValue.trim();
+    }
+
+    return null;
+  };
+
+  const toggleAudienceSelection = (key: keyof AudienceInteractionSelection, value: string | null) => {
+    const normalized = (value ?? '').trim();
+    if (!normalized) return;
+    setAudienceSelection((current) => ({
+      ...current,
+      [key]: current[key] === normalized ? '' : normalized,
+    }));
+  };
+
+  const clearInteractiveSelections = () => {
+    setInteractiveDate('');
+    setAudienceSelection(EMPTY_AUDIENCE_SELECTION);
   };
 
   const resolveDailyBarColor = (rowDate: string, activeColor: string, mutedColor: string) => {
@@ -258,7 +323,251 @@ export function MetaAdsDashboard() {
     return Array.from(optionsMap.values()).sort((left, right) => left.label.localeCompare(right.label, 'es'));
   }, [rows, draftCampaignId]);
 
+  const adsetOptionsByActiveCampaign = useMemo(() => {
+    const targetCampaign = campaignId;
+    const optionsMap = new Map<string, { id: string; label: string }>();
+
+    for (const row of rows) {
+      if (!row.adset_business_id) continue;
+      if (targetCampaign && row.campaign_business_id !== targetCampaign) continue;
+      if (optionsMap.has(row.adset_business_id)) continue;
+      optionsMap.set(row.adset_business_id, {
+        id: row.adset_business_id,
+        label: row.adset_name ?? row.adset_business_id,
+      });
+    }
+
+    return Array.from(optionsMap.values()).sort((left, right) => left.label.localeCompare(right.label, 'es'));
+  }, [rows, campaignId]);
+
+  const adOptionsByActiveScope = useMemo(() => {
+    const optionsMap = new Map<string, { id: string; label: string }>();
+
+    for (const row of rows) {
+      if (!row.ad_business_id) continue;
+      if (campaignId && row.campaign_business_id !== campaignId) continue;
+      if (adsetId && row.adset_business_id !== adsetId) continue;
+      if (optionsMap.has(row.ad_business_id)) continue;
+      optionsMap.set(row.ad_business_id, {
+        id: row.ad_business_id,
+        label: row.ad_name ?? row.ad_business_id,
+      });
+    }
+
+    return Array.from(optionsMap.values()).sort((left, right) => left.label.localeCompare(right.label, 'es'));
+  }, [rows, campaignId, adsetId]);
+
+  const rowByAdId = useMemo(() => {
+    const index = new Map<string, { campaignId: string; adsetId: string }>();
+    for (const row of rows) {
+      if (!row.ad_business_id) continue;
+      if (index.has(row.ad_business_id)) continue;
+      index.set(row.ad_business_id, {
+        campaignId: row.campaign_business_id ?? '',
+        adsetId: row.adset_business_id ?? '',
+      });
+    }
+    return index;
+  }, [rows]);
+
+  const rowByAdsetId = useMemo(() => {
+    const index = new Map<string, { campaignId: string }>();
+    for (const row of rows) {
+      if (!row.adset_business_id) continue;
+      if (index.has(row.adset_business_id)) continue;
+      index.set(row.adset_business_id, {
+        campaignId: row.campaign_business_id ?? '',
+      });
+    }
+    return index;
+  }, [rows]);
+
+  const handleTopCampaignClick = (nextCampaignId: string) => {
+    const normalized = (nextCampaignId ?? '').trim();
+    if (!normalized) return;
+
+    const shouldClear = campaignId === normalized;
+    const value = shouldClear ? '' : normalized;
+    setCampaignId(value);
+    setDraftCampaignId(value);
+    setAdsetId('');
+    setDraftAdsetId('');
+    setAdId('');
+    setDraftAdId('');
+    clearInteractiveSelections();
+  };
+
+  const handleTopAdClick = (nextAdId: string) => {
+    const normalized = (nextAdId ?? '').trim();
+    if (!normalized) return;
+
+    const shouldClear = adId === normalized;
+    if (shouldClear) {
+      setAdId('');
+      setDraftAdId('');
+      clearInteractiveSelections();
+      return;
+    }
+
+    const context = rowByAdId.get(normalized);
+    const campaignFromAd = context?.campaignId ?? '';
+    const adsetFromAd = context?.adsetId ?? '';
+
+    setCampaignId(campaignFromAd);
+    setDraftCampaignId(campaignFromAd);
+    setAdsetId(adsetFromAd);
+    setDraftAdsetId(adsetFromAd);
+    setAdId(normalized);
+    setDraftAdId(normalized);
+    clearInteractiveSelections();
+  };
+
+  const handleDrillCampaignClick = (nextCampaignId: string | null) => {
+    const normalized = (nextCampaignId ?? '').trim();
+    if (!normalized) return;
+    const shouldClear = campaignId === normalized;
+    const value = shouldClear ? '' : normalized;
+
+    setCampaignId(value);
+    setDraftCampaignId(value);
+    setAdsetId('');
+    setDraftAdsetId('');
+    setAdId('');
+    setDraftAdId('');
+  };
+
+  const handleDrillAdsetClick = (nextAdsetId: string | null) => {
+    const normalized = (nextAdsetId ?? '').trim();
+    if (!normalized) return;
+    const shouldClear = adsetId === normalized;
+    if (shouldClear) {
+      setAdsetId('');
+      setDraftAdsetId('');
+      setAdId('');
+      setDraftAdId('');
+      return;
+    }
+
+    const context = rowByAdsetId.get(normalized);
+    const campaignFromAdset = context?.campaignId ?? campaignId;
+
+    setCampaignId(campaignFromAdset);
+    setDraftCampaignId(campaignFromAdset);
+    setAdsetId(normalized);
+    setDraftAdsetId(normalized);
+    setAdId('');
+    setDraftAdId('');
+  };
+
+  const handleDrillAdClick = (nextAdId: string | null) => {
+    const normalized = (nextAdId ?? '').trim();
+    if (!normalized) return;
+    const shouldClear = adId === normalized;
+    if (shouldClear) {
+      setAdId('');
+      setDraftAdId('');
+      return;
+    }
+
+    const context = rowByAdId.get(normalized);
+    const campaignFromAd = context?.campaignId ?? campaignId;
+    const adsetFromAd = context?.adsetId ?? adsetId;
+
+    setCampaignId(campaignFromAd);
+    setDraftCampaignId(campaignFromAd);
+    setAdsetId(adsetFromAd);
+    setDraftAdsetId(adsetFromAd);
+    setAdId(normalized);
+    setDraftAdId(normalized);
+  };
+
   const comparisonRows = useMemo(() => comparisonQuery.data?.rows ?? [], [comparisonQuery.data?.rows]);
+
+  const audienceScopeKeysForGlobal = useMemo(() => {
+    const audienceRows = audienceQuery.data ?? [];
+    const reportRows = reportingQuery.data?.rows ?? [];
+
+    const filteredReportRows = reportRows.filter((row) => {
+      if (campaignId && row.campaign_business_id !== campaignId) return false;
+      if (adsetId && row.adset_business_id !== adsetId) return false;
+      if (adId && row.ad_business_id !== adId) return false;
+      if (interactiveDate && row.date_start !== interactiveDate) return false;
+      return true;
+    });
+
+    const audienceRowsInDateScope = interactiveDate
+      ? audienceRows.filter((row) => row.date_start === interactiveDate)
+      : audienceRows;
+
+    const scopedAdIds = new Set(
+      filteredReportRows
+        .map((row) => row.ad_business_id)
+        .filter((value): value is string => Boolean(value)),
+    );
+
+    const scopedAudienceRowsBase = scopedAdIds.size === 0
+      ? (adId || adsetId || campaignId ? [] : audienceRowsInDateScope)
+      : audienceRowsInDateScope.filter((row) => scopedAdIds.has(row.ad_business_id));
+
+    const activeSelections = Object.entries(audienceSelection)
+      .filter(([, value]) => Boolean(value)) as Array<[keyof AudienceInteractionSelection, string]>;
+
+    if (activeSelections.length === 0) return null;
+
+    const keySets: Array<Set<string>> = [];
+
+    for (const [selectionKey, selectedValue] of activeSelections) {
+      const currentSet = new Set<string>();
+
+      for (const row of scopedAudienceRowsBase) {
+        const rowKey = `${row.ad_business_id}__${row.date_start}`;
+        if (!row.ad_business_id || !row.date_start) continue;
+
+        if (selectionKey === 'age' && row.breakdown_type === 'age_gender') {
+          const ageLabel = normalizeAudienceLabel(row.breakdown_value_1 || 'N/D');
+          if (ageLabel === selectedValue) currentSet.add(rowKey);
+        }
+
+        if (selectionKey === 'gender' && row.breakdown_type === 'age_gender') {
+          const genderLabel = resolveGenderLabel(row.breakdown_value_2 || '');
+          if (genderLabel === selectedValue) currentSet.add(rowKey);
+        }
+
+        if (selectionKey === 'country' && row.breakdown_type === 'country') {
+          const countryLabel = resolveCountryLabel(row.breakdown_value_1 || 'N/D');
+          if (countryLabel === selectedValue) currentSet.add(rowKey);
+        }
+
+        if (selectionKey === 'platform' && row.breakdown_type === 'publisher_platform') {
+          const platformLabel = normalizeAudienceLabel(row.breakdown_value_1 || 'N/D');
+          if (platformLabel === selectedValue) currentSet.add(rowKey);
+        }
+
+        if (selectionKey === 'region' && row.breakdown_type === 'region') {
+          const regionLabel = normalizeAudienceLabel(row.breakdown_value_1 || 'N/D');
+          if (regionLabel === selectedValue) currentSet.add(rowKey);
+        }
+
+        if (selectionKey === 'device' && row.breakdown_type === 'device_platform') {
+          const deviceLabel = normalizeAudienceLabel(row.breakdown_value_1 || 'N/D');
+          if (deviceLabel === selectedValue) currentSet.add(rowKey);
+        }
+      }
+
+      keySets.push(currentSet);
+    }
+
+    if (keySets.length === 0) return null;
+    if (keySets.some((set) => set.size === 0)) return new Set<string>();
+
+    const [firstSet, ...restSets] = keySets;
+    const intersection = new Set<string>(firstSet);
+    for (const key of intersection) {
+      if (restSets.some((set) => !set.has(key))) intersection.delete(key);
+    }
+
+    return intersection;
+  }, [audienceQuery.data, reportingQuery.data?.rows, campaignId, adsetId, adId, interactiveDate, audienceSelection]);
 
   const comparisonCampaignOptions = useMemo(() => {
     const optionsMap = new Map<string, { id: string; label: string }>();
@@ -303,6 +612,10 @@ export function MetaAdsDashboard() {
       if (adsetId && row.adset_business_id !== adsetId) return false;
       if (adId && row.ad_business_id !== adId) return false;
       if (interactiveDate && row.date_start !== interactiveDate) return false;
+      if (audienceScopeKeysForGlobal) {
+        const key = `${row.ad_business_id}__${row.date_start}`;
+        if (!audienceScopeKeysForGlobal.has(key)) return false;
+      }
       return true;
     });
 
@@ -516,7 +829,7 @@ export function MetaAdsDashboard() {
       hourlyRowsCount: hourlyRowsForTrend.length,
       hourlyRowsRawCount: hourlyRows.length,
     };
-  }, [adId, adsetId, campaignId, interactiveDate, reportingQuery.data?.hourlyRows, reportingQuery.data?.rows]);
+  }, [adId, adsetId, audienceScopeKeysForGlobal, campaignId, interactiveDate, reportingQuery.data?.hourlyRows, reportingQuery.data?.rows]);
 
   const isFiltersDirty = campaignId !== draftCampaignId
     || adsetId !== draftAdsetId
@@ -638,6 +951,76 @@ export function MetaAdsDashboard() {
   const showSelectedDailyLabels = selectedDailyTotals.length <= 25;
   const showSelectedAverageDailyLabels = selectedDailyAverages.length <= 25;
 
+  const selectedCampaignLabel = useMemo(() => {
+    if (!campaignId) return '';
+    return campaignOptions.find((option) => option.id === campaignId)?.label ?? campaignId;
+  }, [campaignId, campaignOptions]);
+
+  const selectedAdsetLabel = useMemo(() => {
+    if (!adsetId) return '';
+    return adsetOptionsByActiveCampaign.find((option) => option.id === adsetId)?.label
+      ?? adsetOptions.find((option) => option.id === adsetId)?.label
+      ?? adsetId;
+  }, [adsetId, adsetOptions, adsetOptionsByActiveCampaign]);
+
+  const selectedAdLabel = useMemo(() => {
+    if (!adId) return '';
+    return adOptionsByActiveScope.find((option) => option.id === adId)?.label
+      ?? adOptions.find((option) => option.id === adId)?.label
+      ?? adId;
+  }, [adId, adOptions, adOptionsByActiveScope]);
+
+  const dailyDrillCampaignData = useMemo(() => {
+    if (!interactiveDate) return [] as Array<{ id: string; label: string; total: number }>;
+    const grouped = new Map<string, { id: string; label: string; total: number }>();
+
+    for (const row of rows) {
+      if (row.date_start !== interactiveDate) continue;
+      const id = row.campaign_business_id ?? '';
+      if (!id) continue;
+      const current = grouped.get(id) ?? { id, label: row.campaign_name ?? id, total: 0 };
+      current.total += Number((row as unknown as Record<string, unknown>)[insightChartMetric] ?? 0);
+      grouped.set(id, current);
+    }
+
+    return Array.from(grouped.values()).sort((left, right) => right.total - left.total).slice(0, 12);
+  }, [interactiveDate, rows, insightChartMetric]);
+
+  const dailyDrillAdsetData = useMemo(() => {
+    if (!interactiveDate) return [] as Array<{ id: string; label: string; total: number }>;
+    const grouped = new Map<string, { id: string; label: string; total: number }>();
+
+    for (const row of rows) {
+      if (row.date_start !== interactiveDate) continue;
+      if (campaignId && row.campaign_business_id !== campaignId) continue;
+      const id = row.adset_business_id ?? '';
+      if (!id) continue;
+      const current = grouped.get(id) ?? { id, label: row.adset_name ?? id, total: 0 };
+      current.total += Number((row as unknown as Record<string, unknown>)[insightChartMetric] ?? 0);
+      grouped.set(id, current);
+    }
+
+    return Array.from(grouped.values()).sort((left, right) => right.total - left.total).slice(0, 12);
+  }, [interactiveDate, rows, campaignId, insightChartMetric]);
+
+  const dailyDrillAdData = useMemo(() => {
+    if (!interactiveDate) return [] as Array<{ id: string; label: string; total: number }>;
+    const grouped = new Map<string, { id: string; label: string; total: number }>();
+
+    for (const row of rows) {
+      if (row.date_start !== interactiveDate) continue;
+      if (campaignId && row.campaign_business_id !== campaignId) continue;
+      if (adsetId && row.adset_business_id !== adsetId) continue;
+      const id = row.ad_business_id ?? '';
+      if (!id) continue;
+      const current = grouped.get(id) ?? { id, label: row.ad_name ?? id, total: 0 };
+      current.total += Number((row as unknown as Record<string, unknown>)[insightChartMetric] ?? 0);
+      grouped.set(id, current);
+    }
+
+    return Array.from(grouped.values()).sort((left, right) => right.total - left.total).slice(0, 12);
+  }, [interactiveDate, rows, campaignId, adsetId, insightChartMetric]);
+
   const resolvedCampaignCompareIds = useMemo(
     () => resolveComparisonSelection(comparisonCampaignPerformance, campaignCompareIds),
     [comparisonCampaignPerformance, campaignCompareIds],
@@ -726,6 +1109,78 @@ export function MetaAdsDashboard() {
     return audienceRowsInDateScope.filter((row) => scopedAdIds.has(row.ad_business_id));
   }, [audienceQuery.data, reportingQuery.data?.rows, campaignId, adsetId, adId, interactiveDate]);
 
+  const audienceScopeKeys = useMemo(() => {
+    const activeSelections = Object.entries(audienceSelection)
+      .filter(([, value]) => Boolean(value)) as Array<[keyof AudienceInteractionSelection, string]>;
+
+    if (activeSelections.length === 0) {
+      return null;
+    }
+
+    const keySets: Array<Set<string>> = [];
+
+    for (const [selectionKey, selectedValue] of activeSelections) {
+      const currentSet = new Set<string>();
+
+      for (const row of scopedAudienceRows) {
+        const rowKey = `${row.ad_business_id}__${row.date_start}`;
+        if (!row.ad_business_id || !row.date_start) continue;
+
+        if (selectionKey === 'age' && row.breakdown_type === 'age_gender') {
+          const ageLabel = normalizeAudienceLabel(row.breakdown_value_1 || 'N/D');
+          if (ageLabel === selectedValue) currentSet.add(rowKey);
+        }
+
+        if (selectionKey === 'gender' && row.breakdown_type === 'age_gender') {
+          const genderLabel = resolveGenderLabel(row.breakdown_value_2 || '');
+          if (genderLabel === selectedValue) currentSet.add(rowKey);
+        }
+
+        if (selectionKey === 'country' && row.breakdown_type === 'country') {
+          const countryLabel = resolveCountryLabel(row.breakdown_value_1 || 'N/D');
+          if (countryLabel === selectedValue) currentSet.add(rowKey);
+        }
+
+        if (selectionKey === 'platform' && row.breakdown_type === 'publisher_platform') {
+          const platformLabel = normalizeAudienceLabel(row.breakdown_value_1 || 'N/D');
+          if (platformLabel === selectedValue) currentSet.add(rowKey);
+        }
+
+        if (selectionKey === 'region' && row.breakdown_type === 'region') {
+          const regionLabel = normalizeAudienceLabel(row.breakdown_value_1 || 'N/D');
+          if (regionLabel === selectedValue) currentSet.add(rowKey);
+        }
+
+        if (selectionKey === 'device' && row.breakdown_type === 'device_platform') {
+          const deviceLabel = normalizeAudienceLabel(row.breakdown_value_1 || 'N/D');
+          if (deviceLabel === selectedValue) currentSet.add(rowKey);
+        }
+      }
+
+      keySets.push(currentSet);
+    }
+
+    if (keySets.length === 0) return null;
+    if (keySets.some((set) => set.size === 0)) return new Set<string>();
+
+    const [firstSet, ...restSets] = keySets;
+    const intersection = new Set<string>(firstSet);
+    for (const key of intersection) {
+      if (restSets.some((set) => !set.has(key))) {
+        intersection.delete(key);
+      }
+    }
+
+    return intersection;
+  }, [audienceSelection, scopedAudienceRows]);
+
+  const scopedAudienceRowsWithInteractions = useMemo(() => {
+    if (!audienceScopeKeys) return scopedAudienceRows;
+    if (audienceScopeKeys.size === 0) return [];
+
+    return scopedAudienceRows.filter((row) => audienceScopeKeys.has(`${row.ad_business_id}__${row.date_start}`));
+  }, [audienceScopeKeys, scopedAudienceRows]);
+
   const metricLabel = audienceMetricMeta[audienceMetric].label;
   const metricFormat = audienceMetricMeta[audienceMetric].format;
 
@@ -783,9 +1238,10 @@ export function MetaAdsDashboard() {
   const audienceByAge = useMemo(() => {
     const grouped = new Map<string, number>();
 
-    for (const row of scopedAudienceRows) {
+    for (const row of scopedAudienceRowsWithInteractions) {
       if (row.breakdown_type !== 'age_gender') continue;
       const key = normalizeAudienceLabel(row.breakdown_value_1 || 'N/D');
+      if (key === 'N/D') continue;
       const value = resolveAudienceMetricValue(row);
       grouped.set(key, (grouped.get(key) ?? 0) + value);
     }
@@ -794,12 +1250,12 @@ export function MetaAdsDashboard() {
       .map(([label, total]) => ({ label, total: Math.round(total) }))
       .sort((a, b) => b.total - a.total)
       .slice(0, 12);
-  }, [scopedAudienceRows, audienceMetric]);
+  }, [scopedAudienceRowsWithInteractions, audienceMetric]);
 
   const audienceByGender = useMemo(() => {
     const grouped = new Map<string, number>();
 
-    for (const row of scopedAudienceRows) {
+    for (const row of scopedAudienceRowsWithInteractions) {
       if (row.breakdown_type !== 'age_gender') continue;
       const key = resolveGenderLabel(row.breakdown_value_2 || '');
       if (!key) continue;
@@ -811,12 +1267,12 @@ export function MetaAdsDashboard() {
       .map(([label, total]) => ({ label, total: Math.round(total) }))
       .sort((a, b) => b.total - a.total)
       .slice(0, 12);
-  }, [scopedAudienceRows, audienceMetric]);
+  }, [scopedAudienceRowsWithInteractions, audienceMetric]);
 
   const audienceByCountry = useMemo(() => {
     const grouped = new Map<string, number>();
 
-    for (const row of scopedAudienceRows) {
+    for (const row of scopedAudienceRowsWithInteractions) {
       if (row.breakdown_type !== 'country') continue;
       const key = resolveCountryLabel(row.breakdown_value_1 || 'N/D');
       const value = resolveAudienceMetricValue(row);
@@ -827,12 +1283,12 @@ export function MetaAdsDashboard() {
       .map(([label, total]) => ({ label, total: Math.round(total) }))
       .sort((a, b) => b.total - a.total)
       .slice(0, 10);
-  }, [scopedAudienceRows, audienceMetric]);
+  }, [scopedAudienceRowsWithInteractions, audienceMetric]);
 
   const audienceByPlatform = useMemo(() => {
     const grouped = new Map<string, number>();
 
-    for (const row of scopedAudienceRows) {
+    for (const row of scopedAudienceRowsWithInteractions) {
       if (row.breakdown_type !== 'publisher_platform') continue;
       const key = normalizeAudienceLabel(row.breakdown_value_1 || 'N/D');
       const value = resolveAudienceMetricValue(row);
@@ -843,12 +1299,12 @@ export function MetaAdsDashboard() {
       .map(([label, total]) => ({ label, total: Math.round(total) }))
       .sort((a, b) => b.total - a.total)
       .slice(0, 10);
-  }, [scopedAudienceRows, audienceMetric]);
+  }, [scopedAudienceRowsWithInteractions, audienceMetric]);
 
   const audienceByRegion = useMemo(() => {
     const grouped = new Map<string, number>();
 
-    for (const row of scopedAudienceRows) {
+    for (const row of scopedAudienceRowsWithInteractions) {
       if (row.breakdown_type !== 'region') continue;
       const key = normalizeAudienceLabel(row.breakdown_value_1 || 'N/D');
       const value = resolveAudienceMetricValue(row);
@@ -859,12 +1315,12 @@ export function MetaAdsDashboard() {
       .map(([label, total]) => ({ label, total: Math.round(total) }))
       .sort((a, b) => b.total - a.total)
       .slice(0, 12);
-  }, [scopedAudienceRows, audienceMetric]);
+  }, [scopedAudienceRowsWithInteractions, audienceMetric]);
 
   const audienceByDevicePlatform = useMemo(() => {
     const grouped = new Map<string, number>();
 
-    for (const row of scopedAudienceRows) {
+    for (const row of scopedAudienceRowsWithInteractions) {
       if (row.breakdown_type !== 'device_platform') continue;
       const key = row.breakdown_value_1 || 'N/D';
       const value = resolveAudienceMetricValue(row);
@@ -875,7 +1331,20 @@ export function MetaAdsDashboard() {
       .map(([label, total]) => ({ label, total: Math.round(total) }))
       .sort((a, b) => b.total - a.total)
       .slice(0, 12);
-  }, [scopedAudienceRows, audienceMetric]);
+  }, [scopedAudienceRowsWithInteractions, audienceMetric]);
+
+  const activeAudienceSelectionChips = useMemo(() => {
+    const chips: Array<{ key: keyof AudienceInteractionSelection; label: string; value: string }> = [];
+    if (audienceSelection.age) chips.push({ key: 'age', label: 'Edad', value: audienceSelection.age });
+    if (audienceSelection.gender) chips.push({ key: 'gender', label: 'Género', value: audienceSelection.gender });
+    if (audienceSelection.country) chips.push({ key: 'country', label: 'País', value: audienceSelection.country });
+    if (audienceSelection.platform) chips.push({ key: 'platform', label: 'Plataforma', value: audienceSelection.platform });
+    if (audienceSelection.region) chips.push({ key: 'region', label: 'Región', value: audienceSelection.region });
+    if (audienceSelection.device) chips.push({ key: 'device', label: 'Dispositivo', value: audienceSelection.device });
+    return chips;
+  }, [audienceSelection]);
+
+  const hasInteractiveSelections = Boolean(interactiveDate) || activeAudienceSelectionChips.length > 0;
 
   if (reportingQuery.isLoading) {
     return (
@@ -981,7 +1450,7 @@ export function MetaAdsDashboard() {
           setAdId(draftAdId);
           setDateFrom(draftDateFrom);
           setDateTo(draftDateTo);
-          setInteractiveDate('');
+          clearInteractiveSelections();
         }}
         onClear={() => {
           setCampaignId('');
@@ -994,10 +1463,73 @@ export function MetaAdsDashboard() {
           setDraftAdId('');
           setDraftDateFrom('');
           setDraftDateTo('');
-          setInteractiveDate('');
+          clearInteractiveSelections();
         }}
         isApplyDisabled={!isFiltersDirty}
       />
+
+      {(interactiveDate || campaignId || adsetId || adId) ? (
+        <div className="rounded-xl border border-red-100 bg-red-50/40 px-4 py-3">
+          <div className="flex flex-wrap items-center gap-2 text-[11px]">
+            <span className="font-semibold uppercase tracking-[0.12em] text-gray-600">Contexto activo</span>
+            {interactiveDate ? (
+              <button
+                type="button"
+                onClick={() => setInteractiveDate('')}
+                className="inline-flex items-center gap-1 rounded-full border border-red-200 bg-white px-2 py-1 font-semibold text-red-700"
+              >
+                Fecha: {interactiveDate}
+                <span aria-hidden>×</span>
+              </button>
+            ) : null}
+            {campaignId ? (
+              <button
+                type="button"
+                onClick={() => {
+                  setCampaignId('');
+                  setDraftCampaignId('');
+                  setAdsetId('');
+                  setDraftAdsetId('');
+                  setAdId('');
+                  setDraftAdId('');
+                }}
+                className="inline-flex items-center gap-1 rounded-full border border-red-200 bg-white px-2 py-1 font-semibold text-red-700"
+              >
+                Campaña: {selectedCampaignLabel}
+                <span aria-hidden>×</span>
+              </button>
+            ) : null}
+            {adsetId ? (
+              <button
+                type="button"
+                onClick={() => {
+                  setAdsetId('');
+                  setDraftAdsetId('');
+                  setAdId('');
+                  setDraftAdId('');
+                }}
+                className="inline-flex items-center gap-1 rounded-full border border-red-200 bg-white px-2 py-1 font-semibold text-red-700"
+              >
+                Adset: {selectedAdsetLabel}
+                <span aria-hidden>×</span>
+              </button>
+            ) : null}
+            {adId ? (
+              <button
+                type="button"
+                onClick={() => {
+                  setAdId('');
+                  setDraftAdId('');
+                }}
+                className="inline-flex items-center gap-1 rounded-full border border-red-200 bg-white px-2 py-1 font-semibold text-red-700"
+              >
+                Ad: {selectedAdLabel}
+                <span aria-hidden>×</span>
+              </button>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
 
       <Section title="KPI">
         <KpiGrid>
@@ -1043,6 +1575,22 @@ export function MetaAdsDashboard() {
             <option value="shares">Compartidos</option>
             <option value="video_views">Vistas de video</option>
           </select>
+
+          {activeAudienceSelectionChips.length > 0 ? (
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              {activeAudienceSelectionChips.map((chip) => (
+                <button
+                  key={chip.key}
+                  type="button"
+                  onClick={() => toggleAudienceSelection(chip.key, chip.value)}
+                  className="inline-flex items-center gap-1 rounded-full border border-red-200 bg-red-50 px-2.5 py-1 text-[11px] font-semibold text-red-700"
+                >
+                  {chip.label}: {chip.value}
+                  <span aria-hidden>×</span>
+                </button>
+              ))}
+            </div>
+          ) : null}
         </div>
 
         <div className="grid grid-cols-1 gap-4 xl:grid-cols-3 mt-4">
@@ -1058,7 +1606,20 @@ export function MetaAdsDashboard() {
                   <XAxis type="number" tick={{ fontSize: 12 }} />
                   <YAxis type="category" dataKey="label" width={90} tick={{ fontSize: 11 }} />
                   <Tooltip {...chartTooltipStyle} formatter={(value) => formatCompactMetric(Number(value ?? 0), metricFormat)} />
-                  <Bar dataKey="total" fill="#dc2626" radius={[0, 8, 8, 0]} isAnimationActive={false} />
+                  <Bar
+                    dataKey="total"
+                    fill="#dc2626"
+                    radius={[0, 8, 8, 0]}
+                    isAnimationActive={false}
+                    onClick={(entry) => toggleAudienceSelection('age', extractLabelFromChartClick(entry, 'label'))}
+                  >
+                    {audienceByAge.map((row) => (
+                      <Cell
+                        key={`age-${row.label}`}
+                        fill={audienceSelection.age && audienceSelection.age !== row.label ? '#fca5a5' : '#dc2626'}
+                      />
+                    ))}
+                  </Bar>
                 </BarChart>
               </ResponsiveContainer>
             )}
@@ -1076,7 +1637,20 @@ export function MetaAdsDashboard() {
                   <XAxis dataKey="label" tick={{ fontSize: 11 }} interval={0} />
                   <YAxis tick={{ fontSize: 12 }} />
                   <Tooltip {...chartTooltipStyle} formatter={(value) => formatCompactMetric(Number(value ?? 0), metricFormat)} />
-                  <Bar dataKey="total" fill="#dc2626" radius={[8, 8, 0, 0]} isAnimationActive={false} />
+                  <Bar
+                    dataKey="total"
+                    fill="#dc2626"
+                    radius={[8, 8, 0, 0]}
+                    isAnimationActive={false}
+                    onClick={(entry) => toggleAudienceSelection('gender', extractLabelFromChartClick(entry, 'label'))}
+                  >
+                    {audienceByGender.map((row) => (
+                      <Cell
+                        key={`gender-${row.label}`}
+                        fill={audienceSelection.gender && audienceSelection.gender !== row.label ? '#fca5a5' : '#dc2626'}
+                      />
+                    ))}
+                  </Bar>
                 </BarChart>
               </ResponsiveContainer>
             )}
@@ -1094,7 +1668,20 @@ export function MetaAdsDashboard() {
                   <XAxis dataKey="label" tick={{ fontSize: 11 }} interval={0} angle={-20} textAnchor="end" height={60} />
                   <YAxis tick={{ fontSize: 12 }} />
                   <Tooltip {...chartTooltipStyle} formatter={(value) => formatCompactMetric(Number(value ?? 0), metricFormat)} />
-                  <Bar dataKey="total" fill="#f97316" radius={[8, 8, 0, 0]} isAnimationActive={false} />
+                  <Bar
+                    dataKey="total"
+                    fill="#f97316"
+                    radius={[8, 8, 0, 0]}
+                    isAnimationActive={false}
+                    onClick={(entry) => toggleAudienceSelection('country', extractLabelFromChartClick(entry, 'label'))}
+                  >
+                    {audienceByCountry.map((row) => (
+                      <Cell
+                        key={`country-${row.label}`}
+                        fill={audienceSelection.country && audienceSelection.country !== row.label ? '#fdba74' : '#f97316'}
+                      />
+                    ))}
+                  </Bar>
                 </BarChart>
               </ResponsiveContainer>
             )}
@@ -1112,7 +1699,20 @@ export function MetaAdsDashboard() {
                   <XAxis dataKey="label" tick={{ fontSize: 11 }} interval={0} angle={-20} textAnchor="end" height={60} />
                   <YAxis tick={{ fontSize: 12 }} />
                   <Tooltip {...chartTooltipStyle} formatter={(value) => formatCompactMetric(Number(value ?? 0), metricFormat)} />
-                  <Bar dataKey="total" fill="#dc2626" radius={[8, 8, 0, 0]} isAnimationActive={false} />
+                  <Bar
+                    dataKey="total"
+                    fill="#dc2626"
+                    radius={[8, 8, 0, 0]}
+                    isAnimationActive={false}
+                    onClick={(entry) => toggleAudienceSelection('platform', extractLabelFromChartClick(entry, 'label'))}
+                  >
+                    {audienceByPlatform.map((row) => (
+                      <Cell
+                        key={`platform-${row.label}`}
+                        fill={audienceSelection.platform && audienceSelection.platform !== row.label ? '#fca5a5' : '#dc2626'}
+                      />
+                    ))}
+                  </Bar>
                 </BarChart>
               </ResponsiveContainer>
             )}
@@ -1130,7 +1730,20 @@ export function MetaAdsDashboard() {
                   <XAxis dataKey="label" tick={{ fontSize: 11 }} interval={0} angle={-20} textAnchor="end" height={60} />
                   <YAxis tick={{ fontSize: 12 }} />
                   <Tooltip {...chartTooltipStyle} formatter={(value) => formatCompactMetric(Number(value ?? 0), metricFormat)} />
-                  <Bar dataKey="total" fill="#f97316" radius={[8, 8, 0, 0]} isAnimationActive={false} />
+                  <Bar
+                    dataKey="total"
+                    fill="#f97316"
+                    radius={[8, 8, 0, 0]}
+                    isAnimationActive={false}
+                    onClick={(entry) => toggleAudienceSelection('region', extractLabelFromChartClick(entry, 'label'))}
+                  >
+                    {audienceByRegion.map((row) => (
+                      <Cell
+                        key={`region-${row.label}`}
+                        fill={audienceSelection.region && audienceSelection.region !== row.label ? '#fdba74' : '#f97316'}
+                      />
+                    ))}
+                  </Bar>
                 </BarChart>
               </ResponsiveContainer>
             )}
@@ -1148,7 +1761,20 @@ export function MetaAdsDashboard() {
                   <XAxis dataKey="label" tick={{ fontSize: 11 }} interval={0} angle={-20} textAnchor="end" height={60} />
                   <YAxis tick={{ fontSize: 12 }} />
                   <Tooltip {...chartTooltipStyle} formatter={(value) => formatCompactMetric(Number(value ?? 0), metricFormat)} />
-                  <Bar dataKey="total" fill="#dc2626" radius={[8, 8, 0, 0]} isAnimationActive={false} />
+                  <Bar
+                    dataKey="total"
+                    fill="#dc2626"
+                    radius={[8, 8, 0, 0]}
+                    isAnimationActive={false}
+                    onClick={(entry) => toggleAudienceSelection('device', extractLabelFromChartClick(entry, 'label'))}
+                  >
+                    {audienceByDevicePlatform.map((row) => (
+                      <Cell
+                        key={`device-${row.label}`}
+                        fill={audienceSelection.device && audienceSelection.device !== row.label ? '#fca5a5' : '#dc2626'}
+                      />
+                    ))}
+                  </Bar>
                 </BarChart>
               </ResponsiveContainer>
             )}
@@ -1161,16 +1787,42 @@ export function MetaAdsDashboard() {
           <span className="font-semibold uppercase tracking-[0.14em] text-gray-600">
             Cross-filter por fecha: hacé click en barras/líneas diarias para filtrar todo el dashboard.
           </span>
-          {interactiveDate ? (
+          {hasInteractiveSelections ? (
             <button
               type="button"
-              onClick={() => setInteractiveDate('')}
+              onClick={clearInteractiveSelections}
               className="inline-flex items-center rounded-xl border border-gray-300 bg-white px-3 py-1.5 font-semibold uppercase tracking-[0.12em] text-gray-700 transition hover:border-red-300 hover:text-red-700"
             >
-              Limpiar fecha ({interactiveDate})
+              Limpiar selección
             </button>
           ) : null}
         </div>
+
+        {hasInteractiveSelections ? (
+          <div className="mb-4 flex flex-wrap items-center gap-2 rounded-xl border border-red-100 bg-red-50/40 px-3 py-2 text-[11px]">
+            {interactiveDate ? (
+              <button
+                type="button"
+                onClick={() => setInteractiveDate('')}
+                className="inline-flex items-center gap-1 rounded-full border border-red-200 bg-white px-2 py-1 font-semibold text-red-700"
+              >
+                Fecha: {interactiveDate}
+                <span aria-hidden>×</span>
+              </button>
+            ) : null}
+            {activeAudienceSelectionChips.map((chip) => (
+              <button
+                key={`graph-chip-${chip.key}`}
+                type="button"
+                onClick={() => toggleAudienceSelection(chip.key, chip.value)}
+                className="inline-flex items-center gap-1 rounded-full border border-red-200 bg-white px-2 py-1 font-semibold text-red-700"
+              >
+                {chip.label}: {chip.value}
+                <span aria-hidden>×</span>
+              </button>
+            ))}
+          </div>
+        ) : null}
 
         <div className="rounded-2xl border border-gray-200 bg-white px-4 py-3">
           <label className="text-xs font-semibold uppercase tracking-wide text-gray-500">Métrica de gráficos de insights</label>
@@ -1188,6 +1840,76 @@ export function MetaAdsDashboard() {
             <option value="video_views">Vistas de video</option>
           </select>
         </div>
+
+        {interactiveDate ? (
+          <div className="mt-4 grid grid-cols-1 gap-4 xl:grid-cols-3">
+            <ChartCard title="Drill por campaña (fecha seleccionada)" icon={<Megaphone size={16} className="text-red-600" />}>
+              {dailyDrillCampaignData.length === 0 ? (
+                <div className="rounded-xl border border-dashed border-gray-200 bg-gray-50 px-4 py-6 text-sm text-gray-500">
+                  Sin datos de campañas para la fecha {interactiveDate}.
+                </div>
+              ) : (
+                <ResponsiveContainer width="100%" height={280}>
+                  <BarChart data={dailyDrillCampaignData} onClick={(entry) => handleDrillCampaignClick(extractIdFromChartClick(entry, 'id'))}>
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                    <XAxis dataKey="label" tick={{ fontSize: 11 }} interval={0} angle={-20} textAnchor="end" height={60} />
+                    <YAxis tick={{ fontSize: 12 }} />
+                    <Tooltip {...chartTooltipStyle} formatter={(value) => formatCompactMetric(Number(value ?? 0), selectedInsightMetricMeta.format)} />
+                    <Bar dataKey="total" fill="#dc2626" radius={[8, 8, 0, 0]} isAnimationActive={false}>
+                      {dailyDrillCampaignData.map((row) => (
+                        <Cell key={`drill-campaign-${row.id}`} fill={campaignId && campaignId !== row.id ? '#fca5a5' : '#dc2626'} />
+                      ))}
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+              )}
+            </ChartCard>
+
+            <ChartCard title="Drill por adset (fecha seleccionada)" icon={<BarChart3 size={16} className="text-red-600" />}>
+              {dailyDrillAdsetData.length === 0 ? (
+                <div className="rounded-xl border border-dashed border-gray-200 bg-gray-50 px-4 py-6 text-sm text-gray-500">
+                  Sin datos de adsets para la selección actual.
+                </div>
+              ) : (
+                <ResponsiveContainer width="100%" height={280}>
+                  <BarChart data={dailyDrillAdsetData} onClick={(entry) => handleDrillAdsetClick(extractIdFromChartClick(entry, 'id'))}>
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                    <XAxis dataKey="label" tick={{ fontSize: 11 }} interval={0} angle={-20} textAnchor="end" height={60} />
+                    <YAxis tick={{ fontSize: 12 }} />
+                    <Tooltip {...chartTooltipStyle} formatter={(value) => formatCompactMetric(Number(value ?? 0), selectedInsightMetricMeta.format)} />
+                    <Bar dataKey="total" fill="#dc2626" radius={[8, 8, 0, 0]} isAnimationActive={false}>
+                      {dailyDrillAdsetData.map((row) => (
+                        <Cell key={`drill-adset-${row.id}`} fill={adsetId && adsetId !== row.id ? '#fca5a5' : '#dc2626'} />
+                      ))}
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+              )}
+            </ChartCard>
+
+            <ChartCard title="Drill por ad (fecha seleccionada)" icon={<Activity size={16} className="text-red-600" />}>
+              {dailyDrillAdData.length === 0 ? (
+                <div className="rounded-xl border border-dashed border-gray-200 bg-gray-50 px-4 py-6 text-sm text-gray-500">
+                  Sin datos de ads para la selección actual.
+                </div>
+              ) : (
+                <ResponsiveContainer width="100%" height={280}>
+                  <BarChart data={dailyDrillAdData} onClick={(entry) => handleDrillAdClick(extractIdFromChartClick(entry, 'id'))}>
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                    <XAxis dataKey="label" tick={{ fontSize: 11 }} interval={0} angle={-20} textAnchor="end" height={60} />
+                    <YAxis tick={{ fontSize: 12 }} />
+                    <Tooltip {...chartTooltipStyle} formatter={(value) => formatCompactMetric(Number(value ?? 0), selectedInsightMetricMeta.format)} />
+                    <Bar dataKey="total" fill="#dc2626" radius={[8, 8, 0, 0]} isAnimationActive={false}>
+                      {dailyDrillAdData.map((row) => (
+                        <Cell key={`drill-ad-${row.id}`} fill={adId && adId !== row.id ? '#fca5a5' : '#dc2626'} />
+                      ))}
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+              )}
+            </ChartCard>
+          </div>
+        ) : null}
 
         <div className="grid grid-cols-1 gap-4 xl:grid-cols-2 mt-4">
           <ChartCard title={`${selectedInsightMetricMeta.label} por hora (totales)`} icon={<BarChart3 size={16} className="text-red-600" />}>
@@ -1232,12 +1954,12 @@ export function MetaAdsDashboard() {
 
           <ChartCard title={`${selectedInsightMetricMeta.label} por día (totales)`} icon={<BarChart3 size={16} className="text-red-600" />}>
             <ResponsiveContainer width="100%" height={300}>
-              <BarChart data={selectedDailyTotals}>
+              <BarChart data={selectedDailyTotals} onClick={handleDailyChartClick}>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} />
                 <XAxis dataKey="date_start" tick={{ fontSize: 12 }} />
                 <YAxis tick={{ fontSize: 12 }} />
                 <Tooltip {...chartTooltipStyle} formatter={(value) => formatCompactMetric(Number(value ?? 0), selectedInsightMetricMeta.format)} />
-                <Bar dataKey="total" name="Total" fill="#dc2626" radius={[8, 8, 0, 0]} isAnimationActive={false} onClick={handleDailyChartClick}>
+                <Bar dataKey="total" name="Total" fill="#dc2626" radius={[8, 8, 0, 0]} isAnimationActive={false}>
                   {selectedDailyTotals.map((row) => (
                     <Cell key={`selected-daily-${row.date_start}`} fill={resolveDailyBarColor(row.date_start, '#dc2626', '#fca5a5')} />
                   ))}
@@ -1249,12 +1971,12 @@ export function MetaAdsDashboard() {
 
           <ChartCard title={`Promedio diario de ${selectedInsightMetricMeta.label.toLowerCase()}`} icon={<LineChartIcon size={16} className="text-red-600" />}>
             <ResponsiveContainer width="100%" height={300}>
-              <LineChart data={selectedDailyAverages}>
+              <LineChart data={selectedDailyAverages} onClick={handleDailyChartClick}>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} />
                 <XAxis dataKey="date_start" tick={{ fontSize: 12 }} />
                 <YAxis tick={{ fontSize: 12 }} />
                 <Tooltip {...chartTooltipStyle} formatter={(value) => formatCompactMetric(Number(value ?? 0), selectedInsightMetricMeta.format)} />
-                <Line type="monotone" dataKey="average" name="Promedio" stroke="#f97316" strokeWidth={2.4} dot={{ r: 2 }} activeDot={{ r: 4 }} isAnimationActive={false} onClick={handleDailyChartClick}>
+                <Line type="monotone" dataKey="average" name="Promedio" stroke="#f97316" strokeWidth={2.4} dot={{ r: 2 }} activeDot={{ r: 4 }} isAnimationActive={false}>
                   {showSelectedAverageDailyLabels ? <LabelList dataKey="average" position="top" formatter={(value) => formatCompactMetric(Number(value ?? 0), selectedInsightMetricMeta.format)} className="fill-gray-600 text-[10px] font-semibold" /> : null}
                 </Line>
               </LineChart>
@@ -1267,10 +1989,22 @@ export function MetaAdsDashboard() {
 
         <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
           <ChartCard title="Top campañas" icon={<Megaphone size={16} className="text-red-600" />}>
-            <TopPerformanceList items={dashboard.topCampaignsByClicks} emptyMessage="No hay campañas para mostrar con los filtros actuales." />
+            <TopPerformanceList
+              items={dashboard.topCampaignsByClicks}
+              emptyMessage="No hay campañas para mostrar con los filtros actuales."
+              selectedId={campaignId}
+              onSelect={handleTopCampaignClick}
+              rankLabel="campaign"
+            />
           </ChartCard>
           <ChartCard title="Top ads" icon={<Activity size={16} className="text-red-600" />}>
-            <TopPerformanceList items={dashboard.topAdsByClicks} emptyMessage="No hay ads para mostrar con los filtros actuales." />
+            <TopPerformanceList
+              items={dashboard.topAdsByClicks}
+              emptyMessage="No hay ads para mostrar con los filtros actuales."
+              selectedId={adId}
+              onSelect={handleTopAdClick}
+              rankLabel="ad"
+            />
           </ChartCard>
         </div>
       </Section>
@@ -1394,9 +2128,15 @@ export function MetaAdsDashboard() {
 function TopPerformanceList({
   items,
   emptyMessage,
+  selectedId,
+  onSelect,
+  rankLabel,
 }: {
   items: Array<{ id: string; title: string; subtitle: string; clicks: number; ctr: number; cpc: number }>;
   emptyMessage: string;
+  selectedId: string;
+  onSelect: (id: string) => void;
+  rankLabel: 'campaign' | 'ad';
 }) {
   if (items.length === 0) {
     return <div className="rounded-xl border border-dashed border-gray-200 bg-gray-50 px-4 py-6 text-sm text-gray-500">{emptyMessage}</div>;
@@ -1405,12 +2145,22 @@ function TopPerformanceList({
   return (
     <ul className="space-y-2">
       {items.slice(0, 5).map((item, index) => (
-        <li key={item.id} className="rounded-xl border border-gray-100 bg-gray-50/70 px-4 py-3">
+        <li
+          key={item.id}
+          className={`rounded-xl border px-4 py-3 transition ${selectedId === item.id ? 'border-red-300 bg-red-50/60' : 'border-gray-100 bg-gray-50/70 hover:border-red-200 hover:bg-red-50/30'}`}
+        >
           <div className="flex items-start justify-between gap-4">
             <div className="min-w-0">
               <p className="text-xs font-semibold uppercase tracking-[0.2em] text-red-600">#{index + 1}</p>
               <p className="font-semibold text-gray-900 truncate">{item.title}</p>
               <p className="text-xs text-gray-500 truncate">{item.subtitle}</p>
+              <button
+                type="button"
+                onClick={() => onSelect(item.id)}
+                className={`mt-2 inline-flex items-center rounded-lg border px-2 py-1 text-[11px] font-semibold uppercase tracking-[0.1em] ${selectedId === item.id ? 'border-red-300 bg-red-100 text-red-700' : 'border-gray-300 bg-white text-gray-600 hover:border-red-300 hover:text-red-700'}`}
+              >
+                {selectedId === item.id ? `Quitar ${rankLabel}` : `Filtrar por ${rankLabel}`}
+              </button>
             </div>
             <div className="grid grid-cols-3 gap-4 text-right shrink-0">
               <Metric label="Clicks" value={formatNumberEs(item.clicks)} />

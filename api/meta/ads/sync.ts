@@ -1466,19 +1466,10 @@ export default async function metaAdsSyncHandler(req: VercelRequest, res: Vercel
       if (since) insightsQuery = insightsQuery.gte('date_end' as never, since as never);
       if (until) insightsQuery = insightsQuery.lte('date_end' as never, until as never);
 
-      let postInsightsSnapshotsQuery = supabase
-        .from('meta_page_post_insights_snapshots' as never)
-        .select('post_business_id,page_business_id,page_name,metric,period,snapshot_date,value' as never)
-        .order('snapshot_date' as never, { ascending: true });
-
-      if (since) postInsightsSnapshotsQuery = postInsightsSnapshotsQuery.gte('snapshot_date' as never, since as never);
-      if (until) postInsightsSnapshotsQuery = postInsightsSnapshotsQuery.lte('snapshot_date' as never, until as never);
-
-      const [pagesResult, postsResult, insightsResult, postInsightsSnapshotsResult] = await Promise.all([
+      const [pagesResult, postsResult, insightsResult] = await Promise.all([
         pagesQuery,
         postsQuery,
         insightsQuery,
-        postInsightsSnapshotsQuery,
       ]);
 
       if (pagesResult.error) {
@@ -1490,6 +1481,31 @@ export default async function metaAdsSyncHandler(req: VercelRequest, res: Vercel
       if (insightsResult.error) {
         throw new Error(`No se pudo cargar page insights desde SQL: ${insightsResult.error.message}`);
       }
+
+      const postIds = Array.from(new Set(
+        ((postsResult.data ?? []) as JsonRecord[])
+          .map((item) => toNullableText(item.business_id))
+          .filter((id): id is string => Boolean(id)),
+      ));
+
+      let postInsightsSnapshotsResult:
+        | { data: unknown[]; error: null }
+        | { data: null; error: { message: string } };
+
+      if (postIds.length === 0) {
+        postInsightsSnapshotsResult = { data: [], error: null };
+      } else {
+        const snapshotsQuery = await supabase
+          .from('meta_page_post_insights_snapshots' as never)
+          .select('post_business_id,page_business_id,page_name,metric,period,snapshot_date,value' as never)
+          .in('post_business_id' as never, postIds as never)
+          .order('snapshot_date' as never, { ascending: true });
+
+        postInsightsSnapshotsResult = snapshotsQuery.error
+          ? { data: null, error: { message: snapshotsQuery.error.message } }
+          : { data: snapshotsQuery.data ?? [], error: null };
+      }
+
       if (postInsightsSnapshotsResult.error) {
         throw new Error(`No se pudo cargar post insights snapshots desde SQL: ${postInsightsSnapshotsResult.error.message}`);
       }
