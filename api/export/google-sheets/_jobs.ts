@@ -454,7 +454,7 @@ async function fetchEnviosRows(dateFrom: string, dateTo: string) {
     ),
     selectAllRowsPaginated(
       'leads_ganados',
-      'business_id,tienda_nombre_snapshot,vendedor_nombre_snapshot,fullfilment_snapshot',
+      'business_id,tienda_nombre_snapshot,vendedor_nombre_snapshot,fullfilment_snapshot,fecha_lead_ganado',
       'business_id',
     ),
     supabase.from('destinos' as never).select('business_id,destino' as never),
@@ -470,7 +470,7 @@ async function fetchEnviosRows(dateFrom: string, dateTo: string) {
       'fecha_envio',
     )).filter((row) => isDateInRange(row.fecha_envio, dateFrom, dateTo));
 
-  const leadsById = new Map<number, { tienda: string; vendedor: string; fullfilment: string }>();
+  const leadsById = new Map<number, { tienda: string; vendedor: string; fullfilment: string; fechaLeadGanado: string | null }>();
   for (const row of leadsRowsRaw) {
     const id = Number(row.business_id);
     if (!Number.isFinite(id)) continue;
@@ -478,8 +478,19 @@ async function fetchEnviosRows(dateFrom: string, dateTo: string) {
       tienda: String(row.tienda_nombre_snapshot ?? ''),
       vendedor: String(row.vendedor_nombre_snapshot ?? ''),
       fullfilment: formatBool(row.fullfilment_snapshot),
+      fechaLeadGanado: normalizeDateForCompare(row.fecha_lead_ganado),
     });
   }
+
+  const enviosRowsFiltered = enviosRows.filter((row) => {
+    const leadId = Number(row.id_lead_ganado);
+    if (!Number.isFinite(leadId)) return false;
+
+    const lead = leadsById.get(leadId);
+    if (!lead?.fechaLeadGanado) return false;
+
+    return lead.fechaLeadGanado >= dateFrom && lead.fechaLeadGanado <= dateTo;
+  });
 
   const destinosById = new Map<number, string>();
   for (const row of (destinosResult.data ?? []) as Array<Record<string, unknown>>) {
@@ -499,7 +510,7 @@ async function fetchEnviosRows(dateFrom: string, dateTo: string) {
     if (Number.isFinite(id)) tipoPuntoById.set(id, String(row.tipo_punto ?? ''));
   }
 
-  const mapped = enviosRows
+  const mapped = enviosRowsFiltered
     .map((row) => {
     const leadId = Number(row.id_lead_ganado);
     const lead = leadsById.get(leadId);
@@ -578,22 +589,41 @@ async function fetchRecojosRows(dateFrom: string, dateTo: string) {
     ),
     selectAllRowsPaginated(
       'leads_ganados',
-      'business_id,tienda_nombre_snapshot,vendedor_nombre_snapshot',
+      'business_id,tienda_nombre_snapshot,vendedor_nombre_snapshot,fecha_lead_ganado',
       'business_id',
     ),
   ]);
 
-  const leadsById = new Map<number, { tienda: string; vendedor: string }>();
+  const recojosRows = recojosRowsRaw.length > 0
+    ? recojosRowsRaw
+    : (await selectAllRowsPaginated(
+      'recojos',
+      'fecha,id_lead_ganado,tipo_cobro,veces,cobro_a_tienda,pago_a_moto,ingreso_recojo_total,costo_recojo_total,observaciones',
+      'fecha',
+    )).filter((row) => isDateInRange(row.fecha, dateFrom, dateTo));
+
+  const leadsById = new Map<number, { tienda: string; vendedor: string; fechaLeadGanado: string | null }>();
   for (const row of leadsRowsRaw) {
     const id = Number(row.business_id);
     if (!Number.isFinite(id)) continue;
     leadsById.set(id, {
       tienda: String(row.tienda_nombre_snapshot ?? ''),
       vendedor: String(row.vendedor_nombre_snapshot ?? ''),
+      fechaLeadGanado: normalizeDateForCompare(row.fecha_lead_ganado),
     });
   }
 
-  const mapped = recojosRowsRaw.map((row) => {
+  const recojosRowsFiltered = recojosRows.filter((row) => {
+    const leadId = Number(row.id_lead_ganado);
+    if (!Number.isFinite(leadId)) return false;
+
+    const lead = leadsById.get(leadId);
+    if (!lead?.fechaLeadGanado) return false;
+
+    return lead.fechaLeadGanado >= dateFrom && lead.fechaLeadGanado <= dateTo;
+  });
+
+  const mapped = recojosRowsFiltered.map((row) => {
     const leadId = Number(row.id_lead_ganado);
     const lead = leadsById.get(leadId);
 

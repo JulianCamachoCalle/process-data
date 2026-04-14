@@ -480,6 +480,7 @@ function toRecojoSheetRow(record: RecojoRecord, refs: RecojoReferenceData): Shee
   return {
     _id: record.stable_id,
     idRecojo: record.business_id,
+    __fecha_lead_ganado: snapshot?.fechaLeadGanado ?? '',
     'Fecha': toDmyDisplayDate(record.fecha),
     'Lead Ganado': leadGanado,
     Tienda: snapshot?.tienda ?? '',

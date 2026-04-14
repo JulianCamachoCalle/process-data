@@ -171,16 +171,16 @@ export function DynamicTable({ sheetName, columns, rows, onEdit }: DynamicTableP
         const rowDate = parseDateValue(row[dateColumn]);
         if (!rowDate) return false;
 
-        const leadGanadoDate =
-          sheetName === 'ENVIOS'
-            ? parseDateValue(row.__fecha_lead_ganado)
-            : null;
+        const requiresLeadGanadoDate = sheetName === 'ENVIOS' || sheetName === 'RECOJOS';
+        const leadGanadoDate = requiresLeadGanadoDate
+          ? parseDateValue(row.__fecha_lead_ganado)
+          : null;
 
         if (dateFrom) {
           const fromDate = parseDateValue(dateFrom);
           if (fromDate) {
             if (rowDate < fromDate) return false;
-            if (sheetName === 'ENVIOS' && (!leadGanadoDate || leadGanadoDate < fromDate)) return false;
+            if (requiresLeadGanadoDate && (!leadGanadoDate || leadGanadoDate < fromDate)) return false;
           }
         }
 
@@ -190,7 +190,7 @@ export function DynamicTable({ sheetName, columns, rows, onEdit }: DynamicTableP
             const inclusiveTo = new Date(toDate);
             inclusiveTo.setHours(23, 59, 59, 999);
             if (rowDate > inclusiveTo) return false;
-            if (sheetName === 'ENVIOS' && (!leadGanadoDate || leadGanadoDate > inclusiveTo)) return false;
+            if (requiresLeadGanadoDate && (!leadGanadoDate || leadGanadoDate > inclusiveTo)) return false;
           }
         }
       }
