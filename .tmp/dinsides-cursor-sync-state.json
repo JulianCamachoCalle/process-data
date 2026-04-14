@@ -1,0 +1,27 @@
+{
+  "createdAt": "2026-04-14T12:50:28.246Z",
+  "updatedAt": "2026-04-14T13:02:30.225Z",
+  "envios": {
+    "cursor": 93,
+    "done": false,
+    "iterations": 93,
+    "lastResponse": {
+      "mode": "envios",
+      "cursor": 92,
+      "next_cursor": 93,
+      "has_more": true,
+      "scanned_leads": 0,
+      "processed_leads": 0,
+      "pulled": 2,
+      "grouped_rows": 0,
+      "upserted": 0,
+      "queries_used": 0
+    }
+  },
+  "recojos": {
+    "cursor": 0,
+    "done": false,
+    "iterations": 0,
+    "lastResponse": null
+  }
+}
