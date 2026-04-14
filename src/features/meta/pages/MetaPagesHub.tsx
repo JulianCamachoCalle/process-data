@@ -67,7 +67,6 @@ export function MetaPagesDashboard() {
 
   const pages = useMemo(() => pagesQuery.data?.pages ?? [], [pagesQuery.data?.pages]);
   const posts = useMemo(() => pagesQuery.data?.posts ?? [], [pagesQuery.data?.posts]);
-  const insights = useMemo(() => pagesQuery.data?.insights ?? [], [pagesQuery.data?.insights]);
   const postInsightSnapshots = useMemo(
     () => pagesQuery.data?.post_insights_snapshots ?? [],
     [pagesQuery.data?.post_insights_snapshots],
@@ -159,7 +158,6 @@ export function MetaPagesDashboard() {
 
   const totals = useMemo(() => {
     return {
-      totalInsights: insights.length,
       totalFollowers: pages.reduce((acc, page) => acc + (page.followers_count || 0), 0),
       totalPosts: posts.length,
       totalReactions: enrichedPosts.reduce((acc, post) => acc + post.reactions, 0),
@@ -168,13 +166,8 @@ export function MetaPagesDashboard() {
       totalClicks: enrichedPosts.reduce((acc, post) => acc + post.clicks, 0),
       totalViews: enrichedPosts.reduce((acc, post) => acc + post.views, 0),
       totalVideoViews: enrichedPosts.reduce((acc, post) => acc + post.video_views, 0),
-      averageRetention: (() => {
-        const totalImpressions = enrichedPosts.reduce((acc, post) => acc + post.views, 0);
-        const totalVideoViews = enrichedPosts.reduce((acc, post) => acc + post.video_views, 0);
-        return totalImpressions > 0 ? (totalVideoViews * 100) / totalImpressions : 0;
-      })(),
     };
-  }, [enrichedPosts, insights.length, pages, posts.length]);
+  }, [enrichedPosts, pages, posts.length]);
 
   if (pagesQuery.isLoading) {
     return (
@@ -225,7 +218,6 @@ export function MetaPagesDashboard() {
 
       <Section title="KPI (Pages)">
         <KpiGrid>
-          <KpiCard title="Insights" value={formatNumberEs(totals.totalInsights)} helper="Filas de insights del periodo" icon={<BarChart3 className="text-red-600" size={18} />} />
           <KpiCard title="Seguidores" value={formatNumberEs(totals.totalFollowers)} helper="Total de seguidores" icon={<Eye className="text-red-600" size={18} />} />
           <KpiCard title="Posts" value={formatNumberEs(totals.totalPosts)} helper="Publicaciones del rango" icon={<FileText className="text-red-600" size={18} />} />
           <KpiCard title="Reacciones" value={formatNumberEs(totals.totalReactions)} helper="Total acumulado" icon={<ThumbsUp className="text-red-600" size={18} />} />
@@ -234,7 +226,6 @@ export function MetaPagesDashboard() {
           <KpiCard title="Clicks" value={formatNumberEs(totals.totalClicks)} helper="Total acumulado" icon={<MousePointerClick className="text-red-600" size={18} />} />
           <KpiCard title="Vistas" value={formatNumberEs(totals.totalViews)} helper="Total acumulado" icon={<Eye className="text-red-600" size={18} />} />
           <KpiCard title="Vistas de video" value={formatNumberEs(totals.totalVideoViews)} helper="post_video_views" icon={<Eye className="text-red-600" size={18} />} />
-          <KpiCard title="Retención video" value={`${totals.averageRetention.toFixed(2)}%`} helper="Video views / impresiones" icon={<Activity className="text-red-600" size={18} />} />
         </KpiGrid>
       </Section>
 
