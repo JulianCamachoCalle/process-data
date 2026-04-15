@@ -5,15 +5,23 @@ import {
   ArrowRight,
   Award,
   BadgeCheck,
+  Facebook,
+  Instagram,
+  Linkedin,
+  Mail,
   CircleUserRound,
+  MapPin,
   MessageCircle,
+  Music2,
   Moon,
   PackageCheck,
   RefreshCw,
   ShieldCheck,
   Star,
   Sun,
+  Phone,
   Truck,
+  Youtube,
   Warehouse,
 } from 'lucide-react';
 import { GeoJSON, MapContainer, TileLayer } from 'react-leaflet';
@@ -23,6 +31,7 @@ const whatsappSalesUrl =
   'https://api.whatsapp.com/send?phone=51922509459&text=Hola,%20necesito%20m%C3%A1s%20informaci%C3%B3n%20sobre%20sus%20servicios.';
 const whatsappPremiumUrl =
   'https://api.whatsapp.com/send?phone=51992565076&text=Hola,%20necesito%20m%C3%A1s%20informaci%C3%B3n%20sobre%20sus%20tarifas%20exclusivas.';
+const whatsappTariffInfoPhone = '51922509459';
 
 const navItems = [
   { href: '#nosotros', label: 'Nosotros' },
@@ -101,6 +110,26 @@ const testimonials = [
     author: 'Cindy Yaro',
     role: 'Emprendedora',
   },
+  {
+    quote: 'Excelente soporte en cada ruta, nos dio orden operativo y tranquilidad.',
+    author: 'Karen León',
+    role: 'E-commerce manager',
+  },
+  {
+    quote: 'Cobranza contraentrega súper clara y reportes que realmente ayudan.',
+    author: 'Javier Paredes',
+    role: 'Fundador de tienda online',
+  },
+  {
+    quote: 'Lo mejor fue la rapidez y la comunicación con mis clientes en cada entrega.',
+    author: 'Fiorella Poma',
+    role: 'Emprendedora',
+  },
+];
+
+const testimonialSlides = [
+  testimonials.slice(0, 3),
+  testimonials.slice(3, 6),
 ];
 
 const coverageTariffs = [
@@ -231,6 +260,20 @@ function fixMojibake(value: string) {
   }
 }
 
+function escapeHtml(value: string) {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function buildTariffInfoWhatsappUrl(placeName: string) {
+  const message = `Hola, necesito información sobre la tarifa de ${placeName}.`;
+  return `https://api.whatsapp.com/send?phone=${whatsappTariffInfoPhone}&text=${encodeURIComponent(message)}`;
+}
+
 function isGreenZoneStyle(styleUrl: string) {
   return styleUrl.toUpperCase().includes('POLY-0F9D58');
 }
@@ -266,13 +309,33 @@ const isoCodes = ['ISO 9001', 'ISO 14001', 'ISO 45001', 'ISO 27001', 'ISO 28000'
 
 const values = ['Responsabilidad', 'Empatía', 'Resiliencia', 'Aprendizaje'];
 
+const socialLinks = [
+  { label: 'Instagram', href: 'https://www.instagram.com/dinsides', icon: Instagram },
+  { label: 'Facebook', href: 'https://www.facebook.com/DinsidesCourier/', icon: Facebook },
+  { label: 'TikTok', href: 'https://www.tiktok.com/@dinsides', icon: Music2 },
+  { label: 'LinkedIn', href: 'https://pe.linkedin.com/company/dinsides-courier', icon: Linkedin },
+  { label: 'YouTube', href: 'https://www.youtube.com/@dinsidescourier', icon: Youtube },
+];
+
 function cx(...classes: Array<string | false | null | undefined>) {
   return classes.filter(Boolean).join(' ');
 }
 
-function useScrollReveal() {
+function useScrollReveal(trigger?: unknown) {
   useEffect(() => {
     const els = document.querySelectorAll('.reveal');
+
+    const markVisibleNow = (el: Element) => {
+      const rect = (el as HTMLElement).getBoundingClientRect();
+      const viewportHeight = window.innerHeight || document.documentElement.clientHeight;
+      const isVisible = rect.top < viewportHeight * 0.92 && rect.bottom > 0;
+      if (isVisible) {
+        el.classList.add('in-view');
+      }
+    };
+
+    els.forEach((el) => markVisibleNow(el));
+
     const observer = new IntersectionObserver(
       (entries) => {
         entries.forEach((entry) => {
@@ -285,17 +348,19 @@ function useScrollReveal() {
     );
     els.forEach((el) => observer.observe(el));
     return () => observer.disconnect();
-  }, []);
+  }, [trigger]);
 }
 
 function Header({
   isNight,
   isAnimating,
   onToggleTheme,
+  onNavigateSection,
 }: {
   isNight: boolean;
   isAnimating: boolean;
   onToggleTheme: () => void;
+  onNavigateSection: (event: React.MouseEvent<HTMLAnchorElement>, href: string) => void;
 }) {
   return (
     <header
@@ -341,6 +406,7 @@ function Header({
             <a
               key={item.href}
               href={item.href}
+              onClick={(event) => onNavigateSection(event, item.href)}
               className={cx(
                 'transition-colors',
                 isNight ? 'hover:text-white text-white/55' : 'hover:text-black text-gray-800',
@@ -367,9 +433,9 @@ function Header({
             {isNight ? <Moon size={14} /> : <Sun size={14} />}
           </button>
           <a
-            href="/login"
+            href="/dashboard"
             className={cx(
-              'hidden sm:inline-flex h-10 items-center justify-center gap-2 rounded-full border px-3 shadow-[0_10px_20px_-12px_rgba(220,38,38,0.9)] transition-all duration-200 hover:-translate-y-0.5 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-300/80 focus-visible:ring-offset-2',
+              'hidden sm:inline-flex h-8 items-center justify-center gap-1.5 rounded-full border px-3 shadow-[0_10px_20px_-12px_rgba(220,38,38,0.9)] transition-all duration-200 hover:-translate-y-0.5 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-300/80 focus-visible:ring-offset-2',
               isNight
                 ? 'border-red-500/80 bg-red-600 text-white hover:bg-red-500'
                 : 'border-red-500/80 bg-red-600 text-white hover:bg-red-500',
@@ -377,8 +443,8 @@ function Header({
             aria-label="Login"
             title="Login"
           >
-            <CircleUserRound size={20} />
-            <span className="text-xs font-semibold uppercase tracking-[0.08em]">Clientes</span>
+            <CircleUserRound size={16} />
+            <span className="text-[11px] font-semibold uppercase tracking-[0.08em]">Clientes</span>
           </a>
         </div>
       </div>
@@ -389,11 +455,13 @@ function Header({
 export function LandingPage() {
   const [isNight, setIsNight] = useState(false);
   const [isThemeAnimating, setIsThemeAnimating] = useState(false);
+  const [activeTestimonialSlide, setActiveTestimonialSlide] = useState(0);
+  const [showScrollTop, setShowScrollTop] = useState(false);
   const [coverageGeoJson, setCoverageGeoJson] = useState<AnyProps | null>(null);
   const heroBgRef = useRef<HTMLDivElement>(null);
   const mapIconCache = useRef(new Map<string, L.Icon>());
 
-  useScrollReveal();
+  useScrollReveal(isNight);
 
   const tariffLookup = useRef(
     new Map(
@@ -518,9 +586,21 @@ export function LandingPage() {
       if (heroBgRef.current) {
         heroBgRef.current.style.transform = `translateY(${window.scrollY * 0.32}px)`;
       }
+
+      setShowScrollTop(window.scrollY > 220);
     };
+
+    handleScroll();
     window.addEventListener('scroll', handleScroll, { passive: true });
     return () => window.removeEventListener('scroll', handleScroll);
+  }, []);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      setActiveTestimonialSlide((current) => (current + 1) % testimonialSlides.length);
+    }, 6000);
+
+    return () => window.clearInterval(timer);
   }, []);
 
   const handleToggleTheme = () => {
@@ -534,6 +614,18 @@ export function LandingPage() {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
+  const handleNavigateSection = (event: React.MouseEvent<HTMLAnchorElement>, href: string) => {
+    if (!href.startsWith('#')) return;
+
+    const target = document.querySelector(href) as HTMLElement | null;
+    if (!target) return;
+
+    event.preventDefault();
+    const headerOffset = 84;
+    const targetTop = target.getBoundingClientRect().top + window.scrollY - headerOffset;
+    window.scrollTo({ top: Math.max(targetTop, 0), behavior: 'smooth' });
+  };
+
   const n = isNight;
   const bg = n ? '#080808' : '#f5f5f5';
   const border = n ? 'border-white/[0.09]' : 'border-black/[0.08]';
@@ -541,7 +633,6 @@ export function LandingPage() {
   const cardBase = n
     ? 'bg-white/[0.04] border-white/[0.09]'
     : 'bg-black/[0.025] border-black/[0.07]';
-  const cardSolid = n ? 'bg-[#111] border-white/[0.09]' : 'bg-white border-black/[0.08]';
   const divideColor = n ? 'divide-white/[0.08]' : 'divide-black/[0.07]';
 
   return (
@@ -560,11 +651,16 @@ export function LandingPage() {
         )}
       />
 
-      <Header isNight={n} isAnimating={isThemeAnimating} onToggleTheme={handleToggleTheme} />
+      <Header
+        isNight={n}
+        isAnimating={isThemeAnimating}
+        onToggleTheme={handleToggleTheme}
+        onNavigateSection={handleNavigateSection}
+      />
 
       <main>
         {/* ── HERO ────────────────────────────────────────────── */}
-        <section id="inicio" className="relative h-[100svh] overflow-hidden">
+        <section id="inicio" className="relative min-h-[100svh] overflow-hidden">
           {/* Parallax background */}
           <div ref={heroBgRef} className="hero-parallax absolute inset-0 scale-[1.12]">
             <img
@@ -590,53 +686,54 @@ export function LandingPage() {
           <div className={cx('landing-grid absolute inset-0', n ? 'opacity-10' : 'opacity-7')} />
 
           {/* Hero content */}
-          <div className="relative z-10 flex h-full items-center px-6 sm:px-12 lg:px-20">
-            <div className="mx-auto grid w-full max-w-7xl items-stretch gap-6 lg:grid-cols-[1.05fr_0.95fr]">
-              <div className="max-w-xl self-center">
-              <p className="mb-5 text-[10px] uppercase tracking-[0.34em] text-red-400">
-                Operador logístico oficial · Lima, Perú
-              </p>
+          <div className="relative z-10 flex min-h-[100svh] items-center px-5 pb-16 pt-24 sm:px-8 sm:pb-20 sm:pt-28 lg:px-12 lg:pt-24">
+            <div className="mx-auto grid w-full max-w-7xl items-center gap-8 lg:grid-cols-[1.05fr_0.95fr] lg:gap-10">
+              <div className="mx-auto w-full max-w-2xl self-center text-center lg:mx-0 lg:max-w-xl lg:text-left">
+                <p className="mb-4 text-[10px] uppercase tracking-[0.3em] text-red-400 sm:mb-5 sm:tracking-[0.34em]">
+                  Operador logístico oficial · Lima, Perú
+                </p>
 
-              <h1
-                className={cx(
-                  'text-[22vw] font-black uppercase leading-[0.80] tracking-[-0.02em] md:text-[12vw] lg:text-[10vw]',
-                  n ? 'text-white/90' : 'text-black/85',
-                )}
-              >
-                DINSIDES
-              </h1>
-
-              <p className={cx('mt-7 max-w-sm text-sm leading-7 md:text-base md:max-w-lg', muted)}>
-                Más que un courier somos el motor que impulsa tu marca.
-              </p>
-
-              <div className="mt-8 flex flex-wrap gap-3">
-                <a
-                  href={whatsappSalesUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="inline-flex items-center gap-2 rounded-full bg-red-600 px-6 py-3 text-sm font-semibold text-white transition hover:bg-red-500"
+                <h1
+                  className={cx(
+                    'text-[20vw] font-black uppercase leading-[0.82] tracking-[-0.02em] sm:text-[16vw] md:text-[11vw] lg:text-[8.8vw]',
+                    n ? 'text-white/90' : 'text-black/85',
+                  )}
                 >
-                  <MessageCircle size={15} />
-                  Contáctanos
-                </a>
+                  DINSIDES
+                </h1>
+
+                <p className={cx('mx-auto mt-6 max-w-sm text-sm leading-7 sm:mt-7 md:max-w-lg md:text-base lg:mx-0', muted)}>
+                  Más que un courier somos el motor que impulsa tu marca.
+                </p>
+
+                <div className="mt-7 flex flex-wrap justify-center gap-3 sm:mt-8 lg:justify-start">
+                  <a
+                    href={whatsappSalesUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex items-center gap-2 rounded-full bg-red-600 px-6 py-3 text-sm font-semibold text-white transition hover:bg-red-500"
+                  >
+                    <MessageCircle size={15} />
+                    Contáctanos
+                  </a>
                 <a
                   href="#servicios"
+                  onClick={(event) => handleNavigateSection(event, '#servicios')}
                   className={cx(
                     'inline-flex items-center gap-2 rounded-full border px-6 py-3 text-sm font-semibold transition',
                     n
-                      ? 'border-white/20 text-white hover:bg-white/8'
-                      : 'border-black/20 text-black hover:bg-black/5',
-                  )}
-                >
-                  Ver servicios
-                  <ArrowRight size={15} />
-                </a>
-              </div>
+                        ? 'border-white/20 text-white hover:bg-white/8'
+                        : 'border-black/20 text-black hover:bg-black/5',
+                    )}
+                  >
+                    Ver servicios
+                    <ArrowRight size={15} />
+                  </a>
+                </div>
               </div>
 
               <div className="hidden h-full lg:block">
-                <div className="h-full min-h-[520px] overflow-hidden rounded-[1.8rem]">
+                <div className="h-full min-h-[480px] overflow-hidden rounded-[1.8rem] xl:min-h-[520px]">
                   <img
                     src="/ImagenHeader.png"
                     alt="Dinsides Courier"
@@ -650,7 +747,7 @@ export function LandingPage() {
           {/* Scroll hint */}
           <div
             className={cx(
-              'absolute bottom-8 left-1/2 -translate-x-1/2 flex flex-col items-center gap-2',
+              'absolute bottom-6 left-1/2 hidden -translate-x-1/2 flex-col items-center gap-2 sm:flex',
               muted,
             )}
           >
@@ -797,11 +894,11 @@ export function LandingPage() {
                     i > 0 && `reveal-delay-${i % 3}`,
                     featured
                       ? cx(
-                          'md:p-8',
-                          n
-                            ? 'bg-white/[0.06] border-white/[0.11]'
-                            : 'bg-black/[0.04] border-black/[0.09]',
-                        )
+                        'md:p-8',
+                        n
+                          ? 'bg-white/[0.06] border-white/[0.11]'
+                          : 'bg-black/[0.04] border-black/[0.09]',
+                      )
                       : cardBase,
                   )}
                 >
@@ -811,7 +908,7 @@ export function LandingPage() {
                       n ? 'bg-white/[0.07]' : 'bg-black/[0.05]',
                     )}
                   >
-                    <Icon size={17} className="text-red-400" />
+                    <Icon size={17} className="text-red-500" />
                   </div>
                   <h3
                     className={cx(
@@ -836,18 +933,28 @@ export function LandingPage() {
             <div className="editorial-rule mt-3" />
             <h2
               className={cx(
-                'mt-5 text-3xl font-black tracking-tight md:text-4xl',
+                'mt-5 text-3xl font-black tracking-tight md:text-4xl uppercase',
                 n ? 'text-white' : 'text-black',
               )}
             >
-              Tarifario regular
+              Nuestra Cobertura
             </h2>
             <p className={cx('mt-5 max-w-4xl text-sm leading-7', muted)}>
-              Precios para paquetes de 30cm x 20cm x 15cm o hasta 1.5 kg. Para pesos o medidas mayores, consultanos directamente.
+              Transportamos paquetes de 30cm x 20cm x 15cm o hasta 1.5 kg. Para pesos o medidas mayores, consultanos directamente.
             </p>
           </div>
 
-          <article className={cx('reveal mt-8 overflow-hidden rounded-[1.5rem] border p-2', cardBase)}>
+          <article className={cx('reveal relative mt-8 overflow-hidden rounded-[1.5rem] border p-2', cardBase)}>
+            <a
+              href={whatsappSalesUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="absolute right-4 top-4 z-[500] inline-flex items-center gap-2 rounded-full bg-red-600 px-4 py-2 text-xs font-semibold text-white shadow-[0_12px_24px_-16px_rgba(220,38,38,0.9)] transition hover:bg-red-500 sm:text-sm"
+            >
+              <MessageCircle size={14} />
+              Consultar precio
+            </a>
+
             <div className="overflow-hidden rounded-[1.15rem]">
               <LeafletMap
                 center={[-12.06, -76.99]}
@@ -903,9 +1010,7 @@ export function LandingPage() {
                     }}
                     onEachFeature={(feature: { properties?: Record<string, unknown>; geometry?: { type?: string } }, layer: Record<string, unknown>) => {
                       const name = String(feature.properties?.name ?? 'Sin nombre');
-                      const styleUrl = String(feature.properties?.styleUrl ?? '');
                       const geometryType = String(feature.geometry?.type ?? '');
-                      const tariffPrice = feature.properties?.tariffPrice;
                       const tariffDistrict = feature.properties?.tariffDistrict;
 
                       const leafletLayer = layer as {
@@ -916,13 +1021,9 @@ export function LandingPage() {
                       const popupTitle = typeof tariffDistrict === 'string' && tariffDistrict.trim().length > 0
                         ? tariffDistrict
                         : name;
-                      const popupTariff = typeof tariffPrice === 'string' && tariffPrice.trim().length > 0
-                        ? `Tarifa: ${tariffPrice}`
-                        : null;
-
-                      const popupHtml = popupTariff
-                        ? `<strong>${popupTitle}</strong><br/>${popupTariff}`
-                        : `<strong>${popupTitle}</strong><br/>${geometryType}<br/>${styleUrl}`;
+                      const safePopupTitle = escapeHtml(popupTitle);
+                      const infoUrl = buildTariffInfoWhatsappUrl(popupTitle);
+                      const popupHtml = `<strong>${safePopupTitle}</strong><br/><a href="${infoUrl}" target="_blank" rel="noreferrer" style="display:inline-block;margin-top:6px;color:#dc2626;font-weight:700;text-decoration:none;">Obtener más información</a>`;
 
                       leafletLayer.bindPopup(popupHtml);
 
@@ -969,63 +1070,128 @@ export function LandingPage() {
             </div>
           </article>
 
-          <details className={cx('mt-8 overflow-hidden rounded-2xl border', cardBase)}>
-            <summary className={cx('cursor-pointer list-none px-4 py-3 text-sm font-semibold', n ? 'text-white' : 'text-gray-900')}>
-              Ver con más detalle
-            </summary>
-            <div className="grid gap-2.5 border-t p-3 sm:grid-cols-2 lg:grid-cols-3" style={{ borderColor: n ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)' }}>
-              {coverageTariffs.map((item) => (
-                <article key={item.district} className={cx('rounded-2xl border p-3', cardBase)}>
-                  <p className={cx('text-sm font-medium', n ? 'text-white/85' : 'text-gray-800')}>{item.district}</p>
-                  <p className="mt-1 text-sm font-bold text-red-500">{item.price}</p>
-                </article>
-              ))}
-            </div>
-          </details>
-
-          <a
-            href={whatsappSalesUrl}
-            target="_blank"
-            rel="noreferrer"
-            className="mt-8 inline-flex items-center gap-2 rounded-full bg-red-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-red-500"
-          >
-            <MessageCircle size={14} />
-            Consultar precio
-          </a>
+          
         </section>
 
         {/* ── TESTIMONIOS ─────────────────────────────────────── */}
-        <section className={cx('border-t', border)}>
-          <div className="mx-auto max-w-7xl px-5 py-20 sm:px-8 lg:px-10">
+        <section className={cx('relative overflow-visible border-t', border)}>
+          <div
+            aria-hidden="true"
+            className={cx(
+              'pointer-events-none absolute inset-0',
+              n
+                ? 'bg-[linear-gradient(180deg,rgba(8,8,8,0.96)_0%,rgba(239,68,68,0.20)_46%,rgba(8,8,8,0.96)_100%)]'
+                : 'bg-[linear-gradient(180deg,rgba(245,245,245,0.96)_0%,rgba(239,68,68,0.16)_46%,rgba(245,245,245,0.96)_100%)]',
+            )}
+          />
+          <div
+            aria-hidden="true"
+            className={cx(
+              'pointer-events-none absolute inset-0 landing-grid',
+              n ? 'opacity-[0.08]' : 'opacity-[0.05]',
+            )}
+          />
+          <div
+            aria-hidden="true"
+            className={cx(
+              'pointer-events-none absolute inset-0 landing-noise',
+              n ? 'opacity-[0.12]' : 'opacity-[0.06]',
+            )}
+          />
+
+          <div className="relative z-10 mx-auto max-w-7xl px-5 py-20 sm:px-8 lg:px-10">
             <div className="reveal mb-10">
               <p className="text-[10px] uppercase tracking-[0.3em] text-red-400">Testimonios</p>
               <div className="editorial-rule mt-3" />
+              <h2
+                className={cx(
+                  'mt-5 text-3xl font-black tracking-tight text-left md:text-4xl uppercase',
+                  n ? 'text-white' : 'text-black',
+                )}
+              >
+                Lo que dicen nuestros clientes
+              </h2>
             </div>
 
-            <div className="grid gap-3 md:grid-cols-3">
-              {testimonials.map(({ quote, author, role }, i) => (
-                <article
-                  key={author}
-                  className={cx(
-                    'reveal rounded-[1.8rem] border p-6',
-                    i > 0 && `reveal-delay-${i}`,
-                    cardSolid,
-                  )}
+            <div className="reveal relative">
+              <div className="pointer-events-none absolute right-[-70px] top-[-268px] z-20">
+                <img
+                  src="/ImagenTestimonios.png"
+                  alt="Marco decorativo testimonios"
+                  aria-hidden="true"
+                  className="hidden w-[260px] max-w-none object-contain sm:block md:w-[360px] lg:w-[700px] xl:w-[740px]"
+                />
+              </div>
+
+              <div className="relative overflow-hidden rounded-[2rem]">
+                <div
+                  className="relative z-10 flex transition-transform duration-700 ease-out"
+                  style={{ transform: `translateX(-${activeTestimonialSlide * 100}%)` }}
                 >
-                  <div className="flex gap-0.5 mb-5">
-                    {Array.from({ length: 5 }).map((_, idx) => (
-                      <Star key={idx} size={13} className="text-red-400 fill-red-400" />
-                    ))}
-                  </div>
-                  <p className={cx('text-sm leading-7', muted)}>"{quote}"</p>
-                  <div className="mt-6 pt-5 border-t" style={{ borderColor: n ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.07)' }}>
-                    <p className={cx('text-sm font-semibold', n ? 'text-white' : 'text-black')}>
-                      {author}
-                    </p>
-                    <p className={cx('text-[11px] mt-0.5', muted)}>{role}</p>
-                  </div>
-                </article>
-              ))}
+                  {testimonialSlides.map((slide, slideIndex) => (
+                    <div key={`slide-${slideIndex}`} className="min-w-full p-5 sm:p-7 lg:p-8">
+                      <div className="grid gap-4 md:grid-cols-3">
+                        {slide.map(({ quote, author, role }, i) => (
+                        <article
+                          key={author}
+                          className={cx(
+                            'glass-card reveal p-5 sm:p-6',
+                            n ? 'glass-card-night' : 'glass-card-day',
+                            i > 0 && `reveal-delay-${i}`,
+                          )}
+                        >
+                            <div className="mb-4 flex items-center justify-center">
+                              <div
+                                className={cx(
+                                  'inline-flex h-12 w-12 items-center justify-center overflow-hidden rounded-xl backdrop-blur-sm',
+                                  n ? 'border border-white/20 bg-white/8' : 'border border-white/35 bg-white/25',
+                                )}
+                              >
+                                <img
+                                  src="/icon-dinsides.png"
+                                  alt="Dinsides"
+                                  loading="lazy"
+                                  className="h-8 w-8 object-contain"
+                                />
+                              </div>
+                            </div>
+
+                            <div className="mb-4 flex justify-center gap-1">
+                              {Array.from({ length: 5 }).map((_, idx) => (
+                                <Star key={idx} size={14} className="text-red-500 fill-red-500" />
+                              ))}
+                            </div>
+
+                            <p className={cx('text-sm leading-7 text-center', muted)}>“{quote}”</p>
+
+                            <div className="mt-6 border-t pt-4" style={{ borderColor: n ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.10)' }}>
+                              <p className={cx('text-sm font-semibold text-center', n ? 'text-white' : 'text-black')}>
+                                {author}
+                              </p>
+                              <p className={cx('mt-0.5 text-[11px] text-center', muted)}>{role}</p>
+                            </div>
+                          </article>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="pointer-events-none absolute inset-x-0 bottom-4 z-10 flex items-center justify-center gap-1.5">
+                  {testimonialSlides.map((_, index) => (
+                    <span
+                      key={`dot-${index}`}
+                      className={cx(
+                        'h-1.5 rounded-full transition-all duration-300',
+                        index === activeTestimonialSlide
+                          ? 'w-6 bg-red-500/70'
+                          : (n ? 'w-1.5 bg-white/35' : 'w-1.5 bg-black/25'),
+                      )}
+                      aria-hidden="true"
+                    />
+                  ))}
+                </div>
+              </div>
             </div>
           </div>
         </section>
@@ -1053,7 +1219,7 @@ export function LandingPage() {
                         : 'border-black/[0.10] text-gray-500',
                     )}
                   >
-                    <Award size={11} className="text-red-400" />
+                    <Award size={11} className="text-red-500" />
                     {code}
                   </span>
                 ))}
@@ -1063,75 +1229,145 @@ export function LandingPage() {
         </section>
 
         {/* ── CONTACTO ────────────────────────────────────────── */}
-        <section id="contacto" className="mx-auto max-w-7xl px-5 py-20 sm:px-8 lg:px-10">
-          <div
-            className={cx(
-              'reveal overflow-hidden rounded-[2.2rem] border p-8 md:p-12',
-              n
-                ? 'border-white/[0.11] bg-[linear-gradient(135deg,rgba(127,29,29,0.58)_0%,rgba(8,8,8,0.97)_48%,rgba(18,18,18,0.99)_100%)]'
-                : 'border-black/[0.08] bg-[linear-gradient(135deg,rgba(254,242,242,0.95)_0%,rgba(255,255,255,0.98)_48%,rgba(245,245,245,0.95)_100%)]',
-            )}
-          >
-            <p className={cx('text-[10px] uppercase tracking-[0.3em]', n ? 'text-red-300' : 'text-red-600')}>Contacto</p>
-            <h2 className={cx('mt-4 max-w-xl text-3xl font-black leading-tight md:text-4xl', n ? 'text-white' : 'text-black')}>
-              Lleva tu marca a su máximo potencial con Dinsides Courier.
-            </h2>
-
-            <div className="mt-8 flex flex-wrap gap-3">
-              <a
-                href={whatsappSalesUrl}
-                target="_blank"
-                rel="noreferrer"
-                className="inline-flex items-center gap-2 rounded-full bg-white px-6 py-3 text-sm font-semibold text-black transition hover:bg-neutral-100"
-              >
-                <MessageCircle size={15} />
-                Escríbenos ahora
-              </a>
-              <a
-                href={whatsappPremiumUrl}
-                target="_blank"
-                rel="noreferrer"
+        <section id="contacto" className="mx-auto max-w-7xl px-5 py-14 sm:px-8 sm:py-16 lg:px-10">
+          <div className="grid gap-3 lg:grid-cols-[0.98fr_1.02fr] lg:items-stretch">
+            <div className="reveal flex flex-col justify-center lg:pr-2">
+              <p className="text-[10px] uppercase tracking-[0.3em] text-red-400">Contacto</p>
+              <div className="editorial-rule mt-3" />
+              <h2
                 className={cx(
-                  'inline-flex items-center gap-2 rounded-full border px-6 py-3 text-sm font-semibold transition',
-                  n
-                    ? 'border-white/20 bg-white/[0.08] text-white hover:bg-white/[0.14]'
-                    : 'border-black/15 bg-black/[0.04] text-black hover:bg-black/[0.08]',
+                  'mt-4 text-3xl font-black tracking-tight md:text-4xl uppercase',
+                  n ? 'text-white' : 'text-black',
                 )}
               >
-                Tarifario premium
-              </a>
+                Hablemos de tu operación logística
+              </h2>
+              <p className={cx('mt-3 max-w-xl text-sm leading-7', muted)}>
+                Te ayudamos a optimizar entregas, cobranza y fulfillment con procesos claros y respuesta rápida.
+              </p>
+
+              <div className="mt-5 space-y-3">
+                <div className={cx('flex items-start gap-3 rounded-2xl border-b border-l px-4 py-3', n ? 'border-white/[0.12]' : 'border-black/[0.10]')}>
+                  <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-red-600/90 text-white">
+                    <MapPin size={14} />
+                  </span>
+                  <div>
+                    <p className={cx('text-[10px] uppercase tracking-[0.22em] mb-1', muted)}>Sedes</p>
+                    <p className={cx('text-sm leading-6', n ? 'text-white/75' : 'text-gray-700')}>Av. Arica 1702, Cercado de Lima</p>
+                    <p className={cx('text-sm leading-6', n ? 'text-white/75' : 'text-gray-700')}>Jr. Antonio Bazo 1220, La Victoria</p>
+                  </div>
+                </div>
+
+                <div className={cx('flex items-start gap-3 rounded-2xl border-b border-l px-4 py-3', n ? 'border-white/[0.12]' : 'border-black/[0.10]')}>
+                  <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-red-600/90 text-white">
+                    <Phone size={14} />
+                  </span>
+                  <div>
+                    <p className={cx('text-[10px] uppercase tracking-[0.22em] mb-1', muted)}>Teléfonos</p>
+                    <p className={cx('text-sm leading-6', n ? 'text-white/75' : 'text-gray-700')}>+51 922 509 459</p>
+                    <p className={cx('text-sm leading-6', n ? 'text-white/75' : 'text-gray-700')}>+51 992 565 076</p>
+                  </div>
+                </div>
+
+                <div className={cx('flex items-start gap-3 rounded-2xl border-b border-l px-4 py-3', n ? 'border-white/[0.12]' : 'border-black/[0.10]')}>
+                  <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-red-600/90 text-white">
+                    <Mail size={14} />
+                  </span>
+                  <div>
+                    <p className={cx('text-[10px] uppercase tracking-[0.22em] mb-1', muted)}>Email</p>
+                    <p className={cx('text-sm leading-6', n ? 'text-white/75' : 'text-gray-700')}>contacto@dinsidescourier.com</p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="mt-5 flex flex-wrap gap-3">
+                <a
+                  href={whatsappSalesUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-2 rounded-full bg-red-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-red-500"
+                >
+                  <MessageCircle size={15} />
+                  Ventas
+                </a>
+                <a
+                  href={whatsappPremiumUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className={cx(
+                    'inline-flex items-center gap-2 rounded-full border-bottom px-5 py-2.5 text-sm font-semibold transition',
+                    n
+                      ? 'border-white/20 text-white hover:bg-white/8'
+                      : 'border-black/15 text-black hover:bg-black/5',
+                  )}
+                >
+                  Tarifario premium
+                </a>
+              </div>
             </div>
 
-            <div className="mt-10 grid gap-3 md:grid-cols-3">
-              <div className={cx('rounded-2xl border p-5', n ? 'border-white/[0.09] bg-black/30' : 'border-black/10 bg-white/70')}>
-                <p className={cx('mb-3 text-[10px] uppercase tracking-[0.28em]', n ? 'text-red-300' : 'text-red-600')}>Sedes</p>
-                <p className={cx('text-sm leading-7', n ? 'text-white/65' : 'text-gray-700')}>Av. Arica 1702, Cercado de Lima</p>
-                <p className={cx('text-sm leading-7', n ? 'text-white/65' : 'text-gray-700')}>Jr. Antonio Bazo 1220, La Victoria</p>
-              </div>
-              <div className={cx('rounded-2xl border p-5', n ? 'border-white/[0.09] bg-black/30' : 'border-black/10 bg-white/70')}>
-                <p className={cx('mb-3 text-[10px] uppercase tracking-[0.28em]', n ? 'text-red-300' : 'text-red-600')}>
-                  Teléfonos
-                </p>
-                <p className={cx('text-sm leading-7', n ? 'text-white/65' : 'text-gray-700')}>+51 922 509 459</p>
-                <p className={cx('text-sm leading-7', n ? 'text-white/65' : 'text-gray-700')}>+51 992 565 076</p>
-              </div>
-              <div className={cx('rounded-2xl border p-5', n ? 'border-white/[0.09] bg-black/30' : 'border-black/10 bg-white/70')}>
-                <p className={cx('mb-3 text-[10px] uppercase tracking-[0.28em]', n ? 'text-red-300' : 'text-red-600')}>Email</p>
-                <p className={cx('text-sm leading-7', n ? 'text-white/65' : 'text-gray-700')}>contacto@dinsidescourier.com</p>
+            <article className={cx('reveal overflow-hidden rounded-[1.5rem]')}>
+              <img
+                src="/ImagenContacto.png"
+                alt="Equipo de contacto Dinsides"
+                className="h-full min-h-[360px] w-full object-cover object-center"
+              />
+            </article>
+          </div>
+        </section>
+
+        {/* ── FOOTER ──────────────────────────────────────────── */}
+        <section className={cx('border-y', border)}>
+          <div className="mx-auto max-w-7xl px-5 py-11 sm:px-8 lg:px-10">
+            <div className="reveal flex flex-col items-center gap-5 text-center">
+              <p className={cx('text-sm font-semibold', n ? 'text-white/80' : 'text-black/70')}>
+                Conectá con Dinsides en cada plataforma
+              </p>
+
+              <div className="reveal reveal-delay-1 flex flex-wrap items-center justify-center gap-3">
+                {socialLinks.map(({ label, href, icon: Icon }) => (
+                  <a
+                    key={label}
+                    href={href}
+                    target="_blank"
+                    rel="noreferrer"
+                    aria-label={label}
+                    title={label}
+                    className={cx(
+                      'inline-flex h-11 w-11 items-center justify-center rounded-full border transition-transform duration-200 hover:-translate-y-0.5',
+                      'bg-white/35 backdrop-blur-[8px] border-white/30 shadow-[0_8px_32px_rgba(0,0,0,0.1),inset_0_1px_0_rgba(255,255,255,0.5),inset_0_-1px_0_rgba(255,255,255,0.1),inset_0_0_2px_1px_rgba(255,255,255,0.1)]',
+                      n ? 'hover:bg-white/45' : 'hover:bg-white/55',
+                    )}
+                  >
+                    <Icon size={18} className="text-red-500" />
+                  </a>
+                ))}
               </div>
             </div>
           </div>
         </section>
 
-        {/* ── FOOTER ──────────────────────────────────────────── */}
         <footer className={cx('border-t', border)}>
           <div
             className={cx(
-              'mx-auto max-w-7xl px-5 py-6 sm:px-8 lg:px-10 flex items-center justify-between text-[11px]',
+              'mx-auto max-w-7xl px-5 py-6 sm:px-8 lg:px-10 flex flex-col gap-2 text-[11px] sm:flex-row sm:items-center sm:justify-between',
               muted,
             )}
           >
-            <span>© 2025 Dinsides Courier. Todos los derechos reservados.</span>
+            <div className="flex items-center gap-3">
+              <span>© 2025 Dinsides Courier. Todos los derechos reservados.</span>
+              <a
+                href="/libro-de-reclamaciones"
+                className={cx(
+                  'inline-flex items-center underline underline-offset-4 decoration-transparent transition-colors',
+                  n
+                    ? 'text-white/65 hover:text-white hover:decoration-white/60'
+                    : 'text-gray-600 hover:text-black hover:decoration-black/50',
+                )}
+              >
+                Libro de Reclamaciones
+              </a>
+            </div>
             <span>Lima, Perú</span>
           </div>
         </footer>
@@ -1153,7 +1389,8 @@ export function LandingPage() {
         aria-label="Subir al inicio"
         onClick={handleScrollToTop}
         className={cx(
-          'fixed bottom-6 left-1/2 z-[1200] inline-flex h-10 w-10 -translate-x-1/2 items-center justify-center rounded-full border backdrop-blur-sm transition hover:-translate-y-0.5',
+          'fixed bottom-6 left-1/2 z-[1200] inline-flex h-10 w-10 -translate-x-1/2 items-center justify-center rounded-full border backdrop-blur-sm transition-all duration-300 hover:-translate-y-0.5',
+          showScrollTop ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none translate-y-2',
           n
             ? 'border-white/20 bg-black/45 text-white/80 hover:bg-black/60'
             : 'border-black/15 bg-white/70 text-gray-700 hover:bg-white',
