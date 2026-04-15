@@ -133,122 +133,61 @@ async function fetchDeliveredResultIds() {
 }
 
 async function fetchSellerOptions() {
-  const buildOptionsFromLeadsFallback = async () => {
-    if (!isSupabaseConfigured() || !supabase) {
-      throw new Error('Supabase no está configurado.');
-    }
-
-    const client = supabase;
-    const leads = await fetchAllRowsPaged<{ vendedor_nombre_snapshot: string | null; pipeline_id_snapshot: number | null }>(
-      async (from, to) => {
-        const response = await client
-          .from('leads_ganados')
-          .select('vendedor_nombre_snapshot,pipeline_id_snapshot')
-          .range(from, to);
-
-        return {
-          data: (response.data ?? []) as Array<{ vendedor_nombre_snapshot: string | null; pipeline_id_snapshot: number | null }>,
-          error: response.error,
-        };
-      },
-      1000,
-    );
-
-    const bySeller = new Map<string, { label: string; pipelineCounts: Map<number, number> }>();
-
-    for (const row of leads) {
-      const label = String(row.vendedor_nombre_snapshot ?? '').trim();
-      if (!label) continue;
-      if (EXCLUDED_PIPELINE_NAMES.has(normalizeText(label))) continue;
-
-      const sellerKey = normalizeText(label);
-      const pipelineId = Number(row.pipeline_id_snapshot ?? 0);
-      if (!Number.isFinite(pipelineId) || pipelineId <= 0) continue;
-
-      const entry = bySeller.get(sellerKey) ?? { label, pipelineCounts: new Map<number, number>() };
-      entry.pipelineCounts.set(pipelineId, (entry.pipelineCounts.get(pipelineId) ?? 0) + 1);
-      bySeller.set(sellerKey, entry);
-    }
-
-    const sellers = Array.from(bySeller.values()).map((entry) => entry.label);
-    const sellerChunks = chunkArray(sellers, 100);
-    const pipelineIdBySellerName = new Map<string, number>();
-
-    for (const chunk of sellerChunks) {
-      const { data, error } = await client
-        .from('kommo_pipelines')
-        .select('business_id,name,is_archive')
-        .in('name', chunk);
-
-      if (error) {
-        throw new Error(error.message || 'No se pudieron resolver pipelines por nombre.');
-      }
-
-      const rows = (data ?? []) as Array<{ business_id: number | null; name: string | null; is_archive: boolean | null }>;
-      for (const row of rows) {
-        if (row.is_archive === true) continue;
-        const id = Number(row.business_id ?? 0);
-        if (!Number.isFinite(id) || id <= 0) continue;
-        const name = String(row.name ?? '').trim();
-        if (!name) continue;
-        const key = normalizeText(name);
-        if (!pipelineIdBySellerName.has(key)) {
-          pipelineIdBySellerName.set(key, id);
-        }
-      }
-    }
-
-    const options: SellerOption[] = [];
-    for (const entry of bySeller.values()) {
-      const sellerKey = normalizeText(entry.label);
-      const pipelineByExactName = pipelineIdBySellerName.get(sellerKey) ?? null;
-
-      let bestPipelineId: number | null = null;
-      let bestCount = -1;
-      for (const [pipelineId, count] of entry.pipelineCounts.entries()) {
-        if (count > bestCount) {
-          bestPipelineId = pipelineId;
-          bestCount = count;
-        }
-      }
-
-      const finalPipelineId = pipelineByExactName ?? bestPipelineId;
-      if (!finalPipelineId) continue;
-      options.push({
-        value: String(finalPipelineId),
-        pipelineId: finalPipelineId,
-        label: entry.label,
-      });
-    }
-
-    return options.sort((a, b) => a.label.localeCompare(b.label, 'es'));
-  };
-
-  try {
-    const response = await fetch('/api/kommo/pipeline-options', {
-      method: 'GET',
-      headers: { Accept: 'application/json' },
-    });
-
-    const payload = await response.json().catch(() => ({}));
-    if (!response.ok || !payload?.success || !Array.isArray(payload?.options)) {
-      throw new Error(payload?.error || `Error ${response.status}`);
-    }
-
-    const options = (payload.options as SellerOption[])
-      .filter((option) => {
-        const name = String(option.label ?? '').trim();
-        if (!name) return false;
-        return !EXCLUDED_PIPELINE_NAMES.has(normalizeText(name));
-      })
-      .sort((a, b) => a.label.localeCompare(b.label, 'es'));
-
-    if (options.length > 0) return options;
-  } catch {
-    // fallback to client-side snapshot source below
+  if (!isSupabaseConfigured() || !supabase) {
+    throw new Error('Supabase no está configurado.');
   }
 
-  return buildOptionsFromLeadsFallback();
+  const client = supabase;
+  const leads = await fetchAllRowsPaged<{ vendedor_nombre_snapshot: string | null; pipeline_id_snapshot: number | null }>(
+    async (from, to) => {
+      const response = await client
+        .from('leads_ganados')
+        .select('vendedor_nombre_snapshot,pipeline_id_snapshot')
+        .range(from, to);
+
+      return {
+        data: (response.data ?? []) as Array<{ vendedor_nombre_snapshot: string | null; pipeline_id_snapshot: number | null }>,
+        error: response.error,
+      };
+    },
+    1000,
+  );
+
+  const bySeller = new Map<string, { label: string; pipelineCounts: Map<number, number> }>();
+  for (const row of leads) {
+    const label = String(row.vendedor_nombre_snapshot ?? '').trim();
+    if (!label) continue;
+    if (EXCLUDED_PIPELINE_NAMES.has(normalizeText(label))) continue;
+
+    const sellerKey = normalizeText(label);
+    const pipelineId = Number(row.pipeline_id_snapshot ?? 0);
+    if (!Number.isFinite(pipelineId) || pipelineId <= 0) continue;
+
+    const entry = bySeller.get(sellerKey) ?? { label, pipelineCounts: new Map<number, number>() };
+    entry.pipelineCounts.set(pipelineId, (entry.pipelineCounts.get(pipelineId) ?? 0) + 1);
+    bySeller.set(sellerKey, entry);
+  }
+
+  const options: SellerOption[] = [];
+  for (const entry of bySeller.values()) {
+    let bestPipelineId: number | null = null;
+    let bestCount = -1;
+    for (const [pipelineId, count] of entry.pipelineCounts.entries()) {
+      if (count > bestCount) {
+        bestPipelineId = pipelineId;
+        bestCount = count;
+      }
+    }
+
+    if (!bestPipelineId) continue;
+    options.push({
+      value: String(bestPipelineId),
+      pipelineId: bestPipelineId,
+      label: entry.label,
+    });
+  }
+
+  return options.sort((a, b) => a.label.localeCompare(b.label, 'es'));
 }
 
 async function fetchEnviosByLeadIds(input: {
@@ -388,22 +327,32 @@ async function fetchSellerStats(input: {
       return 0;
     }
 
-    const params = new URLSearchParams();
-    params.set('pipeline_id', String(normalizedPipelineId));
-    if (input.startDate) params.set('start_date', input.startDate);
-    if (input.endDate) params.set('end_date', input.endDate);
+    const countBy = async (field: 'updated_at' | 'updated_at_db') => {
+      let query = client
+        .from('kommo_leads')
+        .select('business_id', { head: true, count: 'exact' })
+        .eq('pipeline_id', normalizedPipelineId);
 
-    const response = await fetch(`/api/kommo/lead-count?${params.toString()}`, {
-      method: 'GET',
-      headers: { Accept: 'application/json' },
-    });
+      if (input.startDate) {
+        query = query.gte(field, input.startDate);
+      }
 
-    const payload = await response.json().catch(() => ({}));
-    if (!response.ok || !payload?.success) {
-      throw new Error(payload?.error || 'No se pudo calcular leads totales.');
-    }
+      if (input.endDate) {
+        query = query.lt(field, `${input.endDate}T23:59:59.999Z`);
+      }
 
-    return Number(payload?.total ?? 0);
+      const { count, error } = await query;
+      if (error) {
+        throw new Error(error.message || `No se pudo calcular leads totales por ${field}.`);
+      }
+
+      return Number(count ?? 0);
+    };
+
+    const updatedAtCount = await countBy('updated_at');
+    if (updatedAtCount > 0) return updatedAtCount;
+
+    return countBy('updated_at_db');
   };
 
   const deliveredResultIds = Array.from(input.deliveredResultIds);
