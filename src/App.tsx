@@ -14,6 +14,7 @@ import { MetaAdsDataPage } from './features/meta/ads/MetaAdsDataPage';
 import { MetaPagesDashboard } from './features/meta/pages/MetaPagesHub';
 import { MetaAdsOrganicDashboard } from './features/meta/compare/MetaAdsOrganicDashboard';
 import { LandingPage } from './features/landing/LandingPage';
+import { NotFoundPage } from './features/error/NotFoundPage';
 import { GoogleSheetsExportPage } from './features/exports/GoogleSheetsExportTester';
 import { AdminUsersPage } from './features/admin/AdminUsersPage';
 import { EstadisticasVendedorPage } from './features/operativas/EstadisticasVendedorPage';
@@ -275,6 +276,7 @@ function Layout() {
               <Route path="/exports/google-sheets" element={adminOnly(<GoogleSheetsExportPage />)} />
               <Route path="/admin/users" element={adminOnly(<AdminUsersPage />)} />
               <Route path="/operativas/estadisticas-vendedor" element={adminOnly(<EstadisticasVendedorPage />)} />
+              <Route path="*" element={<NotFoundPage inPanel />} />
             </Routes>
           </div>
         </main>
@@ -291,11 +293,48 @@ export default function App() {
       <Route path="/inicio" element={<LandingPage />} />
       <Route path="/login" element={<Login />} />
       <Route path="/land-page" element={<Navigate to="/" replace />} />
-      <Route path="/*" element={
+      <Route path="/404" element={<NotFoundPage />} />
+      <Route path="/dashboard/*" element={
         <ProtectedRoute>
           <Layout />
         </ProtectedRoute>
       } />
+      <Route path="/tabla/*" element={
+        <ProtectedRoute>
+          <Layout />
+        </ProtectedRoute>
+      } />
+      <Route path="/sheet/*" element={
+        <ProtectedRoute>
+          <Layout />
+        </ProtectedRoute>
+      } />
+      <Route path="/kommo/*" element={
+        <ProtectedRoute>
+          <Layout />
+        </ProtectedRoute>
+      } />
+      <Route path="/meta/*" element={
+        <ProtectedRoute>
+          <Layout />
+        </ProtectedRoute>
+      } />
+      <Route path="/exports/*" element={
+        <ProtectedRoute>
+          <Layout />
+        </ProtectedRoute>
+      } />
+      <Route path="/admin/*" element={
+        <ProtectedRoute>
+          <Layout />
+        </ProtectedRoute>
+      } />
+      <Route path="/operativas/*" element={
+        <ProtectedRoute>
+          <Layout />
+        </ProtectedRoute>
+      } />
+      <Route path="*" element={<NotFoundPage />} />
     </Routes>
   );
 }

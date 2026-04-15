@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ComponentType } from 'react';
+import { useEffect, useMemo, useRef, useState, type ComponentType } from 'react';
 import {
   ArrowDown,
   ArrowUp,
@@ -9,6 +9,7 @@ import {
   Instagram,
   Linkedin,
   Mail,
+  Menu,
   CircleUserRound,
   MapPin,
   MessageCircle,
@@ -21,6 +22,7 @@ import {
   Sun,
   Phone,
   Truck,
+  X,
   Youtube,
   Warehouse,
 } from 'lucide-react';
@@ -125,11 +127,6 @@ const testimonials = [
     author: 'Fiorella Poma',
     role: 'Emprendedora',
   },
-];
-
-const testimonialSlides = [
-  testimonials.slice(0, 3),
-  testimonials.slice(3, 6),
 ];
 
 const coverageTariffs = [
@@ -362,6 +359,13 @@ function Header({
   onToggleTheme: () => void;
   onNavigateSection: (event: React.MouseEvent<HTMLAnchorElement>, href: string) => void;
 }) {
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+
+  const handleMobileNav = (event: React.MouseEvent<HTMLAnchorElement>, href: string) => {
+    onNavigateSection(event, href);
+    setMobileMenuOpen(false);
+  };
+
   return (
     <header
       className={cx(
@@ -423,7 +427,7 @@ function Header({
             onClick={onToggleTheme}
             aria-label="Cambiar tema"
             className={cx(
-              'h-8 w-8 inline-flex items-center justify-center rounded-full border transition duration-500',
+              'hidden md:inline-flex h-8 w-8 items-center justify-center rounded-full border transition duration-500',
               isNight
                 ? 'border-white/15 bg-white/5 text-white hover:bg-white/10'
                 : 'border-black/15 bg-black/5 text-black hover:bg-black/10',
@@ -446,6 +450,74 @@ function Header({
             <CircleUserRound size={16} />
             <span className="text-[11px] font-semibold uppercase tracking-[0.08em]">Clientes</span>
           </a>
+
+          <button
+            type="button"
+            onClick={() => setMobileMenuOpen((prev) => !prev)}
+            aria-label={mobileMenuOpen ? 'Cerrar menú' : 'Abrir menú'}
+            className={cx(
+              'inline-flex h-8 w-8 items-center justify-center rounded-full border transition md:hidden',
+              isNight
+                ? 'border-white/15 bg-white/5 text-white hover:bg-white/10'
+                : 'border-black/15 bg-black/5 text-black hover:bg-black/10',
+            )}
+          >
+            {mobileMenuOpen ? <X size={15} /> : <Menu size={15} />}
+          </button>
+        </div>
+      </div>
+
+      <div
+        className={cx(
+          'md:hidden overflow-hidden border-t transition-all duration-300',
+          isNight ? 'border-white/10 bg-black/85' : 'border-black/10 bg-white/95',
+          mobileMenuOpen ? 'max-h-[420px] opacity-100' : 'max-h-0 opacity-0',
+        )}
+      >
+        <div className="mx-auto max-w-7xl px-5 py-3 sm:px-8">
+          <nav className="flex flex-col gap-1.5">
+            {navItems.map((item) => (
+              <a
+                key={`mobile-${item.href}`}
+                href={item.href}
+                onClick={(event) => handleMobileNav(event, item.href)}
+                className={cx(
+                  'rounded-xl px-3 py-2 text-sm font-medium transition-colors',
+                  isNight
+                    ? 'text-white/80 hover:bg-white/8 hover:text-white'
+                    : 'text-gray-800 hover:bg-black/5 hover:text-black',
+                )}
+              >
+                {item.label}
+              </a>
+            ))}
+          </nav>
+
+          <div className="mt-3 flex items-center gap-2">
+            <button
+              type="button"
+              onClick={onToggleTheme}
+              aria-label="Cambiar tema"
+              className={cx(
+                'inline-flex h-9 flex-1 items-center justify-center gap-2 rounded-xl border text-sm font-semibold transition duration-500',
+                isNight
+                  ? 'border-white/15 bg-white/5 text-white hover:bg-white/10'
+                  : 'border-black/15 bg-black/5 text-black hover:bg-black/10',
+                isAnimating && 'ring-2 ring-red-500/30',
+              )}
+            >
+              {isNight ? <Moon size={14} /> : <Sun size={14} />}
+              {isNight ? 'Modo noche' : 'Modo día'}
+            </button>
+
+            <a
+              href="/dashboard"
+              className="inline-flex h-9 items-center justify-center gap-1.5 rounded-xl border border-red-500/80 bg-red-600 px-3 text-sm font-semibold text-white shadow-[0_10px_20px_-12px_rgba(220,38,38,0.9)] transition-all duration-200 hover:bg-red-500"
+            >
+              <CircleUserRound size={15} />
+              Clientes
+            </a>
+          </div>
         </div>
       </div>
     </header>
@@ -456,6 +528,10 @@ export function LandingPage() {
   const [isNight, setIsNight] = useState(false);
   const [isThemeAnimating, setIsThemeAnimating] = useState(false);
   const [activeTestimonialSlide, setActiveTestimonialSlide] = useState(0);
+  const [isDesktopTestimonials, setIsDesktopTestimonials] = useState(() => {
+    if (typeof window === 'undefined') return false;
+    return window.matchMedia('(min-width: 1024px)').matches;
+  });
   const [showScrollTop, setShowScrollTop] = useState(false);
   const [coverageGeoJson, setCoverageGeoJson] = useState<AnyProps | null>(null);
   const heroBgRef = useRef<HTMLDivElement>(null);
@@ -596,12 +672,46 @@ export function LandingPage() {
   }, []);
 
   useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const mediaQuery = window.matchMedia('(min-width: 1024px)');
+
+    const sync = () => {
+      setIsDesktopTestimonials(mediaQuery.matches);
+    };
+
+    sync();
+
+    if (typeof mediaQuery.addEventListener === 'function') {
+      mediaQuery.addEventListener('change', sync);
+      return () => mediaQuery.removeEventListener('change', sync);
+    }
+
+    mediaQuery.addListener(sync);
+    return () => mediaQuery.removeListener(sync);
+  }, []);
+
+  const testimonialSlides = useMemo(() => {
+    const chunkSize = isDesktopTestimonials ? 3 : 1;
+    const slides: typeof testimonials[] = [];
+
+    for (let index = 0; index < testimonials.length; index += chunkSize) {
+      slides.push(testimonials.slice(index, index + chunkSize));
+    }
+
+    return slides;
+  }, [isDesktopTestimonials]);
+
+  useEffect(() => {
+    const totalSlides = testimonialSlides.length;
+    if (!totalSlides) return;
+
     const timer = window.setInterval(() => {
-      setActiveTestimonialSlide((current) => (current + 1) % testimonialSlides.length);
+      setActiveTestimonialSlide((current) => (current + 1) % totalSlides);
     }, 6000);
 
     return () => window.clearInterval(timer);
-  }, []);
+  }, [testimonialSlides.length]);
 
   const handleToggleTheme = () => {
     setIsThemeAnimating(true);
@@ -627,6 +737,9 @@ export function LandingPage() {
   };
 
   const n = isNight;
+  const activeTestimonialIndex = testimonialSlides.length > 0
+    ? activeTestimonialSlide % testimonialSlides.length
+    : 0;
   const bg = n ? '#080808' : '#f5f5f5';
   const border = n ? 'border-white/[0.09]' : 'border-black/[0.08]';
   const muted = n ? 'text-white/60' : 'text-gray-800';
@@ -687,15 +800,15 @@ export function LandingPage() {
 
           {/* Hero content */}
           <div className="relative z-10 flex min-h-[100svh] items-center px-5 pb-16 pt-24 sm:px-8 sm:pb-20 sm:pt-28 lg:px-12 lg:pt-24">
-            <div className="mx-auto grid w-full max-w-7xl items-center gap-8 lg:grid-cols-[1.05fr_0.95fr] lg:gap-10">
-              <div className="mx-auto w-full max-w-2xl self-center text-center lg:mx-0 lg:max-w-xl lg:text-left">
+            <div className="mx-auto grid w-full max-w-6xl items-center gap-6 lg:grid-cols-[1.02fr_0.98fr] lg:gap-6">
+              <div className="mx-auto w-full max-w-3xl self-center text-center lg:mx-0 lg:max-w-xl lg:text-left">
                 <p className="mb-4 text-[10px] uppercase tracking-[0.3em] text-red-400 sm:mb-5 sm:tracking-[0.34em]">
                   Operador logístico oficial · Lima, Perú
                 </p>
 
                 <h1
                   className={cx(
-                    'text-[20vw] font-black uppercase leading-[0.82] tracking-[-0.02em] sm:text-[16vw] md:text-[11vw] lg:text-[8.8vw]',
+                    'text-[18vw] font-black uppercase leading-[0.84] tracking-[-0.02em] sm:text-[14vw] md:text-[10vw] lg:text-[7.5vw] xl:text-[6.6vw]',
                     n ? 'text-white/90' : 'text-black/85',
                   )}
                 >
@@ -733,7 +846,7 @@ export function LandingPage() {
               </div>
 
               <div className="hidden h-full lg:block">
-                <div className="h-full min-h-[480px] overflow-hidden rounded-[1.8rem] xl:min-h-[520px]">
+                <div className="h-full min-h-[460px] overflow-hidden rounded-[1.8rem] xl:min-h-[500px]">
                   <img
                     src="/ImagenHeader.png"
                     alt="Dinsides Courier"
@@ -1114,23 +1227,23 @@ export function LandingPage() {
             </div>
 
             <div className="reveal relative">
-              <div className="pointer-events-none absolute right-[-70px] top-[-268px] z-20">
+              <div className="pointer-events-none absolute right-[-36px] top-[-208px] z-20 xl:right-[-54px] xl:top-[-238px] 2xl:right-[-76px] 2xl:top-[-268px]">
                 <img
                   src="/ImagenTestimonios.png"
                   alt="Marco decorativo testimonios"
                   aria-hidden="true"
-                  className="hidden w-[260px] max-w-none object-contain sm:block md:w-[360px] lg:w-[700px] xl:w-[740px]"
+                  className="hidden w-[600px] max-w-none object-contain lg:block xl:w-[680px] 2xl:w-[740px]"
                 />
               </div>
 
               <div className="relative overflow-hidden rounded-[2rem]">
                 <div
                   className="relative z-10 flex transition-transform duration-700 ease-out"
-                  style={{ transform: `translateX(-${activeTestimonialSlide * 100}%)` }}
+                  style={{ transform: `translateX(-${activeTestimonialIndex * 100}%)` }}
                 >
                   {testimonialSlides.map((slide, slideIndex) => (
                     <div key={`slide-${slideIndex}`} className="min-w-full p-5 sm:p-7 lg:p-8">
-                      <div className="grid gap-4 md:grid-cols-3">
+                      <div className={cx('grid gap-4', isDesktopTestimonials ? 'md:grid-cols-3' : 'grid-cols-1')}>
                         {slide.map(({ quote, author, role }, i) => (
                         <article
                           key={author}
@@ -1177,13 +1290,13 @@ export function LandingPage() {
                   ))}
                 </div>
 
-                <div className="pointer-events-none absolute inset-x-0 bottom-4 z-10 flex items-center justify-center gap-1.5">
+                <div className="pointer-events-none absolute inset-x-0 bottom-2 z-10 flex items-center justify-center gap-1.5">
                   {testimonialSlides.map((_, index) => (
                     <span
                       key={`dot-${index}`}
                       className={cx(
                         'h-1.5 rounded-full transition-all duration-300',
-                        index === activeTestimonialSlide
+                        index === activeTestimonialIndex
                           ? 'w-6 bg-red-500/70'
                           : (n ? 'w-1.5 bg-white/35' : 'w-1.5 bg-black/25'),
                       )}
@@ -1306,7 +1419,7 @@ export function LandingPage() {
               </div>
             </div>
 
-            <article className={cx('reveal overflow-hidden rounded-[1.5rem]')}>
+            <article className={cx('reveal hidden overflow-hidden rounded-[1.5rem] lg:block')}>
               <img
                 src="/ImagenContacto.png"
                 alt="Equipo de contacto Dinsides"
