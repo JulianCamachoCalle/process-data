@@ -5,6 +5,7 @@ import { isSupabaseConfigured, supabase } from '../../lib/supabase';
 
 type SellerOption = {
   value: string;
+  pipelineId: number;
   label: string;
 };
 
@@ -17,6 +18,7 @@ type LeadGanadoForSeller = {
 
 type EnvioRow = {
   id_lead_ganado: number | null;
+  id_resultado: number | null;
   ingreso_total_fila: number | null;
   costo_total_fila: number | null;
 };
@@ -27,14 +29,10 @@ type RecojoRow = {
   costo_recojo_total: number | null;
 };
 
-type KommoLeadRow = {
-  pipeline_id: number | null;
-};
-
 type SellerStats = {
   seller: string;
   enviosTotales: number;
-  leadsGestionados: number;
+  totalLeads: number;
   leadsGanados: number;
   efectividad: number;
   ingresoTotal: number;
@@ -46,6 +44,11 @@ type SellerStats = {
 };
 
 type QueryError = { message?: string } | null;
+
+const EXCLUDED_PIPELINE_NAMES = new Set([
+  'data de leads',
+  'leads entrantes principal',
+]);
 
 function parseNumeric(value: unknown) {
   const parsed = Number(value ?? 0);
@@ -129,50 +132,130 @@ async function fetchDeliveredResultIds() {
   );
 }
 
-async function fetchSellerOptions(input: { startDate: string; endDate: string }) {
-  if (!isSupabaseConfigured() || !supabase) {
-    throw new Error('Supabase no está configurado.');
-  }
-  const client = supabase;
-
-  const rows = await fetchAllRowsPaged<{ vendedor_nombre_snapshot: string | null }>(async (from, to) => {
-    let query = client
-      .from('leads_ganados')
-      .select('vendedor_nombre_snapshot')
-      .range(from, to);
-
-    if (input.startDate) {
-      query = query.gte('fecha_lead_ganado', input.startDate);
+async function fetchSellerOptions() {
+  const buildOptionsFromLeadsFallback = async () => {
+    if (!isSupabaseConfigured() || !supabase) {
+      throw new Error('Supabase no está configurado.');
     }
 
-    if (input.endDate) {
-      query = query.lte('fecha_lead_ganado', input.endDate);
+    const client = supabase;
+    const leads = await fetchAllRowsPaged<{ vendedor_nombre_snapshot: string | null; pipeline_id_snapshot: number | null }>(
+      async (from, to) => {
+        const response = await client
+          .from('leads_ganados')
+          .select('vendedor_nombre_snapshot,pipeline_id_snapshot')
+          .range(from, to);
+
+        return {
+          data: (response.data ?? []) as Array<{ vendedor_nombre_snapshot: string | null; pipeline_id_snapshot: number | null }>,
+          error: response.error,
+        };
+      },
+      1000,
+    );
+
+    const bySeller = new Map<string, { label: string; pipelineCounts: Map<number, number> }>();
+
+    for (const row of leads) {
+      const label = String(row.vendedor_nombre_snapshot ?? '').trim();
+      if (!label) continue;
+      if (EXCLUDED_PIPELINE_NAMES.has(normalizeText(label))) continue;
+
+      const sellerKey = normalizeText(label);
+      const pipelineId = Number(row.pipeline_id_snapshot ?? 0);
+      if (!Number.isFinite(pipelineId) || pipelineId <= 0) continue;
+
+      const entry = bySeller.get(sellerKey) ?? { label, pipelineCounts: new Map<number, number>() };
+      entry.pipelineCounts.set(pipelineId, (entry.pipelineCounts.get(pipelineId) ?? 0) + 1);
+      bySeller.set(sellerKey, entry);
     }
 
-    const response = await query;
+    const sellers = Array.from(bySeller.values()).map((entry) => entry.label);
+    const sellerChunks = chunkArray(sellers, 100);
+    const pipelineIdBySellerName = new Map<string, number>();
 
-    return {
-      data: (response.data ?? []) as Array<{ vendedor_nombre_snapshot: string | null }>,
-      error: response.error,
-    };
-  });
+    for (const chunk of sellerChunks) {
+      const { data, error } = await client
+        .from('kommo_pipelines')
+        .select('business_id,name,is_archive')
+        .in('name', chunk);
 
-  const unique = new Set<string>();
-  for (const row of rows) {
-    const seller = String(row.vendedor_nombre_snapshot ?? '').trim() || 'Sin vendedor';
-    unique.add(seller);
+      if (error) {
+        throw new Error(error.message || 'No se pudieron resolver pipelines por nombre.');
+      }
+
+      const rows = (data ?? []) as Array<{ business_id: number | null; name: string | null; is_archive: boolean | null }>;
+      for (const row of rows) {
+        if (row.is_archive === true) continue;
+        const id = Number(row.business_id ?? 0);
+        if (!Number.isFinite(id) || id <= 0) continue;
+        const name = String(row.name ?? '').trim();
+        if (!name) continue;
+        const key = normalizeText(name);
+        if (!pipelineIdBySellerName.has(key)) {
+          pipelineIdBySellerName.set(key, id);
+        }
+      }
+    }
+
+    const options: SellerOption[] = [];
+    for (const entry of bySeller.values()) {
+      const sellerKey = normalizeText(entry.label);
+      const pipelineByExactName = pipelineIdBySellerName.get(sellerKey) ?? null;
+
+      let bestPipelineId: number | null = null;
+      let bestCount = -1;
+      for (const [pipelineId, count] of entry.pipelineCounts.entries()) {
+        if (count > bestCount) {
+          bestPipelineId = pipelineId;
+          bestCount = count;
+        }
+      }
+
+      const finalPipelineId = pipelineByExactName ?? bestPipelineId;
+      if (!finalPipelineId) continue;
+      options.push({
+        value: String(finalPipelineId),
+        pipelineId: finalPipelineId,
+        label: entry.label,
+      });
+    }
+
+    return options.sort((a, b) => a.label.localeCompare(b.label, 'es'));
+  };
+
+  try {
+    const response = await fetch('/api/kommo/pipeline-options', {
+      method: 'GET',
+      headers: { Accept: 'application/json' },
+    });
+
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok || !payload?.success || !Array.isArray(payload?.options)) {
+      throw new Error(payload?.error || `Error ${response.status}`);
+    }
+
+    const options = (payload.options as SellerOption[])
+      .filter((option) => {
+        const name = String(option.label ?? '').trim();
+        if (!name) return false;
+        return !EXCLUDED_PIPELINE_NAMES.has(normalizeText(name));
+      })
+      .sort((a, b) => a.label.localeCompare(b.label, 'es'));
+
+    if (options.length > 0) return options;
+  } catch {
+    // fallback to client-side snapshot source below
   }
 
-  return Array.from(unique)
-    .sort((a, b) => a.localeCompare(b, 'es'))
-    .map((seller) => ({ value: seller, label: seller })) satisfies SellerOption[];
+  return buildOptionsFromLeadsFallback();
 }
 
 async function fetchEnviosByLeadIds(input: {
   leadIds: number[];
-  deliveredResultIds: number[];
   startDate: string;
   endDate: string;
+  deliveredResultIds?: number[];
 }) {
   if (!isSupabaseConfigured() || !supabase) {
     throw new Error('Supabase no está configurado.');
@@ -186,10 +269,13 @@ async function fetchEnviosByLeadIds(input: {
     const chunkRows = await fetchAllRowsPaged<EnvioRow>(async (from, to) => {
       let query = client
         .from('envios')
-        .select('id_lead_ganado,ingreso_total_fila,costo_total_fila')
+        .select('id_lead_ganado,id_resultado,ingreso_total_fila,costo_total_fila')
         .in('id_lead_ganado', leadIdsChunk)
-        .in('id_resultado', input.deliveredResultIds)
         .range(from, to);
+
+      if (input.deliveredResultIds && input.deliveredResultIds.length > 0) {
+        query = query.in('id_resultado', input.deliveredResultIds);
+      }
 
       if (input.startDate) {
         query = query.gte('fecha_envio', input.startDate);
@@ -253,7 +339,8 @@ async function fetchRecojosByLeadIds(input: { leadIds: number[]; startDate: stri
 }
 
 async function fetchSellerStats(input: {
-  seller: string;
+  sellerName: string;
+  pipelineId: number;
   startDate: string;
   endDate: string;
   deliveredResultIds: Set<number>;
@@ -267,7 +354,7 @@ async function fetchSellerStats(input: {
     let query = client
       .from('leads_ganados')
       .select('business_id,pipeline_id_snapshot,kommo_lead_id,tienda_nombre_snapshot')
-      .eq('vendedor_nombre_snapshot', input.seller)
+      .eq('vendedor_nombre_snapshot', input.sellerName)
       .range(from, to);
 
     if (input.startDate) {
@@ -294,73 +381,61 @@ async function fetchSellerStats(input: {
     ),
   );
 
-  const pipelineIds = Array.from(
-    new Set(
-      leadsGanados
-        .map((lead) => Number(lead.pipeline_id_snapshot ?? 0))
-        .filter((id) => Number.isFinite(id) && id > 0),
-    ),
-  );
+  const normalizedPipelineId = Number(input.pipelineId);
 
-  if (!leadIds.length) {
-    const empty: SellerStats = {
-      seller: input.seller,
-      enviosTotales: 0,
-      leadsGestionados: 0,
-      leadsGanados: 0,
-      efectividad: 0,
-      ingresoTotal: 0,
-      costoMotoTotal: 0,
-      margenVsMoto: 0,
-      ingresoPorLeadGanado: 0,
-      ticketPromedio: 0,
-      topTiendas: [],
-    };
-    return empty;
-  }
+  const fetchKommoLeadCount = async () => {
+    if (!Number.isFinite(normalizedPipelineId) || normalizedPipelineId <= 0) {
+      return 0;
+    }
+
+    const params = new URLSearchParams();
+    params.set('pipeline_id', String(normalizedPipelineId));
+    if (input.startDate) params.set('start_date', input.startDate);
+    if (input.endDate) params.set('end_date', input.endDate);
+
+    const response = await fetch(`/api/kommo/lead-count?${params.toString()}`, {
+      method: 'GET',
+      headers: { Accept: 'application/json' },
+    });
+
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok || !payload?.success) {
+      throw new Error(payload?.error || 'No se pudo calcular leads totales.');
+    }
+
+    return Number(payload?.total ?? 0);
+  };
 
   const deliveredResultIds = Array.from(input.deliveredResultIds);
-  const [envios, recojos, kommoLeads] = await Promise.all([
-    deliveredResultIds.length
+  const [envios, enviosEntregados, recojos, totalLeads] = await Promise.all([
+    leadIds.length
       ? fetchEnviosByLeadIds({
-        leadIds,
-        deliveredResultIds,
-        startDate: input.startDate,
-        endDate: input.endDate,
-      })
+          leadIds,
+          startDate: input.startDate,
+          endDate: input.endDate,
+        })
       : Promise.resolve([] as EnvioRow[]),
-    fetchRecojosByLeadIds({
-      leadIds,
-      startDate: input.startDate,
-      endDate: input.endDate,
-    }),
-    pipelineIds.length
-      ? fetchAllRowsPaged<KommoLeadRow>(async (from, to) => {
-        let query = client
-          .from('kommo_leads')
-          .select('pipeline_id')
-          .in('pipeline_id', pipelineIds)
-          .range(from, to);
-
-        if (input.startDate) {
-          query = query.gte('created_at', input.startDate);
-        }
-
-        if (input.endDate) {
-          query = query.lte('created_at', input.endDate);
-        }
-
-        const response = await query;
-        return {
-          data: (response.data ?? []) as KommoLeadRow[],
-          error: response.error,
-        };
-      })
-      : Promise.resolve([] as KommoLeadRow[]),
+    deliveredResultIds.length
+      ? (leadIds.length
+        ? fetchEnviosByLeadIds({
+          leadIds,
+          deliveredResultIds,
+          startDate: input.startDate,
+          endDate: input.endDate,
+        })
+        : Promise.resolve([] as EnvioRow[]))
+      : Promise.resolve([] as EnvioRow[]),
+    leadIds.length
+      ? fetchRecojosByLeadIds({
+          leadIds,
+          startDate: input.startDate,
+          endDate: input.endDate,
+        })
+      : Promise.resolve([] as RecojoRow[]),
+    fetchKommoLeadCount(),
   ]);
 
   const enviosTotales = envios.length;
-  const leadsGestionados = kommoLeads.length;
 
   const ingresoEnvios = envios.reduce((acc, row) => acc + parseNumeric(row.ingreso_total_fila), 0);
   const costoEnvios = envios.reduce((acc, row) => acc + parseNumeric(row.costo_total_fila), 0);
@@ -370,7 +445,7 @@ async function fetchSellerStats(input: {
   const ingresoTotal = ingresoEnvios + ingresoRecojos;
   const costoMotoTotal = costoEnvios + costoRecojos;
   const margenVsMoto = ingresoTotal - costoMotoTotal;
-  const efectividad = leadsGestionados > 0 ? (leadsGanadosTotal / leadsGestionados) * 100 : 0;
+  const efectividad = totalLeads > 0 ? (leadsGanadosTotal / totalLeads) * 100 : 0;
   const ingresoPorLeadGanado = leadsGanadosTotal > 0 ? ingresoTotal / leadsGanadosTotal : 0;
   const ticketPromedio = enviosTotales > 0 ? ingresoTotal / enviosTotales : 0;
 
@@ -383,7 +458,7 @@ async function fetchSellerStats(input: {
   }
 
   const topTiendaCounter = new Map<string, number>();
-  for (const envio of envios) {
+  for (const envio of enviosEntregados) {
     const leadId = Number(envio.id_lead_ganado ?? 0);
     const tienda = tiendaByLeadId.get(leadId) ?? `Lead #${leadId}`;
     topTiendaCounter.set(tienda, (topTiendaCounter.get(tienda) ?? 0) + 1);
@@ -395,9 +470,9 @@ async function fetchSellerStats(input: {
     .slice(0, 3);
 
   return {
-    seller: input.seller,
+    seller: input.sellerName,
     enviosTotales,
-    leadsGestionados,
+    totalLeads,
     leadsGanados: leadsGanadosTotal,
     efectividad,
     ingresoTotal,
@@ -422,14 +497,15 @@ export function EstadisticasVendedorPage() {
   });
 
   const sellersQuery = useQuery({
-    queryKey: ['operativas', 'estadisticas-vendedor', 'sellers', startDate || 'none', endDate || 'none'],
-    queryFn: () => fetchSellerOptions({ startDate, endDate }),
+    queryKey: ['operativas', 'estadisticas-vendedor', 'sellers'],
+    queryFn: fetchSellerOptions,
     staleTime: 60_000,
     refetchOnWindowFocus: false,
   });
 
   const sellerOptions = sellersQuery.data ?? [];
-  const selectedSellerIsValid = !!selectedSeller && sellerOptions.some((option) => option.value === selectedSeller);
+  const selectedOption = sellerOptions.find((option) => option.value === selectedSeller) ?? null;
+  const selectedSellerIsValid = !!selectedOption;
 
   const statsQuery = useQuery({
     queryKey: [
@@ -445,8 +521,13 @@ export function EstadisticasVendedorPage() {
         throw new Error('No se pudieron cargar los resultados entregados.');
       }
 
+      if (!selectedOption) {
+        throw new Error('Seleccioná un vendedor válido.');
+      }
+
       return fetchSellerStats({
-        seller: selectedSeller,
+        sellerName: selectedOption.label,
+        pipelineId: selectedOption.pipelineId,
         startDate,
         endDate,
         deliveredResultIds: deliveredResultIdsQuery.data,
@@ -517,7 +598,9 @@ export function EstadisticasVendedorPage() {
             <div className="rounded-xl border border-red-100 bg-red-50/50 px-3 py-2 text-sm text-red-800"><strong>{statsQuery.data.seller}</strong></div>
 
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
-              <MetricCard title="Envíos totales (entregados)" value={String(statsQuery.data.enviosTotales)} />
+              <MetricCard title="Leads totales" value={String(statsQuery.data.totalLeads)} />
+              <MetricCard title="Leads ganados" value={String(statsQuery.data.leadsGanados)} />
+              <MetricCard title="Envíos totales" value={String(statsQuery.data.enviosTotales)} />
               <MetricCard title="Efectividad" value={`${formatDecimal(statsQuery.data.efectividad, 2)}%`} />
               <MetricCard title="Ingreso total" value={`S/ ${formatDecimal(statsQuery.data.ingresoTotal, 2)}`} />
               <MetricCard title="Costo moto total" value={`S/ ${formatDecimal(statsQuery.data.costoMotoTotal, 2)}`} />
