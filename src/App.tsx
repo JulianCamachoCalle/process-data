@@ -16,6 +16,7 @@ import { MetaAdsOrganicDashboard } from './features/meta/compare/MetaAdsOrganicD
 import { LandingPage } from './features/landing/LandingPage';
 import { GoogleSheetsExportPage } from './features/exports/GoogleSheetsExportTester';
 import { AdminUsersPage } from './features/admin/AdminUsersPage';
+import { EstadisticasVendedorPage } from './features/operativas/EstadisticasVendedorPage';
 import { prefetchSheetData } from './hooks/useSheetData';
 import { isSupabaseConfigured, supabase } from './lib/supabase';
 
@@ -258,7 +259,7 @@ function Layout() {
         <main className="relative flex-1 overflow-x-hidden overflow-y-auto p-2 sm:p-4 md:p-6 lg:p-8 print:overflow-visible print:p-0">
           <div className="mx-auto w-full max-w-7xl print:max-w-none">
             <Routes>
-              <Route path="/" element={adminOnly(<DashboardOverview />)} />
+              <Route path="/dashboard" element={adminOnly(<DashboardOverview />)} />
               <Route path="/tabla/:sheetName" element={adminOnly(<SheetRouteWrapper />)} />
               <Route path="/sheet/:sheetName" element={adminOnly(<LegacySheetRedirect />)} />
               <Route path="/kommo" element={adminOnly(<KommoExplorer />)} />
@@ -273,6 +274,7 @@ function Layout() {
               <Route path="/meta/pages/dashboard" element={<MetaPagesDashboard />} />
               <Route path="/exports/google-sheets" element={adminOnly(<GoogleSheetsExportPage />)} />
               <Route path="/admin/users" element={adminOnly(<AdminUsersPage />)} />
+              <Route path="/operativas/estadisticas-vendedor" element={adminOnly(<EstadisticasVendedorPage />)} />
             </Routes>
           </div>
         </main>
@@ -285,8 +287,10 @@ function Layout() {
 export default function App() {
   return (
     <Routes>
+      <Route path="/" element={<LandingPage />} />
+      <Route path="/inicio" element={<LandingPage />} />
       <Route path="/login" element={<Login />} />
-      <Route path="/land-page" element={<LandingPage />} />
+      <Route path="/land-page" element={<Navigate to="/" replace />} />
       <Route path="/*" element={
         <ProtectedRoute>
           <Layout />
