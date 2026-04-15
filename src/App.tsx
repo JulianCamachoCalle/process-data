@@ -16,6 +16,7 @@ import { MetaAdsOrganicDashboard } from './features/meta/compare/MetaAdsOrganicD
 import { LandingPage } from './features/landing/LandingPage';
 import { GoogleSheetsExportPage } from './features/exports/GoogleSheetsExportTester';
 import { AdminUsersPage } from './features/admin/AdminUsersPage';
+import { EstadisticasVendedorPage } from './features/operativas/EstadisticasVendedorPage';
 import { prefetchSheetData } from './hooks/useSheetData';
 import { isSupabaseConfigured, supabase } from './lib/supabase';
 
@@ -273,6 +274,7 @@ function Layout() {
               <Route path="/meta/pages/dashboard" element={<MetaPagesDashboard />} />
               <Route path="/exports/google-sheets" element={adminOnly(<GoogleSheetsExportPage />)} />
               <Route path="/admin/users" element={adminOnly(<AdminUsersPage />)} />
+              <Route path="/operativas/estadisticas-vendedor" element={adminOnly(<EstadisticasVendedorPage />)} />
             </Routes>
           </div>
         </main>
