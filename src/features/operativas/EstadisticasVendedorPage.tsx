@@ -79,6 +79,14 @@ function chunkArray<T>(items: T[], size: number) {
   return chunks;
 }
 
+function shiftIsoDate(isoDate: string, deltaDays: number) {
+  const [yearRaw, monthRaw, dayRaw] = isoDate.split('-');
+  const date = new Date(Date.UTC(Number(yearRaw), Number(monthRaw) - 1, Number(dayRaw)));
+  if (Number.isNaN(date.getTime())) return isoDate;
+  date.setUTCDate(date.getUTCDate() + deltaDays);
+  return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}-${String(date.getUTCDate()).padStart(2, '0')}`;
+}
+
 async function fetchAllRowsPaged<T>(
   fetchPage: (from: number, to: number) => Promise<{ data: T[] | null; error: QueryError }>,
   pageSize = 1000,
@@ -334,11 +342,11 @@ async function fetchSellerStats(input: {
         .eq('pipeline_id', normalizedPipelineId);
 
       if (input.startDate) {
-        query = query.gte(field, input.startDate);
+        query = query.gte(field, `${input.startDate}T00:00:00.000Z`);
       }
 
       if (input.endDate) {
-        query = query.lt(field, `${input.endDate}T23:59:59.999Z`);
+        query = query.lt(field, `${shiftIsoDate(input.endDate, 1)}T00:00:00.000Z`);
       }
 
       const { count, error } = await query;
