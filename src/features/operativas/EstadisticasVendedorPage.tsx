@@ -1,7 +1,6 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { DateRangePicker } from '../../components/DateRangePicker';
-import { isSupabaseConfigured, supabase } from '../../lib/supabase';
 
 type SellerOption = {
   value: string;
@@ -9,28 +8,9 @@ type SellerOption = {
   label: string;
 };
 
-type LeadGanadoForSeller = {
-  business_id: number;
-  pipeline_id_snapshot: number | null;
-  kommo_lead_id: number | null;
-  tienda_nombre_snapshot: string | null;
-};
-
-type EnvioRow = {
-  id_lead_ganado: number | null;
-  id_resultado: number | null;
-  ingreso_total_fila: number | null;
-  costo_total_fila: number | null;
-};
-
-type RecojoRow = {
-  id_lead_ganado: number | null;
-  ingreso_recojo_total: number | null;
-  costo_recojo_total: number | null;
-};
-
 type SellerStats = {
   seller: string;
+  pipeline_id: number;
   enviosTotales: number;
   totalLeads: number;
   leadsGanados: number;
@@ -43,26 +23,6 @@ type SellerStats = {
   topTiendas: Array<{ tienda: string; enviosEntregados: number }>;
 };
 
-type QueryError = { message?: string } | null;
-
-const EXCLUDED_PIPELINE_NAMES = new Set([
-  'data de leads',
-  'leads entrantes principal',
-]);
-
-function parseNumeric(value: unknown) {
-  const parsed = Number(value ?? 0);
-  return Number.isFinite(parsed) ? parsed : 0;
-}
-
-function normalizeText(value: string) {
-  return value
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .trim()
-    .toLowerCase();
-}
-
 function formatDecimal(value: number, digits = 2) {
   return new Intl.NumberFormat('es-PE', {
     minimumFractionDigits: digits,
@@ -70,423 +30,45 @@ function formatDecimal(value: number, digits = 2) {
   }).format(value);
 }
 
-function chunkArray<T>(items: T[], size: number) {
-  if (size <= 0) return [items];
-  const chunks: T[][] = [];
-  for (let index = 0; index < items.length; index += size) {
-    chunks.push(items.slice(index, index + size));
-  }
-  return chunks;
-}
-
-function shiftIsoDate(isoDate: string, deltaDays: number) {
-  const [yearRaw, monthRaw, dayRaw] = isoDate.split('-');
-  const date = new Date(Date.UTC(Number(yearRaw), Number(monthRaw) - 1, Number(dayRaw)));
-  if (Number.isNaN(date.getTime())) return isoDate;
-  date.setUTCDate(date.getUTCDate() + deltaDays);
-  return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}-${String(date.getUTCDate()).padStart(2, '0')}`;
-}
-
-async function fetchAllRowsPaged<T>(
-  fetchPage: (from: number, to: number) => Promise<{ data: T[] | null; error: QueryError }>,
-  pageSize = 1000,
-) {
-  const rows: T[] = [];
-  let from = 0;
-
-  while (true) {
-    const to = from + pageSize - 1;
-    const { data, error } = await fetchPage(from, to);
-    if (error) {
-      throw new Error(error.message || 'No se pudieron cargar datos desde Supabase.');
-    }
-
-    const page = data ?? [];
-    rows.push(...page);
-
-    if (page.length < pageSize) break;
-    from += pageSize;
-  }
-
-  return rows;
-}
-
-async function fetchDeliveredResultIds() {
-  if (!isSupabaseConfigured() || !supabase) {
-    throw new Error('Supabase no está configurado.');
-  }
-  const client = supabase;
-
-  const rows = await fetchAllRowsPaged<{ business_id: number; resultado: string | null }>(
-    async (from, to) => {
-      const response = await client
-        .from('resultados')
-        .select('business_id,resultado')
-        .range(from, to);
-
-      return {
-        data: (response.data ?? []) as Array<{ business_id: number; resultado: string | null }>,
-        error: response.error,
-      };
-    },
-    500,
-  );
-
-  return new Set(
-    rows
-      .filter((row) => normalizeText(String(row.resultado ?? '')).includes('entregado'))
-      .map((row) => Number(row.business_id))
-      .filter((id) => Number.isFinite(id) && id > 0),
-  );
-}
-
 async function fetchSellerOptions() {
-  if (!isSupabaseConfigured() || !supabase) {
-    throw new Error('Supabase no está configurado.');
-  }
-
-  const client = supabase;
-  const leads = await fetchAllRowsPaged<{ vendedor_nombre_snapshot: string | null; pipeline_id_snapshot: number | null }>(
-    async (from, to) => {
-      const response = await client
-        .from('leads_ganados')
-        .select('vendedor_nombre_snapshot,pipeline_id_snapshot')
-        .range(from, to);
-
-      return {
-        data: (response.data ?? []) as Array<{ vendedor_nombre_snapshot: string | null; pipeline_id_snapshot: number | null }>,
-        error: response.error,
-      };
-    },
-    1000,
-  );
-
-  const bySeller = new Map<string, { label: string; pipelineCounts: Map<number, number> }>();
-  for (const row of leads) {
-    const label = String(row.vendedor_nombre_snapshot ?? '').trim();
-    if (!label) continue;
-    if (EXCLUDED_PIPELINE_NAMES.has(normalizeText(label))) continue;
-
-    const sellerKey = normalizeText(label);
-    const pipelineId = Number(row.pipeline_id_snapshot ?? 0);
-    if (!Number.isFinite(pipelineId) || pipelineId <= 0) continue;
-
-    const entry = bySeller.get(sellerKey) ?? { label, pipelineCounts: new Map<number, number>() };
-    entry.pipelineCounts.set(pipelineId, (entry.pipelineCounts.get(pipelineId) ?? 0) + 1);
-    bySeller.set(sellerKey, entry);
-  }
-
-  const sellerNames = Array.from(bySeller.values()).map((entry) => entry.label);
-  const sellerNameChunks = chunkArray(sellerNames, 100);
-  const pipelineIdByExactSellerName = new Map<string, number>();
-
-  for (const chunk of sellerNameChunks) {
-    const { data, error } = await client
-      .from('kommo_pipelines')
-      .select('business_id,name,is_archive')
-      .in('name', chunk);
-
-    if (error) {
-      throw new Error(error.message || 'No se pudieron resolver pipelines por nombre.');
-    }
-
-    const rows = (data ?? []) as Array<{ business_id: number | null; name: string | null; is_archive: boolean | null }>;
-    for (const row of rows) {
-      if (row.is_archive === true) continue;
-      const id = Number(row.business_id ?? 0);
-      if (!Number.isFinite(id) || id <= 0) continue;
-
-      const name = String(row.name ?? '').trim();
-      if (!name) continue;
-      if (EXCLUDED_PIPELINE_NAMES.has(normalizeText(name))) continue;
-
-      const key = normalizeText(name);
-      if (!pipelineIdByExactSellerName.has(key)) {
-        pipelineIdByExactSellerName.set(key, id);
-      }
-    }
-  }
-
-  const options: SellerOption[] = [];
-  for (const entry of bySeller.values()) {
-    const sellerKey = normalizeText(entry.label);
-    const pipelineByName = pipelineIdByExactSellerName.get(sellerKey) ?? null;
-
-    let bestPipelineId: number | null = null;
-    let bestCount = -1;
-    for (const [pipelineId, count] of entry.pipelineCounts.entries()) {
-      if (count > bestCount) {
-        bestPipelineId = pipelineId;
-        bestCount = count;
-      }
-    }
-
-    const finalPipelineId = pipelineByName ?? bestPipelineId;
-    if (!finalPipelineId) continue;
-    options.push({
-      value: String(finalPipelineId),
-      pipelineId: finalPipelineId,
-      label: entry.label,
-    });
-  }
-
-  return options.sort((a, b) => a.label.localeCompare(b.label, 'es'));
-}
-
-async function fetchEnviosByLeadIds(input: {
-  leadIds: number[];
-  startDate: string;
-  endDate: string;
-  deliveredResultIds?: number[];
-}) {
-  if (!isSupabaseConfigured() || !supabase) {
-    throw new Error('Supabase no está configurado.');
-  }
-  const client = supabase;
-
-  const leadIdChunks = chunkArray(input.leadIds, 200);
-  const rows: EnvioRow[] = [];
-
-  for (const leadIdsChunk of leadIdChunks) {
-    const chunkRows = await fetchAllRowsPaged<EnvioRow>(async (from, to) => {
-      let query = client
-        .from('envios')
-        .select('id_lead_ganado,id_resultado,ingreso_total_fila,costo_total_fila')
-        .in('id_lead_ganado', leadIdsChunk)
-        .range(from, to);
-
-      if (input.deliveredResultIds && input.deliveredResultIds.length > 0) {
-        query = query.in('id_resultado', input.deliveredResultIds);
-      }
-
-      if (input.startDate) {
-        query = query.gte('fecha_envio', input.startDate);
-      }
-
-      if (input.endDate) {
-        query = query.lte('fecha_envio', input.endDate);
-      }
-
-      const response = await query;
-
-      return {
-        data: (response.data ?? []) as EnvioRow[],
-        error: response.error,
-      };
-    });
-
-    rows.push(...chunkRows);
-  }
-
-  return rows;
-}
-
-async function fetchRecojosByLeadIds(input: { leadIds: number[]; startDate: string; endDate: string }) {
-  if (!isSupabaseConfigured() || !supabase) {
-    throw new Error('Supabase no está configurado.');
-  }
-  const client = supabase;
-
-  const leadIdChunks = chunkArray(input.leadIds, 200);
-  const rows: RecojoRow[] = [];
-
-  for (const leadIdsChunk of leadIdChunks) {
-    const chunkRows = await fetchAllRowsPaged<RecojoRow>(async (from, to) => {
-      let query = client
-        .from('recojos')
-        .select('id_lead_ganado,ingreso_recojo_total,costo_recojo_total')
-        .in('id_lead_ganado', leadIdsChunk)
-        .range(from, to);
-
-      if (input.startDate) {
-        query = query.gte('fecha', input.startDate);
-      }
-
-      if (input.endDate) {
-        query = query.lte('fecha', input.endDate);
-      }
-
-      const response = await query;
-
-      return {
-        data: (response.data ?? []) as RecojoRow[],
-        error: response.error,
-      };
-    });
-
-    rows.push(...chunkRows);
-  }
-
-  return rows;
-}
-
-async function fetchSellerStats(input: {
-  sellerName: string;
-  pipelineId: number;
-  startDate: string;
-  endDate: string;
-  deliveredResultIds: Set<number>;
-}) {
-  if (!isSupabaseConfigured() || !supabase) {
-    throw new Error('Supabase no está configurado.');
-  }
-  const client = supabase;
-
-  const leadsGanados = await fetchAllRowsPaged<LeadGanadoForSeller>(async (from, to) => {
-    let query = client
-      .from('leads_ganados')
-      .select('business_id,pipeline_id_snapshot,kommo_lead_id,tienda_nombre_snapshot')
-      .eq('vendedor_nombre_snapshot', input.sellerName)
-      .range(from, to);
-
-    if (input.startDate) {
-      query = query.gte('fecha_lead_ganado', input.startDate);
-    }
-
-    if (input.endDate) {
-      query = query.lte('fecha_lead_ganado', input.endDate);
-    }
-
-    const response = await query;
-    return {
-      data: (response.data ?? []) as LeadGanadoForSeller[],
-      error: response.error,
-    };
+  const response = await fetch('/api/kommo/leads-insights?mode=seller_options', {
+    method: 'GET',
+    headers: { Accept: 'application/json' },
   });
 
-  const leadsGanadosTotal = leadsGanados.length;
-  const leadIds = Array.from(
-    new Set(
-      leadsGanados
-        .map((lead) => Number(lead.business_id))
-        .filter((id) => Number.isFinite(id) && id > 0),
-    ),
-  );
-
-  const normalizedPipelineId = Number(input.pipelineId);
-
-  const fetchKommoLeadCount = async () => {
-    if (!Number.isFinite(normalizedPipelineId) || normalizedPipelineId <= 0) {
-      return 0;
-    }
-
-    const countBy = async (field: 'updated_at' | 'updated_at_db') => {
-      let query = client
-        .from('kommo_leads')
-        .select('business_id', { head: true, count: 'exact' })
-        .eq('pipeline_id', normalizedPipelineId);
-
-      if (input.startDate) {
-        query = query.gte(field, `${input.startDate}T00:00:00.000Z`);
-      }
-
-      if (input.endDate) {
-        query = query.lt(field, `${shiftIsoDate(input.endDate, 1)}T00:00:00.000Z`);
-      }
-
-      const { count, error } = await query;
-      if (error) {
-        throw new Error(error.message || `No se pudo calcular leads totales por ${field}.`);
-      }
-
-      return Number(count ?? 0);
-    };
-
-    const updatedAtCount = await countBy('updated_at');
-    if (updatedAtCount > 0) return updatedAtCount;
-
-    return countBy('updated_at_db');
-  };
-
-  const deliveredResultIds = Array.from(input.deliveredResultIds);
-  const [envios, enviosEntregados, recojos, totalLeads] = await Promise.all([
-    leadIds.length
-      ? fetchEnviosByLeadIds({
-          leadIds,
-          startDate: input.startDate,
-          endDate: input.endDate,
-        })
-      : Promise.resolve([] as EnvioRow[]),
-    deliveredResultIds.length
-      ? (leadIds.length
-        ? fetchEnviosByLeadIds({
-          leadIds,
-          deliveredResultIds,
-          startDate: input.startDate,
-          endDate: input.endDate,
-        })
-        : Promise.resolve([] as EnvioRow[]))
-      : Promise.resolve([] as EnvioRow[]),
-    leadIds.length
-      ? fetchRecojosByLeadIds({
-          leadIds,
-          startDate: input.startDate,
-          endDate: input.endDate,
-        })
-      : Promise.resolve([] as RecojoRow[]),
-    fetchKommoLeadCount(),
-  ]);
-
-  const enviosTotales = envios.length;
-
-  const ingresoEnvios = envios.reduce((acc, row) => acc + parseNumeric(row.ingreso_total_fila), 0);
-  const costoEnvios = envios.reduce((acc, row) => acc + parseNumeric(row.costo_total_fila), 0);
-  const ingresoRecojos = recojos.reduce((acc, row) => acc + parseNumeric(row.ingreso_recojo_total), 0);
-  const costoRecojos = recojos.reduce((acc, row) => acc + parseNumeric(row.costo_recojo_total), 0);
-
-  const ingresoTotal = ingresoEnvios + ingresoRecojos;
-  const costoMotoTotal = costoEnvios + costoRecojos;
-  const margenVsMoto = ingresoTotal - costoMotoTotal;
-  const efectividad = totalLeads > 0 ? (leadsGanadosTotal / totalLeads) * 100 : 0;
-  const ingresoPorLeadGanado = leadsGanadosTotal > 0 ? ingresoTotal / leadsGanadosTotal : 0;
-  const ticketPromedio = enviosTotales > 0 ? ingresoTotal / enviosTotales : 0;
-
-  const tiendaByLeadId = new Map<number, string>();
-  for (const lead of leadsGanados) {
-    const leadId = Number(lead.business_id);
-    if (!Number.isFinite(leadId) || leadId <= 0) continue;
-    const tienda = String(lead.tienda_nombre_snapshot ?? '').trim() || `Lead #${leadId}`;
-    tiendaByLeadId.set(leadId, tienda);
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok || !payload?.success || !Array.isArray(payload?.options)) {
+    throw new Error(payload?.error || 'No se pudo cargar la lista de vendedores.');
   }
 
-  const topTiendaCounter = new Map<string, number>();
-  for (const envio of enviosEntregados) {
-    const leadId = Number(envio.id_lead_ganado ?? 0);
-    const tienda = tiendaByLeadId.get(leadId) ?? `Lead #${leadId}`;
-    topTiendaCounter.set(tienda, (topTiendaCounter.get(tienda) ?? 0) + 1);
+  return payload.options as SellerOption[];
+}
+
+async function fetchSellerStats(input: { sellerName: string; pipelineId: number; startDate: string; endDate: string }) {
+  const params = new URLSearchParams();
+  params.set('mode', 'seller_stats');
+  params.set('seller_name', input.sellerName);
+  params.set('pipeline_id', String(input.pipelineId));
+  if (input.startDate) params.set('start_date', input.startDate);
+  if (input.endDate) params.set('end_date', input.endDate);
+
+  const response = await fetch(`/api/kommo/leads-insights?${params.toString()}`, {
+    method: 'GET',
+    headers: { Accept: 'application/json' },
+  });
+
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok || !payload?.success || !payload?.data) {
+    throw new Error(payload?.error || 'No se pudo cargar la estadística de vendedor.');
   }
 
-  const topTiendas = Array.from(topTiendaCounter.entries())
-    .map(([tienda, enviosEntregados]) => ({ tienda, enviosEntregados }))
-    .sort((a, b) => b.enviosEntregados - a.enviosEntregados)
-    .slice(0, 3);
-
-  return {
-    seller: input.sellerName,
-    enviosTotales,
-    totalLeads,
-    leadsGanados: leadsGanadosTotal,
-    efectividad,
-    ingresoTotal,
-    costoMotoTotal,
-    margenVsMoto,
-    ingresoPorLeadGanado,
-    ticketPromedio,
-    topTiendas,
-  } satisfies SellerStats;
+  return payload.data as SellerStats;
 }
 
 export function EstadisticasVendedorPage() {
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
   const [selectedSeller, setSelectedSeller] = useState('');
-
-  const deliveredResultIdsQuery = useQuery({
-    queryKey: ['operativas', 'estadisticas-vendedor', 'delivered-result-ids'],
-    queryFn: fetchDeliveredResultIds,
-    staleTime: 10 * 60_000,
-    refetchOnWindowFocus: false,
-  });
 
   const sellersQuery = useQuery({
     queryKey: ['operativas', 'estadisticas-vendedor', 'sellers'],
@@ -509,10 +91,6 @@ export function EstadisticasVendedorPage() {
       endDate || 'none',
     ],
     queryFn: () => {
-      if (!deliveredResultIdsQuery.data) {
-        throw new Error('No se pudieron cargar los resultados entregados.');
-      }
-
       if (!selectedOption) {
         throw new Error('Seleccioná un vendedor válido.');
       }
@@ -522,10 +100,9 @@ export function EstadisticasVendedorPage() {
         pipelineId: selectedOption.pipelineId,
         startDate,
         endDate,
-        deliveredResultIds: deliveredResultIdsQuery.data,
       });
     },
-    enabled: selectedSellerIsValid && !!deliveredResultIdsQuery.data,
+    enabled: selectedSellerIsValid,
     staleTime: 30_000,
     refetchOnWindowFocus: false,
   });
@@ -561,13 +138,9 @@ export function EstadisticasVendedorPage() {
               onChange={(event) => setSelectedSeller(event.target.value)}
               className="w-full rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm text-gray-800 shadow-sm focus:border-red-400 focus:outline-none focus:ring-2 focus:ring-red-100"
             >
-              <option value="">
-                {sellersQuery.isLoading ? 'Cargando vendedores…' : 'Seleccioná un vendedor…'}
-              </option>
+              <option value="">{sellersQuery.isLoading ? 'Cargando vendedores…' : 'Seleccioná un vendedor…'}</option>
               {sellerOptions.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
+                <option key={option.value} value={option.value}>{option.label}</option>
               ))}
             </select>
           </div>
@@ -579,7 +152,7 @@ export function EstadisticasVendedorPage() {
           <div className="p-6 text-sm text-red-600">No se pudo cargar la lista de vendedores. {(sellersQuery.error as Error)?.message ?? ''}</div>
         ) : !selectedSellerIsValid ? (
           <div className="p-6 text-sm text-gray-500">Seleccioná un vendedor para ver las estadísticas del periodo.</div>
-        ) : statsQuery.isLoading || deliveredResultIdsQuery.isLoading ? (
+        ) : statsQuery.isLoading ? (
           <div className="p-6 text-sm text-gray-500">Calculando estadísticas…</div>
         ) : statsQuery.isError ? (
           <div className="p-6 text-sm text-red-600">No se pudo cargar la estadística de vendedor. {(statsQuery.error as Error)?.message ?? ''}</div>
@@ -591,7 +164,7 @@ export function EstadisticasVendedorPage() {
 
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
               <MetricCard title="Leads totales" value={String(statsQuery.data.totalLeads)} />
-              <MetricCard title="Leads ganados" value={String(statsQuery.data.leadsGanados)} />
+              <MetricCard title="Leads ganados (total)" value={String(statsQuery.data.leadsGanados)} />
               <MetricCard title="Envíos totales" value={String(statsQuery.data.enviosTotales)} />
               <MetricCard title="Efectividad" value={`${formatDecimal(statsQuery.data.efectividad, 2)}%`} />
               <MetricCard title="Ingreso total" value={`S/ ${formatDecimal(statsQuery.data.ingresoTotal, 2)}`} />

@@ -107,6 +107,27 @@ type WonSellerInsight = {
   total_won: number;
 };
 
+type SellerOption = {
+  value: string;
+  pipelineId: number;
+  label: string;
+};
+
+type SellerStatsPayload = {
+  seller: string;
+  pipeline_id: number;
+  enviosTotales: number;
+  totalLeads: number;
+  leadsGanados: number;
+  efectividad: number;
+  ingresoTotal: number;
+  costoMotoTotal: number;
+  margenVsMoto: number;
+  ingresoPorLeadGanado: number;
+  ticketPromedio: number;
+  topTiendas: Array<{ tienda: string; enviosEntregados: number }>;
+};
+
 type LeadsInsightsResponse = {
   filters: {
     start_date: string | null;
@@ -317,6 +338,11 @@ function buildInsightsCacheKey(startDate: string | null, endDate: string | null)
   return `${startDate ?? 'null'}::${endDate ?? 'null'}`;
 }
 
+function toNumberOrZero(value: unknown) {
+  const parsed = Number(value ?? 0);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
 function applyDateRangeQuery<T extends { gte: (column: string, value: string) => T; lte: (column: string, value: string) => T }>(
   query: T,
   column: string,
@@ -448,6 +474,216 @@ export default async function kommoLeadsInsightsHandler(req: VercelRequest, res:
         success: false,
         error: 'El parámetro start_date no puede ser mayor que end_date.',
       });
+    }
+
+    const modeParam = asSingleQueryParam(req.query.mode);
+    const mode = typeof modeParam === 'string' ? modeParam.trim().toLowerCase() : '';
+
+    if (mode === 'seller_options') {
+      const pipelines = await safeSelectPaginated<{ business_id: number; name: string | null; is_archive: boolean | null }>(
+        'kommo_pipelines',
+        'business_id,name,is_archive',
+      );
+
+      const excluded = new Set(['data de leads', 'leads entrantes principal']);
+      const options: SellerOption[] = [];
+
+      for (const row of pipelines) {
+        const pipelineId = Number(row.business_id);
+        if (!Number.isFinite(pipelineId) || pipelineId <= 0) continue;
+        if (row.is_archive === true) continue;
+
+        const label = String(row.name ?? '').trim();
+        if (!label) continue;
+        if (excluded.has(normalizeText(label))) continue;
+
+        options.push({
+          value: String(pipelineId),
+          pipelineId,
+          label,
+        });
+      }
+
+      options.sort((a, b) => a.label.localeCompare(b.label, 'es'));
+      return res.status(200).json({ success: true, options });
+    }
+
+    if (mode === 'seller_stats') {
+      const sellerNameParam = asSingleQueryParam(req.query.seller_name);
+      const pipelineIdParam = asSingleQueryParam(req.query.pipeline_id);
+
+      const sellerName = typeof sellerNameParam === 'string' ? sellerNameParam.trim() : '';
+      const pipelineId = Number.parseInt(typeof pipelineIdParam === 'string' ? pipelineIdParam.trim() : '', 10);
+
+      if (!sellerName) {
+        return res.status(400).json({ success: false, error: 'Falta seller_name.' });
+      }
+
+      if (!Number.isFinite(pipelineId) || pipelineId <= 0) {
+        return res.status(400).json({ success: false, error: 'pipeline_id inválido.' });
+      }
+
+      const supabase = getSupabaseAdminClient();
+
+      const leadsGanados: Array<{ business_id: number | null; tienda_nombre_snapshot: string | null }> = [];
+      let from = 0;
+      const pageSize = 1000;
+
+      while (true) {
+        const to = from + pageSize - 1;
+        let query = supabase
+          .from('leads_ganados' as never)
+          .select('business_id,tienda_nombre_snapshot' as never)
+          .eq('vendedor_nombre_snapshot' as never, sellerName as never)
+          .range(from, to);
+
+        if (startDate) query = query.gte('fecha_lead_ganado' as never, startDate as never);
+        if (endDate) query = query.lte('fecha_lead_ganado' as never, endDate as never);
+
+        const { data, error } = await query;
+        if (error) throw new Error(error.message || 'No se pudieron cargar leads ganados.');
+
+        const chunk = (data ?? []) as Array<{ business_id: number | null; tienda_nombre_snapshot: string | null }>;
+        leadsGanados.push(...chunk);
+        if (chunk.length < pageSize) break;
+        from += pageSize;
+      }
+
+      const leadsGanadosTotal = leadsGanados.length;
+      const leadIds = Array.from(new Set(
+        leadsGanados
+          .map((lead) => Number(lead.business_id ?? 0))
+          .filter((id) => Number.isFinite(id) && id > 0),
+      ));
+
+      const resultados = await safeSelectPaginated<{ business_id: number; resultado: string | null }>('resultados', 'business_id,resultado', { batchSize: 500 });
+      const deliveredResultIds = new Set(
+        resultados
+          .filter((row) => normalizeText(String(row.resultado ?? '')).includes('entregado'))
+          .map((row) => Number(row.business_id))
+          .filter((id) => Number.isFinite(id) && id > 0),
+      );
+
+      const enviosRows: Array<{ id_lead_ganado: number | null; id_resultado: number | null; ingreso_total_fila: number | null; costo_total_fila: number | null }> = [];
+      const recojosRows: Array<{ id_lead_ganado: number | null; ingreso_recojo_total: number | null; costo_recojo_total: number | null }> = [];
+
+      const leadIdChunks: number[][] = [];
+      for (let index = 0; index < leadIds.length; index += 200) {
+        leadIdChunks.push(leadIds.slice(index, index + 200));
+      }
+
+      for (const chunk of leadIdChunks) {
+        let envFrom = 0;
+        while (true) {
+          const envTo = envFrom + pageSize - 1;
+          let enviosQuery = supabase
+            .from('envios' as never)
+            .select('id_lead_ganado,id_resultado,ingreso_total_fila,costo_total_fila' as never)
+            .in('id_lead_ganado' as never, chunk as never)
+            .range(envFrom, envTo);
+
+          if (startDate) enviosQuery = enviosQuery.gte('fecha_envio' as never, startDate as never);
+          if (endDate) enviosQuery = enviosQuery.lte('fecha_envio' as never, endDate as never);
+
+          const { data, error } = await enviosQuery;
+          if (error) throw new Error(error.message || 'No se pudieron cargar envíos.');
+
+          const chunkRows = (data ?? []) as Array<{ id_lead_ganado: number | null; id_resultado: number | null; ingreso_total_fila: number | null; costo_total_fila: number | null }>;
+          enviosRows.push(...chunkRows);
+          if (chunkRows.length < pageSize) break;
+          envFrom += pageSize;
+        }
+
+        let recFrom = 0;
+        while (true) {
+          const recTo = recFrom + pageSize - 1;
+          let recojosQuery = supabase
+            .from('recojos' as never)
+            .select('id_lead_ganado,ingreso_recojo_total,costo_recojo_total' as never)
+            .in('id_lead_ganado' as never, chunk as never)
+            .range(recFrom, recTo);
+
+          if (startDate) recojosQuery = recojosQuery.gte('fecha' as never, startDate as never);
+          if (endDate) recojosQuery = recojosQuery.lte('fecha' as never, endDate as never);
+
+          const { data, error } = await recojosQuery;
+          if (error) throw new Error(error.message || 'No se pudieron cargar recojos.');
+
+          const chunkRows = (data ?? []) as Array<{ id_lead_ganado: number | null; ingreso_recojo_total: number | null; costo_recojo_total: number | null }>;
+          recojosRows.push(...chunkRows);
+          if (chunkRows.length < pageSize) break;
+          recFrom += pageSize;
+        }
+      }
+
+      const countBy = async (field: 'updated_at' | 'updated_at_db') => {
+        let countQuery = supabase
+          .from('kommo_leads' as never)
+          .select('business_id' as never, { head: true, count: 'exact' })
+          .eq('pipeline_id' as never, pipelineId as never);
+
+        if (startDate) countQuery = countQuery.gte(field as never, `${startDate}T00:00:00.000Z` as never);
+        if (endDate) countQuery = countQuery.lt(field as never, `${shiftIsoDate(endDate, 1)}T00:00:00.000Z` as never);
+
+        const { count, error } = await countQuery;
+        if (error) throw new Error(error.message || `No se pudo calcular leads totales por ${field}.`);
+        return Number(count ?? 0);
+      };
+
+      const totalLeadsFromUpdatedAt = await countBy('updated_at');
+      const totalLeads = totalLeadsFromUpdatedAt > 0 ? totalLeadsFromUpdatedAt : await countBy('updated_at_db');
+
+      const enviosTotales = enviosRows.length;
+      const enviosEntregados = enviosRows.filter((row) => deliveredResultIds.has(Number(row.id_resultado ?? 0)));
+
+      const ingresoEnvios = enviosRows.reduce((acc, row) => acc + toNumberOrZero(row.ingreso_total_fila), 0);
+      const costoEnvios = enviosRows.reduce((acc, row) => acc + toNumberOrZero(row.costo_total_fila), 0);
+      const ingresoRecojos = recojosRows.reduce((acc, row) => acc + toNumberOrZero(row.ingreso_recojo_total), 0);
+      const costoRecojos = recojosRows.reduce((acc, row) => acc + toNumberOrZero(row.costo_recojo_total), 0);
+
+      const ingresoTotal = ingresoEnvios + ingresoRecojos;
+      const costoMotoTotal = costoEnvios + costoRecojos;
+      const margenVsMoto = ingresoTotal - costoMotoTotal;
+      const efectividad = totalLeads > 0 ? (leadsGanadosTotal / totalLeads) * 100 : 0;
+      const ingresoPorLeadGanado = leadsGanadosTotal > 0 ? ingresoTotal / leadsGanadosTotal : 0;
+      const ticketPromedio = enviosTotales > 0 ? ingresoTotal / enviosTotales : 0;
+
+      const tiendaByLeadId = new Map<number, string>();
+      for (const lead of leadsGanados) {
+        const leadId = Number(lead.business_id ?? 0);
+        if (!Number.isFinite(leadId) || leadId <= 0) continue;
+        const tienda = String(lead.tienda_nombre_snapshot ?? '').trim() || `Lead #${leadId}`;
+        tiendaByLeadId.set(leadId, tienda);
+      }
+
+      const topTiendaCounter = new Map<string, number>();
+      for (const envio of enviosEntregados) {
+        const leadId = Number(envio.id_lead_ganado ?? 0);
+        const tienda = tiendaByLeadId.get(leadId) ?? `Lead #${leadId}`;
+        topTiendaCounter.set(tienda, (topTiendaCounter.get(tienda) ?? 0) + 1);
+      }
+
+      const topTiendas = Array.from(topTiendaCounter.entries())
+        .map(([tienda, enviosEntregadosCount]) => ({ tienda, enviosEntregados: enviosEntregadosCount }))
+        .sort((a, b) => b.enviosEntregados - a.enviosEntregados)
+        .slice(0, 3);
+
+      const payload: SellerStatsPayload = {
+        seller: sellerName,
+        pipeline_id: pipelineId,
+        enviosTotales,
+        totalLeads,
+        leadsGanados: leadsGanadosTotal,
+        efectividad,
+        ingresoTotal,
+        costoMotoTotal,
+        margenVsMoto,
+        ingresoPorLeadGanado,
+        ticketPromedio,
+        topTiendas,
+      };
+
+      return res.status(200).json({ success: true, data: payload });
     }
 
     const cacheKey = buildInsightsCacheKey(startDate, endDate);
