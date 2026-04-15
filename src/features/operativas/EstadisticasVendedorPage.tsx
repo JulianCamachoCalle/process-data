@@ -176,8 +176,42 @@ async function fetchSellerOptions() {
     bySeller.set(sellerKey, entry);
   }
 
+  const sellerNames = Array.from(bySeller.values()).map((entry) => entry.label);
+  const sellerNameChunks = chunkArray(sellerNames, 100);
+  const pipelineIdByExactSellerName = new Map<string, number>();
+
+  for (const chunk of sellerNameChunks) {
+    const { data, error } = await client
+      .from('kommo_pipelines')
+      .select('business_id,name,is_archive')
+      .in('name', chunk);
+
+    if (error) {
+      throw new Error(error.message || 'No se pudieron resolver pipelines por nombre.');
+    }
+
+    const rows = (data ?? []) as Array<{ business_id: number | null; name: string | null; is_archive: boolean | null }>;
+    for (const row of rows) {
+      if (row.is_archive === true) continue;
+      const id = Number(row.business_id ?? 0);
+      if (!Number.isFinite(id) || id <= 0) continue;
+
+      const name = String(row.name ?? '').trim();
+      if (!name) continue;
+      if (EXCLUDED_PIPELINE_NAMES.has(normalizeText(name))) continue;
+
+      const key = normalizeText(name);
+      if (!pipelineIdByExactSellerName.has(key)) {
+        pipelineIdByExactSellerName.set(key, id);
+      }
+    }
+  }
+
   const options: SellerOption[] = [];
   for (const entry of bySeller.values()) {
+    const sellerKey = normalizeText(entry.label);
+    const pipelineByName = pipelineIdByExactSellerName.get(sellerKey) ?? null;
+
     let bestPipelineId: number | null = null;
     let bestCount = -1;
     for (const [pipelineId, count] of entry.pipelineCounts.entries()) {
@@ -187,10 +221,11 @@ async function fetchSellerOptions() {
       }
     }
 
-    if (!bestPipelineId) continue;
+    const finalPipelineId = pipelineByName ?? bestPipelineId;
+    if (!finalPipelineId) continue;
     options.push({
-      value: String(bestPipelineId),
-      pipelineId: bestPipelineId,
+      value: String(finalPipelineId),
+      pipelineId: finalPipelineId,
       label: entry.label,
     });
   }
