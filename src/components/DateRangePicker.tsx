@@ -166,6 +166,7 @@ export function DateRangePicker({
   void startAdornment;
   void endAdornment;
   void inputClassName;
+  void labelClassName;
 
   useEffect(() => {
     onValidityChange?.(isValid);
@@ -297,7 +298,7 @@ export function DateRangePicker({
                   >
                     ←
                   </button>
-                  <p className={joinClasses('text-xs font-semibold uppercase tracking-[0.1em] text-gray-600', labelClassName)}>
+                  <p className="text-xs font-semibold uppercase tracking-[0.1em] text-gray-600">
                     {formatMonthLabel(displayMonth)}
                   </p>
                   <button

@@ -58,7 +58,7 @@ export function Login() {
         return;
       }
 
-      navigate(data.role === 'user' ? '/meta/ads/dashboard' : '/');
+      navigate(data.role === 'user' ? '/meta/ads/dashboard' : '/dashboard');
     } catch {
       setError('No se pudo conectar con el servidor');
     } finally {

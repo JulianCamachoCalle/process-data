@@ -45,6 +45,23 @@ const chartTooltipStyle = {
   },
 } as const;
 
+const ADS_SERIES_COLOR = '#dc2626';
+const ORGANIC_SERIES_COLOR = '#2563eb';
+
+function getLatestMetricValue(latestByPostMetric: Map<string, number>, postId: string, metric: string) {
+  return latestByPostMetric.get(`${postId}:${metric}`) ?? 0;
+}
+
+function getOrganicVideoViews(latestByPostMetric: Map<string, number>, postId: string) {
+  const unified = getLatestMetricValue(latestByPostMetric, postId, 'post_video_views');
+  const totalMediaView = getLatestMetricValue(latestByPostMetric, postId, 'post_total_media_view');
+  const organic = getLatestMetricValue(latestByPostMetric, postId, 'post_video_views_organic');
+  const paid = getLatestMetricValue(latestByPostMetric, postId, 'post_video_views_paid');
+  const splitTotal = organic + paid;
+
+  return Math.max(unified, totalMediaView, splitTotal);
+}
+
 export function MetaAdsOrganicDashboard() {
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
@@ -126,9 +143,9 @@ export function MetaAdsOrganicDashboard() {
         ads_video_views: 0,
         organic_video_views: 0,
       };
-      current.organic_clicks += latestByPostMetric.get(`${post.id}:post_clicks`) ?? 0;
-      current.organic_impressions += latestByPostMetric.get(`${post.id}:post_impressions`) ?? 0;
-      current.organic_video_views += latestByPostMetric.get(`${post.id}:post_video_views`) ?? 0;
+      current.organic_clicks += getLatestMetricValue(latestByPostMetric, post.id, 'post_clicks');
+      current.organic_impressions += getLatestMetricValue(latestByPostMetric, post.id, 'post_impressions');
+      current.organic_video_views += getOrganicVideoViews(latestByPostMetric, post.id);
       current.organic_reactions += Number(post.reactions ?? 0);
       current.organic_comments += Number(post.comments ?? 0);
       current.organic_shares += Number(post.shares ?? 0);
@@ -170,11 +187,6 @@ export function MetaAdsOrganicDashboard() {
       },
     );
   }, [compareByDate]);
-
-  const retention = useMemo(() => ({
-    ads: totals.adsImpressions > 0 ? (totals.adsVideoViews * 100) / totals.adsImpressions : 0,
-    organic: totals.organicImpressions > 0 ? (totals.organicVideoViews * 100) / totals.organicImpressions : 0,
-  }), [totals.adsImpressions, totals.adsVideoViews, totals.organicImpressions, totals.organicVideoViews]);
 
   const retentionByDate = useMemo(() => {
     return compareByDate.map((row) => ({
@@ -234,6 +246,18 @@ export function MetaAdsOrganicDashboard() {
         isApplyDisabled={!isFiltersDirty}
       />
 
+      <div className="inline-flex items-center gap-4 rounded-full border border-gray-200 bg-white/90 px-3 py-1 text-[11px] text-gray-600">
+        <span className="font-semibold uppercase tracking-wide text-gray-500">Referencia</span>
+        <span className="inline-flex items-center gap-1.5">
+          <span className="h-2 w-2 rounded-full" style={{ backgroundColor: ADS_SERIES_COLOR }} />
+          Ads
+        </span>
+        <span className="inline-flex items-center gap-1.5">
+          <span className="h-2 w-2 rounded-full" style={{ backgroundColor: ORGANIC_SERIES_COLOR }} />
+          Orgánico
+        </span>
+      </div>
+
       <Section title="KPI comparativos">
         <KpiGrid>
           <KpiCard title="Clicks Ads" value={formatNumberEs(Math.round(totals.adsClicks))} helper="Total del periodo" icon={<MousePointerClick className="text-red-600" size={18} />} />
@@ -248,8 +272,6 @@ export function MetaAdsOrganicDashboard() {
           <KpiCard title="Compartidos Orgánico" value={formatNumberEs(Math.round(totals.organicShares))} helper="Total del periodo" icon={<Share2 className="text-red-600" size={18} />} />
           <KpiCard title="Video Views Ads" value={formatNumberEs(Math.round(totals.adsVideoViews))} helper="Total del periodo" icon={<Eye className="text-red-600" size={18} />} />
           <KpiCard title="Video Views Orgánico" value={formatNumberEs(Math.round(totals.organicVideoViews))} helper="Total del periodo" icon={<Eye className="text-red-600" size={18} />} />
-          <KpiCard title="Retención Ads" value={`${retention.ads.toFixed(2)}%`} helper="Video views / impresiones" icon={<Target className="text-red-600" size={18} />} />
-          <KpiCard title="Retención Orgánico" value={`${retention.organic.toFixed(2)}%`} helper="Video views / impresiones" icon={<Target className="text-red-600" size={18} />} />
         </KpiGrid>
       </Section>
 
@@ -266,8 +288,8 @@ export function MetaAdsOrganicDashboard() {
                 <XAxis dataKey="date" tick={{ fontSize: 12 }} />
                 <YAxis tick={{ fontSize: 12 }} />
                 <Tooltip {...chartTooltipStyle} />
-                <Line type="monotone" dataKey="ads_clicks" name="Clicks Ads" stroke="#dc2626" strokeWidth={2.5} dot={false} isAnimationActive={false} />
-                <Line type="monotone" dataKey="organic_clicks" name="Clicks Orgánico" stroke="#2563eb" strokeWidth={2.5} dot={false} isAnimationActive={false} />
+                <Line type="monotone" dataKey="ads_clicks" name="Clicks Ads" stroke={ADS_SERIES_COLOR} strokeWidth={2.5} dot={false} isAnimationActive={false} />
+                <Line type="monotone" dataKey="organic_clicks" name="Clicks Orgánico" stroke={ORGANIC_SERIES_COLOR} strokeWidth={2.5} dot={false} isAnimationActive={false} />
               </LineChart>
             </ResponsiveContainer>
           )}
@@ -287,8 +309,8 @@ export function MetaAdsOrganicDashboard() {
                 <XAxis dataKey="date" tick={{ fontSize: 12 }} />
                 <YAxis tick={{ fontSize: 12 }} />
                 <Tooltip {...chartTooltipStyle} />
-                <Line type="monotone" dataKey="ads_impressions" name="Impresiones Ads" stroke="#dc2626" strokeWidth={2.5} dot={false} isAnimationActive={false} />
-                <Line type="monotone" dataKey="organic_impressions" name="Impresiones Orgánico" stroke="#059669" strokeWidth={2.5} dot={false} isAnimationActive={false} />
+                <Line type="monotone" dataKey="ads_impressions" name="Impresiones Ads" stroke={ADS_SERIES_COLOR} strokeWidth={2.5} dot={false} isAnimationActive={false} />
+                <Line type="monotone" dataKey="organic_impressions" name="Impresiones Orgánico" stroke={ORGANIC_SERIES_COLOR} strokeWidth={2.5} dot={false} isAnimationActive={false} />
               </LineChart>
             </ResponsiveContainer>
           )}
@@ -309,8 +331,8 @@ export function MetaAdsOrganicDashboard() {
                   <XAxis dataKey="date" tick={{ fontSize: 12 }} />
                   <YAxis tick={{ fontSize: 12 }} />
                   <Tooltip {...chartTooltipStyle} />
-                  <Line type="monotone" dataKey="ads_reactions" name="Reacciones Ads" stroke="#dc2626" strokeWidth={2.4} dot={false} isAnimationActive={false} />
-                  <Line type="monotone" dataKey="organic_reactions" name="Reacciones Orgánico" stroke="#2563eb" strokeWidth={2.4} dot={false} isAnimationActive={false} />
+                  <Line type="monotone" dataKey="ads_reactions" name="Reacciones Ads" stroke={ADS_SERIES_COLOR} strokeWidth={2.4} dot={false} isAnimationActive={false} />
+                  <Line type="monotone" dataKey="organic_reactions" name="Reacciones Orgánico" stroke={ORGANIC_SERIES_COLOR} strokeWidth={2.4} dot={false} isAnimationActive={false} />
                 </LineChart>
               </ResponsiveContainer>
             )}
@@ -328,8 +350,8 @@ export function MetaAdsOrganicDashboard() {
                   <XAxis dataKey="date" tick={{ fontSize: 12 }} />
                   <YAxis tick={{ fontSize: 12 }} />
                   <Tooltip {...chartTooltipStyle} />
-                  <Line type="monotone" dataKey="ads_comments" name="Comentarios Ads" stroke="#dc2626" strokeWidth={2.4} dot={false} isAnimationActive={false} />
-                  <Line type="monotone" dataKey="organic_comments" name="Comentarios Orgánico" stroke="#2563eb" strokeWidth={2.4} dot={false} isAnimationActive={false} />
+                  <Line type="monotone" dataKey="ads_comments" name="Comentarios Ads" stroke={ADS_SERIES_COLOR} strokeWidth={2.4} dot={false} isAnimationActive={false} />
+                  <Line type="monotone" dataKey="organic_comments" name="Comentarios Orgánico" stroke={ORGANIC_SERIES_COLOR} strokeWidth={2.4} dot={false} isAnimationActive={false} />
                 </LineChart>
               </ResponsiveContainer>
             )}
@@ -347,8 +369,8 @@ export function MetaAdsOrganicDashboard() {
                   <XAxis dataKey="date" tick={{ fontSize: 12 }} />
                   <YAxis tick={{ fontSize: 12 }} />
                   <Tooltip {...chartTooltipStyle} />
-                  <Line type="monotone" dataKey="ads_shares" name="Compartidos Ads" stroke="#dc2626" strokeWidth={2.4} dot={false} isAnimationActive={false} />
-                  <Line type="monotone" dataKey="organic_shares" name="Compartidos Orgánico" stroke="#2563eb" strokeWidth={2.4} dot={false} isAnimationActive={false} />
+                  <Line type="monotone" dataKey="ads_shares" name="Compartidos Ads" stroke={ADS_SERIES_COLOR} strokeWidth={2.4} dot={false} isAnimationActive={false} />
+                  <Line type="monotone" dataKey="organic_shares" name="Compartidos Orgánico" stroke={ORGANIC_SERIES_COLOR} strokeWidth={2.4} dot={false} isAnimationActive={false} />
                 </LineChart>
               </ResponsiveContainer>
             )}
@@ -370,8 +392,8 @@ export function MetaAdsOrganicDashboard() {
                   <XAxis dataKey="date" tick={{ fontSize: 12 }} />
                   <YAxis tick={{ fontSize: 12 }} />
                   <Tooltip {...chartTooltipStyle} />
-                  <Line type="monotone" dataKey="ads_video_views" name="Video Views Ads" stroke="#dc2626" strokeWidth={2.4} dot={false} isAnimationActive={false} />
-                  <Line type="monotone" dataKey="organic_video_views" name="Video Views Orgánico" stroke="#2563eb" strokeWidth={2.4} dot={false} isAnimationActive={false} />
+                  <Line type="monotone" dataKey="ads_video_views" name="Video Views Ads" stroke={ADS_SERIES_COLOR} strokeWidth={2.4} dot={false} isAnimationActive={false} />
+                  <Line type="monotone" dataKey="organic_video_views" name="Video Views Orgánico" stroke={ORGANIC_SERIES_COLOR} strokeWidth={2.4} dot={false} isAnimationActive={false} />
                 </LineChart>
               </ResponsiveContainer>
             )}
@@ -392,8 +414,8 @@ export function MetaAdsOrganicDashboard() {
                     {...chartTooltipStyle}
                     formatter={(value) => `${Number(value ?? 0).toFixed(2)}%`}
                   />
-                  <Line type="monotone" dataKey="ads_retention" name="Retención Ads" stroke="#dc2626" strokeWidth={2.4} dot={false} isAnimationActive={false} />
-                  <Line type="monotone" dataKey="organic_retention" name="Retención Orgánico" stroke="#2563eb" strokeWidth={2.4} dot={false} isAnimationActive={false} />
+                  <Line type="monotone" dataKey="ads_retention" name="Retención Ads" stroke={ADS_SERIES_COLOR} strokeWidth={2.4} dot={false} isAnimationActive={false} />
+                  <Line type="monotone" dataKey="organic_retention" name="Retención Orgánico" stroke={ORGANIC_SERIES_COLOR} strokeWidth={2.4} dot={false} isAnimationActive={false} />
                 </LineChart>
               </ResponsiveContainer>
             )}
@@ -410,8 +432,8 @@ export function MetaAdsOrganicDashboard() {
                 <XAxis dataKey="label" tick={{ fontSize: 12 }} />
                 <YAxis tick={{ fontSize: 12 }} />
                 <Tooltip {...chartTooltipStyle} />
-                <Bar dataKey="ads" name="Ads" fill="#dc2626" radius={[8, 8, 0, 0]} />
-                <Bar dataKey="organico" name="Orgánico" fill="#2563eb" radius={[8, 8, 0, 0]} />
+                <Bar dataKey="ads" name="Ads" fill={ADS_SERIES_COLOR} radius={[8, 8, 0, 0]} />
+                <Bar dataKey="organico" name="Orgánico" fill={ORGANIC_SERIES_COLOR} radius={[8, 8, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
           </ChartCard>
@@ -423,8 +445,8 @@ export function MetaAdsOrganicDashboard() {
                 <XAxis dataKey="label" tick={{ fontSize: 12 }} />
                 <YAxis tick={{ fontSize: 12 }} />
                 <Tooltip {...chartTooltipStyle} />
-                <Bar dataKey="ads" name="Ads" fill="#dc2626" radius={[8, 8, 0, 0]} />
-                <Bar dataKey="organico" name="Orgánico" fill="#059669" radius={[8, 8, 0, 0]} />
+                <Bar dataKey="ads" name="Ads" fill={ADS_SERIES_COLOR} radius={[8, 8, 0, 0]} />
+                <Bar dataKey="organico" name="Orgánico" fill={ORGANIC_SERIES_COLOR} radius={[8, 8, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
           </ChartCard>

@@ -1,22 +1,39 @@
-import { useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type ComponentType } from 'react';
 import {
+  ArrowDown,
+  ArrowUp,
   ArrowRight,
+  Award,
   BadgeCheck,
-  MapPinned,
+  Facebook,
+  Instagram,
+  Linkedin,
+  Mail,
+  Menu,
+  CircleUserRound,
+  MapPin,
   MessageCircle,
+  Music2,
   Moon,
   PackageCheck,
+  RefreshCw,
   ShieldCheck,
   Star,
   Sun,
+  Phone,
   Truck,
+  X,
+  Youtube,
   Warehouse,
 } from 'lucide-react';
+import { GeoJSON, MapContainer, TileLayer } from 'react-leaflet';
+import * as L from 'leaflet';
 
 const whatsappSalesUrl =
   'https://api.whatsapp.com/send?phone=51922509459&text=Hola,%20necesito%20m%C3%A1s%20informaci%C3%B3n%20sobre%20sus%20servicios.';
 const whatsappPremiumUrl =
   'https://api.whatsapp.com/send?phone=51992565076&text=Hola,%20necesito%20m%C3%A1s%20informaci%C3%B3n%20sobre%20sus%20tarifas%20exclusivas.';
+const whatsappTariffInfoPhone = '51922509459';
 
 const navItems = [
   { href: '#nosotros', label: 'Nosotros' },
@@ -25,157 +42,482 @@ const navItems = [
   { href: '#contacto', label: 'Contacto' },
 ];
 
+const stats = [
+  { value: 'Lima', label: 'Y Callao' },
+  { value: '+1000', label: 'Clientes activos' },
+  { value: '6', label: 'Certificaciones ISO' },
+  { value: '24h', label: 'Tiempo de entrega' },
+];
+
 const services = [
   {
+    id: 'contraentrega',
     title: 'Contraentrega',
-    description: 'Cobro al entregar con efectivo, transferencias, Yape, Plin y POS.',
+    description:
+      'Cobro al entregar con efectivo, transferencias, Yape, Plin y POS. Seguridad en cada transacción.',
     icon: PackageCheck,
+    featured: true,
   },
   {
+    id: 'recojo',
     title: 'Recojo a domicilio',
-    description: 'Recojo, clasificación y despacho con seguimiento operativo.',
+    description: 'Recojo, clasificación y despacho con seguimiento operativo en tiempo real.',
     icon: Truck,
+    featured: false,
   },
   {
+    id: 'cambio-prenda',
     title: 'Cambio de prenda',
     description: 'Cambio de talla o color con devolución del producto no elegido.',
     icon: ShieldCheck,
+    featured: false,
   },
   {
+    id: 'cambio-producto',
     title: 'Cambio de producto',
     description: 'Recojo del artículo anterior y entrega del nuevo en una sola gestión.',
-    icon: ArrowRight,
+    icon: RefreshCw,
+    featured: false,
   },
   {
-    title: 'Fulfillment',
-    description: 'Almacenamiento, empaquetado, rotulado, envío y cobro.',
-    icon: Warehouse,
-  },
-  {
+    id: 'reutilizado',
     title: 'Reutilizado',
-    description: 'Si no se concreta una venta, el pedido se reutiliza.',
+    description: 'Si no se concreta una venta, el pedido se redirige nada se pierde.',
     icon: BadgeCheck,
+    featured: false,
   },
-];
-
-const coverageHighlights = [
-  { district: 'Breña', price: 'S/ 8.00' },
-  { district: 'Cercado de Lima', price: 'S/ 10.00' },
-  { district: 'Miraflores', price: 'S/ 10.00' },
-  { district: 'San Isidro', price: 'S/ 10.00' },
-  { district: 'Ate', price: 'S/ 12.00' },
-  { district: 'Callao', price: 'S/ 12.00' },
-  { district: 'Chosica', price: 'S/ 22.00' },
-  { district: 'Pucusana', price: 'S/ 28.00' },
+  {
+    id: 'fulfillment',
+    title: 'Fulfillment',
+    description:
+      'Almacenamiento, empaquetado, rotulado, envío y cobro integral de tu operación logística.',
+    icon: Warehouse,
+    featured: true,
+  },
 ];
 
 const testimonials = [
   {
     quote: 'Muy feliz de trabajar con ustedes, siempre cumplen con los envíos.',
     author: 'Maritza Valdivia',
+    role: 'Emprendedora',
   },
   {
     quote: 'El mejor courier con el que hemos trabajado, facilitan nuestro tiempo al mil.',
     author: 'Itzzait Angulo',
+    role: 'Dueña de negocio',
   },
   {
     quote: 'Se adecuaron a las necesidades de los emprendedores, por eso los refiero.',
     author: 'Cindy Yaro',
+    role: 'Emprendedora',
+  },
+  {
+    quote: 'Excelente soporte en cada ruta, nos dio orden operativo y tranquilidad.',
+    author: 'Karen León',
+    role: 'E-commerce manager',
+  },
+  {
+    quote: 'Cobranza contraentrega súper clara y reportes que realmente ayudan.',
+    author: 'Javier Paredes',
+    role: 'Fundador de tienda online',
+  },
+  {
+    quote: 'Lo mejor fue la rapidez y la comunicación con mis clientes en cada entrega.',
+    author: 'Fiorella Poma',
+    role: 'Emprendedora',
   },
 ];
 
-const isoCodes = ['ISO 9001', 'ISO 14001', 'ISO 45001', 'ISO 27001', 'ISO 28000', 'ISO 50001'];
-
-const heroSlides = [
-  {
-    image: '/hero/slide-01.jpg',
-    objectPosition: 'center 38%',
-  },
-  {
-    image: '/hero/slide-02.jpg',
-    objectPosition: 'center 42%',
-  },
-  {
-    image: '/hero/slide-03.jpg',
-    objectPosition: 'center 34%',
-  },
+const coverageTariffs = [
+  { district: 'Ancón', price: 'S/ 17.00' },
+  { district: 'Ate', price: 'S/ 12.00' },
+  { district: 'Barranco', price: 'S/ 10.00' },
+  { district: 'Bellavista', price: 'S/ 12.00' },
+  { district: 'Breña', price: 'S/ 8.00' },
+  { district: 'Cajamarquilla', price: 'S/ 21.00' },
+  { district: 'Callao', price: 'S/ 12.00' },
+  { district: 'Carabayllo', price: 'S/ 12.00' },
+  { district: 'Carmen de la Legua Reynoso', price: 'S/ 12.00' },
+  { district: 'Cercado de Lima', price: 'S/ 10.00' },
+  { district: 'Chaclacayo', price: 'S/ 17.00' },
+  { district: 'Chorrillos', price: 'S/ 12.00' },
+  { district: 'Chosica', price: 'S/ 22.00' },
+  { district: 'Cieneguilla', price: 'S/ 17.00' },
+  { district: 'Comas', price: 'S/ 12.00' },
+  { district: 'El Agustino', price: 'S/ 10.00' },
+  { district: 'El Márquez - Callao', price: 'S/ 12.00' },
+  { district: 'Envío Agencia Marvisur', price: 'S/ 5.00' },
+  { district: 'Envio Agencia Olva Courier', price: 'S/ 5.00' },
+  { district: 'Envío Agencia Shalom', price: 'S/ 5.00' },
+  { district: 'Huachipa', price: 'S/ 14.00' },
+  { district: 'Huaycan', price: 'S/ 12.00' },
+  { district: 'Independencia', price: 'S/ 12.00' },
+  { district: 'Jesús María', price: 'S/ 10.00' },
+  { district: 'Jicamarca - Anexo 22', price: 'S/ 14.00' },
+  { district: 'Jicamarca - Anexo 8', price: 'S/ 21.00' },
+  { district: 'La Molina', price: 'S/ 10.00' },
+  { district: 'La Perla', price: 'S/ 12.00' },
+  { district: 'La Punta', price: 'S/ 12.00' },
+  { district: 'La Victoria', price: 'S/ 10.00' },
+  { district: 'Lince', price: 'S/ 10.00' },
+  { district: 'Los Olivos', price: 'S/ 12.00' },
+  { district: 'Lurigancho - Chosica', price: 'S/ 14.00' },
+  { district: 'Lurin', price: 'S/ 14.00' },
+  { district: 'Magdalena del Mar', price: 'S/ 10.00' },
+  { district: 'Manchay', price: 'S/ 17.00' },
+  { district: 'Mi Perú', price: 'S/ 12.00' },
+  { district: 'Miraflores', price: 'S/ 10.00' },
+  { district: 'Pachacamac', price: 'S/ 19.00' },
+  { district: 'Pucusana', price: 'S/ 28.00' },
+  { district: 'Pueblo Libre', price: 'S/ 10.00' },
+  { district: 'Puente Piedra', price: 'S/ 12.00' },
+  { district: 'Punta Hermosa', price: 'S/ 17.00' },
+  { district: 'Punta Negra', price: 'S/ 21.00' },
+  { district: 'Retiro Sede Cercado (Av Arica 1702)', price: 'S/ 8.00' },
+  { district: 'Retiro Sede Gamarra (Antonio Bazo 1218)', price: 'S/ 8.00' },
+  { district: 'Ricardo Palma', price: 'S/ 25.00' },
+  { district: 'Rímac', price: 'S/ 10.00' },
+  { district: 'Salamanca Ate', price: 'S/ 10.00' },
+  { district: 'San Bartolo', price: 'S/ 22.00' },
+  { district: 'San Borja', price: 'S/ 10.00' },
+  { district: 'San Isidro', price: 'S/ 10.00' },
+  { district: 'San Juan de Lurigancho', price: 'S/ 10.00' },
+  { district: 'San Juan de Miraflores', price: 'S/ 12.00' },
+  { district: 'San Luis', price: 'S/ 10.00' },
+  { district: 'San Martín de Porres', price: 'S/ 12.00' },
+  { district: 'San Miguel', price: 'S/ 10.00' },
+  { district: 'Santa Anita', price: 'S/ 10.00' },
+  { district: 'Santa Clara - Ate', price: 'S/ 12.00' },
+  { district: 'Santa Eulalia', price: 'S/ 25.00' },
+  { district: 'Santa María del Mar', price: 'S/ 25.00' },
+  { district: 'Santa Rosa', price: 'S/ 17.00' },
+  { district: 'Santiago de Surco', price: 'S/ 10.00' },
+  { district: 'Surquillo', price: 'S/ 10.00' },
+  { district: 'Ventanilla', price: 'S/ 12.00' },
+  { district: 'Villa El Salvador', price: 'S/ 12.00' },
+  { district: 'Villa María del Triunfo', price: 'S/ 12.00' },
 ] as const;
 
-// Ajustable: glow monocromo (suave/casi imperceptible) para DINSIDES en el HERO.
-const HERO_LED_GLOW = {
-  blurSoftPx: 10,
-  blurStrongPx: 24,
-  baseOpacityNight: 0.11,
-  baseOpacityDay: 0.06,
-  glowOpacityNight: 0.08,
-  glowOpacityDay: 0.045,
-  strokeOpacityNight: 0.14,
-  strokeOpacityDay: 0.08,
-} as const;
+type AnyProps = Record<string, unknown>;
 
-// Ajustable: PNG superpuesto junto al título (detrás + delante del texto).
-const HERO_OVERLAY_IMAGE = {
-  src: '/ImagenHeader.png',
-  heightVh: 80,
-  rightPercent: -5,
-  centerYOffsetPx: 40,
-  frontClipPercent: 100,
-} as const;
+const LeafletMap = MapContainer as unknown as ComponentType<AnyProps>;
+const LeafletTiles = TileLayer as unknown as ComponentType<AnyProps>;
+const LeafletGeoJson = GeoJSON as unknown as ComponentType<AnyProps>;
 
-function joinClasses(...values: Array<string | false | null | undefined>) {
-  return values.filter(Boolean).join(' ');
+const COVERAGE_PLACEMARKS_URL = '/maps/coverage-placemarks.json';
+const COVERAGE_STYLES_URL = '/maps/coverage-styles.json';
+
+type GeometryType = 'Point' | 'Polygon' | 'LineString' | 'Unknown';
+
+interface CoveragePlacemark {
+  name: string;
+  folder: string;
+  styleUrl: string;
+  geometryType: GeometryType;
+  coordinates: string;
 }
 
-function Header({ isNight, isAnimating, onToggleTheme }: { isNight: boolean; isAnimating: boolean; onToggleTheme: () => void }) {
+interface KmlStyle {
+  id: string;
+  polyColor: string | null;
+  lineColor: string | null;
+  iconHref: string | null;
+}
+
+interface KmlStyleMap {
+  id: string;
+  normal: string | null;
+  highlight: string | null;
+}
+
+interface CoverageStylesPayload {
+  styles: KmlStyle[];
+  styleMaps: KmlStyleMap[];
+}
+
+function normalizeLabel(value: string) {
+  return value
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^A-Za-z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toUpperCase();
+}
+
+function fixMojibake(value: string) {
+  if (!value) return value;
+  try {
+    const bytes = Uint8Array.from(value, (ch) => ch.charCodeAt(0));
+    const decoded = new TextDecoder('utf-8').decode(bytes);
+    return decoded.includes('�') ? value : decoded;
+  } catch {
+    return value;
+  }
+}
+
+function escapeHtml(value: string) {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function buildTariffInfoWhatsappUrl(placeName: string) {
+  const message = `Hola, necesito información sobre la tarifa de ${placeName}.`;
+  return `https://api.whatsapp.com/send?phone=${whatsappTariffInfoPhone}&text=${encodeURIComponent(message)}`;
+}
+
+function isGreenZoneStyle(styleUrl: string) {
+  return styleUrl.toUpperCase().includes('POLY-0F9D58');
+}
+
+function parseKmlColor(kmlColor: string | null | undefined, fallback: string) {
+  if (!kmlColor || kmlColor.length !== 8) {
+    return { color: fallback, opacity: 0.75 };
+  }
+
+  const aa = kmlColor.slice(0, 2);
+  const bb = kmlColor.slice(2, 4);
+  const gg = kmlColor.slice(4, 6);
+  const rr = kmlColor.slice(6, 8);
+
+  const opacity = Number.parseInt(aa, 16) / 255;
+  return {
+    color: `#${rr}${gg}${bb}`,
+    opacity: Number.isFinite(opacity) ? opacity : 0.75,
+  };
+}
+
+function parseKmlCoords(raw: string) {
+  return raw
+    .trim()
+    .split(/\s+/)
+    .map((token) => token.split(',').slice(0, 2).map((v) => Number(v)))
+    .filter((pair) => pair.length === 2 && Number.isFinite(pair[0]) && Number.isFinite(pair[1]))
+    .map((pair) => [pair[0], pair[1]] as [number, number]);
+}
+
+
+const isoCodes = ['ISO 9001', 'ISO 14001', 'ISO 45001', 'ISO 27001', 'ISO 28000', 'ISO 50001'];
+
+const values = ['Responsabilidad', 'Empatía', 'Resiliencia', 'Aprendizaje'];
+
+const socialLinks = [
+  { label: 'Instagram', href: 'https://www.instagram.com/dinsides', icon: Instagram },
+  { label: 'Facebook', href: 'https://www.facebook.com/DinsidesCourier/', icon: Facebook },
+  { label: 'TikTok', href: 'https://www.tiktok.com/@dinsides', icon: Music2 },
+  { label: 'LinkedIn', href: 'https://pe.linkedin.com/company/dinsides-courier', icon: Linkedin },
+  { label: 'YouTube', href: 'https://www.youtube.com/@dinsidescourier', icon: Youtube },
+];
+
+function cx(...classes: Array<string | false | null | undefined>) {
+  return classes.filter(Boolean).join(' ');
+}
+
+function useScrollReveal(trigger?: unknown) {
+  useEffect(() => {
+    const els = document.querySelectorAll('.reveal');
+
+    const markVisibleNow = (el: Element) => {
+      const rect = (el as HTMLElement).getBoundingClientRect();
+      const viewportHeight = window.innerHeight || document.documentElement.clientHeight;
+      const isVisible = rect.top < viewportHeight * 0.92 && rect.bottom > 0;
+      if (isVisible) {
+        el.classList.add('in-view');
+      }
+    };
+
+    els.forEach((el) => markVisibleNow(el));
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          if (entry.isIntersecting) {
+            entry.target.classList.add('in-view');
+          }
+        });
+      },
+      { threshold: 0.08, rootMargin: '0px 0px -48px 0px' },
+    );
+    els.forEach((el) => observer.observe(el));
+    return () => observer.disconnect();
+  }, [trigger]);
+}
+
+function Header({
+  isNight,
+  isAnimating,
+  onToggleTheme,
+  onNavigateSection,
+}: {
+  isNight: boolean;
+  isAnimating: boolean;
+  onToggleTheme: () => void;
+  onNavigateSection: (event: React.MouseEvent<HTMLAnchorElement>, href: string) => void;
+}) {
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+
+  const handleMobileNav = (event: React.MouseEvent<HTMLAnchorElement>, href: string) => {
+    onNavigateSection(event, href);
+    setMobileMenuOpen(false);
+  };
+
   return (
-    <header className={joinClasses(
-      'fixed inset-x-0 top-0 z-50 border-b backdrop-blur-lg transition-colors duration-500',
-      isNight ? 'border-white/10 bg-black/70' : 'border-black/10 bg-white/75',
-    )}>
-      <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-5 py-4 sm:px-8 lg:px-10">
-        <a href="#inicio" className="flex items-center gap-0.5">
-          <img src="/icon-dinsides.png" alt="Dinsides Courier" className={joinClasses('h-15 w-15 rounded-2xl object-cover')} />
-          <div className="hidden flex-col items-start leading-[0.9] md:flex gap-0.5">
-            <p className={joinClasses('text-[12px] uppercase tracking-[0.1em] font-extrabold', isNight ? 'text-white' : 'text-black')}>Dinsides</p>
-            <p className={joinClasses('text-[8px] uppercase tracking-[0.15em] font-thin', isNight ? 'text-white' : 'text-red-500')}>Courier</p>
+    <header
+      className={cx(
+        'fixed inset-x-0 top-0 z-[1200] border-b backdrop-blur-lg transition-colors duration-500',
+        isNight ? 'border-white/10 bg-black/70' : 'border-black/10 bg-white/82',
+      )}
+    >
+      <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-5 py-3.5 sm:px-8 lg:px-10">
+        <a href="#inicio" className="flex items-center gap-2.5">
+          <img
+            src="/icon-dinsides.png"
+            alt="Dinsides Courier"
+            className="h-9 w-9 rounded-xl object-cover"
+          />
+          <div className="flex flex-col leading-none gap-[3px]">
+            <span
+              className={cx(
+                'text-[11px] uppercase tracking-[0.12em] font-black',
+                isNight ? 'text-white' : 'text-black',
+              )}
+            >
+              Dinsides
+            </span>
+            <span
+              className={cx(
+                'text-[8px] uppercase tracking-[0.18em] font-light',
+                isNight ? 'text-white/45' : 'text-red-500',
+              )}
+            >
+              Courier
+            </span>
           </div>
         </a>
 
-        <nav className={joinClasses('hidden items-center gap-6 text-sm md:flex', isNight ? 'text-white/70' : 'text-gray-700')}>
+        <nav
+          className={cx(
+            'hidden items-center gap-8 text-[13px] md:flex',
+            isNight ? 'text-white/55' : 'text-gray-500',
+          )}
+        >
           {navItems.map((item) => (
-            <a key={item.href} href={item.href} className={joinClasses('transition', isNight ? 'hover:text-white' : 'hover:text-black')}>
+            <a
+              key={item.href}
+              href={item.href}
+              onClick={(event) => onNavigateSection(event, item.href)}
+              className={cx(
+                'transition-colors',
+                isNight ? 'hover:text-white text-white/55' : 'hover:text-black text-gray-800',
+              )}
+            >
               {item.label}
             </a>
           ))}
         </nav>
 
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2.5">
           <button
             type="button"
             onClick={onToggleTheme}
-            aria-label="Cambiar tema día y noche"
-            className={joinClasses(
-              'relative inline-flex h-9 w-9 items-center justify-center rounded-full border transition duration-500',
+            aria-label="Cambiar tema"
+            className={cx(
+              'hidden md:inline-flex h-8 w-8 items-center justify-center rounded-full border transition duration-500',
               isNight
-                ? 'border-white/15 bg-white/5 text-white hover:bg-white/10'
-                : 'border-black/15 bg-black/5 text-black hover:bg-black/10',
-              isAnimating && 'ring-2 ring-red-400/40',
+                ? 'border-white/15 bg-white/5 text-white'
+                : 'border-black/15 bg-black/5 text-black',
+              isAnimating && 'ring-2 ring-red-500/30',
             )}
           >
-            <span className={joinClasses('transition-transform duration-500', isNight ? 'rotate-0 scale-100' : 'rotate-180 scale-95')}>
-              {isNight ? <Moon size={16} /> : <Sun size={16} />}
-            </span>
+            {isNight ? <Moon size={14} /> : <Sun size={14} />}
           </button>
-
           <a
-            href={whatsappPremiumUrl}
-            target="_blank"
-            rel="noreferrer"
-            className="inline-flex items-center gap-2 rounded-full border border-red-500/40 bg-red-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-red-500"
+            href="/dashboard"
+            className={cx(
+              'hidden sm:inline-flex h-8 items-center justify-center gap-1.5 rounded-full border px-3 shadow-[0_10px_20px_-12px_rgba(220,38,38,0.9)] transition-all duration-200 hover:-translate-y-0.5 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-300/80 focus-visible:ring-offset-2',
+              isNight
+                ? 'border-red-500/80 bg-red-600 text-white'
+                : 'border-red-500/80 bg-red-600 text-white',
+            )}
+            aria-label="Login"
+            title="Login"
           >
-            <MessageCircle size={16} />
-            Tarifas exclusivas
+            <CircleUserRound size={16} />
+            <span className="text-[11px] font-semibold uppercase tracking-[0.08em]">Clientes</span>
           </a>
+
+          <button
+            type="button"
+            onClick={() => setMobileMenuOpen((prev) => !prev)}
+            aria-label={mobileMenuOpen ? 'Cerrar menú' : 'Abrir menú'}
+            className={cx(
+              'inline-flex h-8 w-8 items-center justify-center rounded-full border transition md:hidden',
+              isNight
+                ? 'border-white/15 bg-white/5 text-white'
+                : 'border-black/15 bg-black/5 text-black',
+            )}
+          >
+            {mobileMenuOpen ? <X size={15} /> : <Menu size={15} />}
+          </button>
+        </div>
+      </div>
+
+      <div
+        className={cx(
+          'md:hidden overflow-hidden border-t transition-all duration-300',
+          isNight ? 'border-white/10 bg-black/85' : 'border-black/10 bg-white/95',
+          mobileMenuOpen ? 'max-h-[420px] opacity-100' : 'max-h-0 opacity-0',
+        )}
+      >
+        <div className="mx-auto max-w-7xl px-5 py-3 sm:px-8">
+          <nav className="flex flex-col gap-1.5">
+            {navItems.map((item) => (
+              <a
+                key={`mobile-${item.href}`}
+                href={item.href}
+                onClick={(event) => handleMobileNav(event, item.href)}
+                className={cx(
+                  'rounded-xl px-3 py-2 text-sm font-medium transition-colors',
+                  isNight
+                    ? 'text-white/80 hover:bg-white/8 hover:text-white'
+                    : 'text-gray-800 hover:bg-black/5 hover:text-black',
+                )}
+              >
+                {item.label}
+              </a>
+            ))}
+          </nav>
+
+          <div className="mt-3 flex items-center gap-2">
+            <button
+              type="button"
+              onClick={onToggleTheme}
+              aria-label="Cambiar tema"
+              className={cx(
+                'inline-flex h-9 flex-1 items-center justify-center gap-2 rounded-xl border text-sm font-semibold transition duration-500',
+                isNight
+                  ? 'border-white/15 bg-white/5 text-white'
+                  : 'border-black/15 bg-black/5 text-black',
+                isAnimating && 'ring-2 ring-red-500/30',
+              )}
+            >
+              {isNight ? <Moon size={14} /> : <Sun size={14} />}
+              {isNight ? 'Modo noche' : 'Modo día'}
+            </button>
+
+            <a
+              href="/dashboard"
+              className="inline-flex h-9 items-center justify-center gap-1.5 rounded-xl border border-red-500/80 bg-red-600 px-3 text-sm font-semibold text-white shadow-[0_10px_20px_-12px_rgba(220,38,38,0.9)] transition-all duration-200"
+            >
+              <CircleUserRound size={15} />
+              Clientes
+            </a>
+          </div>
         </div>
       </div>
     </header>
@@ -183,215 +525,879 @@ function Header({ isNight, isAnimating, onToggleTheme }: { isNight: boolean; isA
 }
 
 export function LandingPage() {
-  const [isNight, setIsNight] = useState(true);
+  const [isNight, setIsNight] = useState(false);
   const [isThemeAnimating, setIsThemeAnimating] = useState(false);
-  const softBorderClass = isNight ? 'border-white/10' : 'border-black/10';
-  const sectionAltClass = isNight ? 'bg-white/[0.02]' : 'bg-black/[0.02]';
-  const mutedTextClass = isNight ? 'text-white/75' : 'text-gray-600';
-  const cardClass = isNight ? 'bg-black/30' : 'bg-white';
-  const activeHeroSlide = heroSlides[0];
-  const ledRgb = isNight ? '255, 255, 255' : '0, 0, 0';
-  const ledBaseOpacity = isNight ? HERO_LED_GLOW.baseOpacityNight : HERO_LED_GLOW.baseOpacityDay;
-  const ledGlowOpacity = isNight ? HERO_LED_GLOW.glowOpacityNight : HERO_LED_GLOW.glowOpacityDay;
-  const ledStrokeOpacity = isNight ? HERO_LED_GLOW.strokeOpacityNight : HERO_LED_GLOW.strokeOpacityDay;
-  const heroLedTextStyle = {
-    textShadow: `0 0 ${HERO_LED_GLOW.blurSoftPx}px rgba(${ledRgb}, ${ledBaseOpacity}), 0 0 ${HERO_LED_GLOW.blurStrongPx}px rgba(${ledRgb}, ${ledGlowOpacity})`,
-    WebkitTextStroke: `1px rgba(${ledRgb}, ${ledStrokeOpacity})`,
-  } as const;
+  const [cursorEnabled, setCursorEnabled] = useState(false);
+  const [activeTestimonialSlide, setActiveTestimonialSlide] = useState(0);
+  const [isDesktopTestimonials, setIsDesktopTestimonials] = useState(() => {
+    if (typeof window === 'undefined') return false;
+    return window.matchMedia('(min-width: 1024px)').matches;
+  });
+  const [showScrollTop, setShowScrollTop] = useState(false);
+  const [coverageGeoJson, setCoverageGeoJson] = useState<AnyProps | null>(null);
+  const landingRootRef = useRef<HTMLDivElement>(null);
+  const heroBgRef = useRef<HTMLDivElement>(null);
+  const mapIconCache = useRef(new Map<string, L.Icon>());
+  const cursorInteractiveRef = useRef(false);
+
+  useScrollReveal(isNight);
+
+  const tariffLookup = useRef(
+    new Map(
+      coverageTariffs.map((item) => [
+        normalizeLabel(item.district)
+          .replace(/^SANTIAGO DE SURCO$/, 'SURCO')
+          .replace(/^LURIGANCHO CHOSICA$/, 'CHOSICA')
+          .replace(/^EL MARQUEZ CALLAO$/, 'MARQUEZ CALLAO')
+          .replace(/^SALAMANCA ATE$/, 'SALAMANCA')
+          .trim(),
+        item,
+      ]),
+    ),
+  );
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const run = async () => {
+      try {
+        const [placemarksResponse, stylesResponse] = await Promise.all([
+          fetch(COVERAGE_PLACEMARKS_URL),
+          fetch(COVERAGE_STYLES_URL),
+        ]);
+        if (!placemarksResponse.ok || !stylesResponse.ok) return;
+
+        const placemarks = (await placemarksResponse.json()) as CoveragePlacemark[];
+        const stylesPayload = (await stylesResponse.json()) as CoverageStylesPayload;
+
+        const styleById = new Map(stylesPayload.styles.map((s) => [s.id, s] as const));
+        const styleMapById = new Map(stylesPayload.styleMaps.map((s) => [s.id, s] as const));
+
+        const resolveStyle = (styleUrl: string) => {
+          const raw = styleUrl.replace('#', '').trim();
+          const mapped = styleMapById.get(raw)?.normal ?? raw;
+          return styleById.get(mapped) ?? null;
+        };
+
+        const features = placemarks
+          .map((placemark) => {
+            const coords = parseKmlCoords(placemark.coordinates);
+            if (!coords.length) return null;
+
+            // Quitar puntos de encuentro y rutas: solo polígonos de zonas
+            if (placemark.geometryType !== 'Polygon') return null;
+
+            let geometry: Record<string, unknown> | null = null;
+            if (coords.length < 3) return null;
+            const ring = [...coords];
+            const first = ring[0];
+            const last = ring[ring.length - 1];
+            if (first[0] !== last[0] || first[1] !== last[1]) ring.push(first);
+            geometry = { type: 'Polygon', coordinates: [ring] };
+
+            if (!geometry) return null;
+
+            const style = resolveStyle(placemark.styleUrl);
+            const isLaPunta = normalizeLabel(fixMojibake(placemark.name)) === 'LA PUNTA';
+            if (!isGreenZoneStyle(placemark.styleUrl) && !isLaPunta) return null;
+            const fill = parseKmlColor(style?.polyColor, '#ef4444');
+            const stroke = parseKmlColor(style?.lineColor, '#111827');
+            const cleanedName = fixMojibake(placemark.name);
+            const cleanedFolder = fixMojibake(placemark.folder);
+
+            const normalizedName = normalizeLabel(cleanedName)
+              .replace(/^SANTIAGO DE SURCO$/, 'SURCO')
+              .replace(/^LURIGANCHO CHOSICA$/, 'CHOSICA')
+              .replace(/^EL MARQUEZ CALLAO$/, 'MARQUEZ CALLAO')
+              .replace(/^SALAMANCA ATE$/, 'SALAMANCA')
+              .trim();
+            const tariff = tariffLookup.current.get(normalizedName) ?? null;
+
+            return {
+              type: 'Feature',
+              geometry,
+              properties: {
+                name: cleanedName,
+                folder: cleanedFolder,
+                styleUrl: placemark.styleUrl,
+                geometryType: placemark.geometryType,
+                fillColor: fill.color,
+                fillOpacity: fill.opacity,
+                strokeColor: stroke.color,
+                strokeOpacity: stroke.opacity,
+                iconHref: style?.iconHref ?? null,
+                tariffPrice: tariff?.price ?? null,
+                tariffDistrict: tariff?.district ?? null,
+                isGreenZone: isGreenZoneStyle(placemark.styleUrl),
+              },
+            };
+          })
+          .filter((f) => f !== null) as Record<string, unknown>[];
+
+        if (isMounted) setCoverageGeoJson({ type: 'FeatureCollection', features });
+      } catch {
+        // no-op
+      }
+    };
+
+    void run();
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  const getMarkerIcon = (iconHref: string | null) => {
+    const key = iconHref ?? '__default__';
+    const cached = mapIconCache.current.get(key);
+    if (cached) return cached;
+
+    const icon = L.icon({
+      iconUrl: iconHref ? `/maps/google-export/${iconHref}` : '/maps/google-export/images/icon-1.png',
+      iconSize: [22, 22],
+      iconAnchor: [11, 11],
+    });
+    mapIconCache.current.set(key, icon);
+    return icon;
+  };
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const mediaQuery = window.matchMedia('(hover: hover) and (pointer: fine)');
+    const sync = () => {
+      setCursorEnabled(mediaQuery.matches);
+    };
+
+    sync();
+
+    if (typeof mediaQuery.addEventListener === 'function') {
+      mediaQuery.addEventListener('change', sync);
+      return () => mediaQuery.removeEventListener('change', sync);
+    }
+
+    mediaQuery.addListener(sync);
+    return () => mediaQuery.removeListener(sync);
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const root = landingRootRef.current;
+    if (!root) return;
+
+    if (!cursorEnabled) {
+      cursorInteractiveRef.current = false;
+      root.style.setProperty('--landing-cursor-x', '-9999px');
+      root.style.setProperty('--landing-cursor-y', '-9999px');
+      root.dataset.cursorHover = '0';
+      return;
+    }
+
+    cursorInteractiveRef.current = false;
+    root.dataset.cursorHover = '0';
+    const interactiveSelector = 'a,button,[role="button"],input,select,textarea,summary,.leaflet-interactive,.leaflet-control-zoom a,[data-cursor="circle"]';
+
+    const handleMouseMove = (event: MouseEvent) => {
+      root.style.setProperty('--landing-cursor-x', `${event.clientX}px`);
+      root.style.setProperty('--landing-cursor-y', `${event.clientY}px`);
+
+      const target = event.target instanceof Element ? event.target : null;
+      const interactive = Boolean(target?.closest(interactiveSelector));
+      if (interactive !== cursorInteractiveRef.current) {
+        cursorInteractiveRef.current = interactive;
+        root.dataset.cursorHover = interactive ? '1' : '0';
+      }
+    };
+
+    const handleMouseLeave = () => {
+      root.style.setProperty('--landing-cursor-x', '-9999px');
+      root.style.setProperty('--landing-cursor-y', '-9999px');
+      cursorInteractiveRef.current = false;
+      root.dataset.cursorHover = '0';
+    };
+
+    window.addEventListener('mousemove', handleMouseMove, { passive: true });
+    window.addEventListener('mouseleave', handleMouseLeave);
+
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseleave', handleMouseLeave);
+      root.style.setProperty('--landing-cursor-x', '-9999px');
+      root.style.setProperty('--landing-cursor-y', '-9999px');
+      root.dataset.cursorHover = '0';
+    };
+  }, [cursorEnabled]);
+
+  useEffect(() => {
+    if (typeof document === 'undefined') return;
+    const { body } = document;
+    const dayClass = 'landing-mode-day';
+    const nightClass = 'landing-mode-night';
+
+    body.classList.remove(dayClass, nightClass);
+    body.classList.add(isNight ? nightClass : dayClass);
+
+    return () => {
+      body.classList.remove(dayClass, nightClass);
+    };
+  }, [isNight]);
+
+  useEffect(() => {
+    const handleScroll = () => {
+      if (heroBgRef.current) {
+        heroBgRef.current.style.transform = `translateY(${window.scrollY * 0.32}px)`;
+      }
+
+      setShowScrollTop(window.scrollY > 220);
+    };
+
+    handleScroll();
+    window.addEventListener('scroll', handleScroll, { passive: true });
+    return () => window.removeEventListener('scroll', handleScroll);
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const mediaQuery = window.matchMedia('(min-width: 1024px)');
+
+    const sync = () => {
+      setIsDesktopTestimonials(mediaQuery.matches);
+    };
+
+    sync();
+
+    if (typeof mediaQuery.addEventListener === 'function') {
+      mediaQuery.addEventListener('change', sync);
+      return () => mediaQuery.removeEventListener('change', sync);
+    }
+
+    mediaQuery.addListener(sync);
+    return () => mediaQuery.removeListener(sync);
+  }, []);
+
+  const testimonialSlides = useMemo(() => {
+    const chunkSize = isDesktopTestimonials ? 3 : 1;
+    const slides: typeof testimonials[] = [];
+
+    for (let index = 0; index < testimonials.length; index += chunkSize) {
+      slides.push(testimonials.slice(index, index + chunkSize));
+    }
+
+    return slides;
+  }, [isDesktopTestimonials]);
+
+  useEffect(() => {
+    const totalSlides = testimonialSlides.length;
+    if (!totalSlides) return;
+
+    const timer = window.setInterval(() => {
+      setActiveTestimonialSlide((current) => (current + 1) % totalSlides);
+    }, 6000);
+
+    return () => window.clearInterval(timer);
+  }, [testimonialSlides.length]);
 
   const handleToggleTheme = () => {
     setIsThemeAnimating(true);
-    setIsNight((current) => !current);
+    setIsNight((v) => !v);
     window.setTimeout(() => setIsThemeAnimating(false), 520);
   };
 
+  const handleScrollToTop = (event: React.MouseEvent<HTMLAnchorElement>) => {
+    event.preventDefault();
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const handleNavigateSection = (event: React.MouseEvent<HTMLAnchorElement>, href: string) => {
+    if (!href.startsWith('#')) return;
+
+    const target = document.querySelector(href) as HTMLElement | null;
+    if (!target) return;
+
+    event.preventDefault();
+    const headerOffset = 84;
+    const targetTop = target.getBoundingClientRect().top + window.scrollY - headerOffset;
+    window.scrollTo({ top: Math.max(targetTop, 0), behavior: 'smooth' });
+  };
+
+  const n = isNight;
+  const activeTestimonialIndex = testimonialSlides.length > 0
+    ? activeTestimonialSlide % testimonialSlides.length
+    : 0;
+  const bg = n ? '#080808' : '#f5f5f5';
+  const border = n ? 'border-white/[0.09]' : 'border-black/[0.08]';
+  const muted = n ? 'text-white/60' : 'text-gray-800';
+  const cardBase = n
+    ? 'bg-white/[0.04] border-white/[0.09]'
+    : 'bg-black/[0.025] border-black/[0.07]';
+  const divideColor = n ? 'divide-white/[0.08]' : 'divide-black/[0.07]';
+
   return (
-    <div className={joinClasses('relative min-h-screen overflow-x-hidden selection:bg-red-600 selection:text-white', isNight ? 'text-white' : 'text-gray-900')}>
-      <div className={joinClasses('pointer-events-none fixed inset-0 -z-20 transition-opacity duration-700', isNight ? 'bg-black opacity-100' : 'bg-black opacity-0')} />
-      <div className={joinClasses('pointer-events-none fixed inset-0 -z-20 transition-opacity duration-700', isNight ? 'bg-white opacity-0' : 'bg-white opacity-100')} />
+    <div
+      ref={landingRootRef}
+      className={cx(
+        'relative min-h-screen overflow-x-hidden selection:bg-red-600 selection:text-white landing-root',
+        cursorEnabled && 'landing-cursor-enabled',
+        n ? 'text-white' : 'text-gray-900',
+      )}
+      style={{ backgroundColor: bg }}
+    >
       <div
-        className={joinClasses(
-          'pointer-events-none fixed inset-0 -z-10 bg-[radial-gradient(circle_at_20%_20%,rgba(255, 0, 0, 0.22),transparent_42%)] transition-opacity duration-500',
+        aria-hidden="true"
+        className={cx('landing-cursor-glow', cursorEnabled && 'is-active')}
+      />
+      <div
+        aria-hidden="true"
+        className={cx('landing-cursor-ring', cursorEnabled && 'is-active')}
+      />
+
+      {/* Theme transition flash */}
+      <div
+        className={cx(
+          'pointer-events-none fixed inset-0 z-40 bg-[radial-gradient(circle_at_20%_20%,rgba(220,38,38,0.15),transparent_55%)] transition-opacity duration-500',
           isThemeAnimating ? 'opacity-100' : 'opacity-0',
         )}
       />
 
-      <Header isNight={isNight} isAnimating={isThemeAnimating} onToggleTheme={handleToggleTheme} />
+      <Header
+        isNight={n}
+        isAnimating={isThemeAnimating}
+        onToggleTheme={handleToggleTheme}
+        onNavigateSection={handleNavigateSection}
+      />
 
       <main>
-        <section
-          id="inicio"
-          className={joinClasses('relative overflow-hidden border-b min-h-[100svh]', softBorderClass)}
-        >
-          <div className={joinClasses('landing-noise absolute inset-0', isNight ? 'opacity-35' : 'opacity-10')} />
-          <div className={joinClasses('landing-grid absolute inset-0', isNight ? 'opacity-15' : 'opacity-10')} />
+        {/* ── HERO ────────────────────────────────────────────── */}
+        <section id="inicio" className="relative min-h-[100svh] overflow-hidden">
+          {/* Parallax background */}
+          <div ref={heroBgRef} className="hero-parallax absolute inset-0 scale-[1.12]">
+            <img
+              src="/hero/slide-01.jpg"
+              alt=""
+              aria-hidden="true"
+              className="h-full w-full object-cover object-[center_38%]"
+            />
+          </div>
 
-          <div className="relative h-[100svh] overflow-hidden">
-            <div className="absolute inset-0 transition-all duration-[1400ms] ease-out opacity-100 scale-100 translate-y-0">
-              <img
-                src={activeHeroSlide.image}
-                alt="Slide principal"
-                className="absolute inset-0 h-full w-full object-cover object-center transition-transform duration-[1800ms] ease-out scale-100"
-                style={{ objectPosition: activeHeroSlide.objectPosition }}
-              />
-              <div
-                className={joinClasses(
-                  'absolute inset-0',
-                  isNight
-                    ? 'bg-[linear-gradient(96deg,rgba(0,0,0,0.72)_0%,rgba(0,0,0,0.42)_38%,rgba(0,0,0,0.58)_100%)]'
-                    : 'bg-[linear-gradient(96deg,rgba(255,255,255,0.84)_0%,rgba(255,255,255,0.52)_38%,rgba(245,245,245,0.38)_100%)]',
-                )}
-              />
-            </div>
+          {/* Gradient overlay */}
+          <div
+            className={cx(
+              'absolute inset-0',
+              n
+                ? 'bg-[linear-gradient(108deg,rgba(0,0,0,0.82)_0%,rgba(0,0,0,0.44)_52%,rgba(0,0,0,0.68)_100%)]'
+                : 'bg-[linear-gradient(108deg,rgba(255,255,255,0.90)_0%,rgba(255,255,255,0.58)_52%,rgba(240,240,240,0.42)_100%)]',
+            )}
+          />
 
-            <div className="pointer-events-none absolute inset-0">
-              <img
-                src={HERO_OVERLAY_IMAGE.src}
-                alt=""
-                aria-hidden="true"
-                className="absolute top-1/2 object-contain"
-                style={{
-                  height: `${HERO_OVERLAY_IMAGE.heightVh}svh`,
-                  right: `${HERO_OVERLAY_IMAGE.rightPercent}%`,
-                  transform: `translateY(calc(-50% + ${HERO_OVERLAY_IMAGE.centerYOffsetPx}px))`,
-                  zIndex: 12,
-                }}
-              />
+          {/* Subtle noise */}
+          <div className={cx('landing-noise absolute inset-0', n ? 'opacity-28' : 'opacity-8')} />
+          <div className={cx('landing-grid absolute inset-0', n ? 'opacity-10' : 'opacity-7')} />
 
-              <div className="absolute inset-0 z-20 flex items-center justify-center">
-                <div className="relative inline-flex flex-col items-start">
-                  <h1
-                    className={joinClasses('text-[26vw] font-black uppercase leading-[0.8] tracking-[0.1em] md:text-[16vw]', isNight ? 'text-white/[0.32]' : 'text-black/[0.85]')}
-                    style={heroLedTextStyle}
+          {/* Hero content */}
+          <div className="relative z-10 flex min-h-[100svh] items-center px-5 pb-16 pt-24 sm:px-8 sm:pb-20 sm:pt-28 lg:px-12 lg:pt-24">
+            <div className="mx-auto grid w-full max-w-6xl items-center gap-6 lg:grid-cols-[1.02fr_0.98fr] lg:gap-6">
+              <div className="mx-auto w-full max-w-3xl self-center text-center lg:mx-0 lg:max-w-xl lg:text-left">
+                <p className="mb-4 text-[10px] uppercase tracking-[0.3em] text-red-400 sm:mb-5 sm:tracking-[0.34em]">
+                  Operador logístico oficial · Lima, Perú
+                </p>
+
+                <h1
+                  className={cx(
+                    'text-[18vw] font-black uppercase leading-[0.84] tracking-[-0.02em] sm:text-[14vw] md:text-[10vw] lg:text-[7.5vw] xl:text-[6.6vw]',
+                    n ? 'text-white/90' : 'text-black/85',
+                  )}
+                >
+                  DINSIDES
+                </h1>
+
+                <p className={cx('mx-auto mt-6 max-w-sm text-sm leading-7 sm:mt-7 md:max-w-lg md:text-base lg:mx-0', muted)}>
+                  Más que un courier somos el motor que impulsa tu marca.
+                </p>
+
+                <div className="mt-7 flex flex-wrap justify-center gap-3 sm:mt-8 lg:justify-start">
+                  <a
+                    href={whatsappSalesUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex items-center gap-2 rounded-full bg-red-600 px-6 py-3 text-sm font-semibold text-white transition"
                   >
-                    DINSIDES
-                  </h1>
-
-                  <p className={joinClasses(
-                    'mt-1 max-w-[min(88vw,720px)] rounded-full px-3  text-[11px] font-medium leading-relaxed sm:mt-2 sm:px-4 sm:py-1 sm:text-sm md:text-xl backdrop-blur-[2px]',
-                    isNight
-                      ? '+text-white/88'
-                      : 'text-black/78',
-                  )}>
-                    Más que un servicio logístico, somos el motor que impulsa tu marca.
-                  </p>
+                    <MessageCircle size={15} />
+                    Contáctanos
+                  </a>
+                <a
+                  href="#servicios"
+                  onClick={(event) => handleNavigateSection(event, '#servicios')}
+                  className={cx(
+                    'inline-flex items-center gap-2 rounded-full border px-6 py-3 text-sm font-semibold transition',
+                    n
+                        ? 'border-white/20 text-white'
+                        : 'border-black/20 text-black',
+                    )}
+                  >
+                    Ver servicios
+                    <ArrowRight size={15} />
+                  </a>
                 </div>
               </div>
 
-              <img
-                src={HERO_OVERLAY_IMAGE.src}
-                alt=""
-                aria-hidden="true"
-                className="absolute top-1/2 object-contain"
-                style={{
-                  height: `${HERO_OVERLAY_IMAGE.heightVh}svh`,
-                  right: `${HERO_OVERLAY_IMAGE.rightPercent}%`,
-                  transform: `translateY(calc(-50% + ${HERO_OVERLAY_IMAGE.centerYOffsetPx}px))`,
-                  clipPath: `inset(0 ${100 - HERO_OVERLAY_IMAGE.frontClipPercent}% 0 0)`,
-                  zIndex: 28,
-                }}
-              />
+              <div className="hidden h-full lg:block">
+                <div className="h-full min-h-[460px] overflow-hidden rounded-[1.8rem] xl:min-h-[500px]">
+                  <img
+                    src="/ImagenHeader.png"
+                    alt="Dinsides Courier"
+                    className="h-full w-full object-cover object-center"
+                  />
+                </div>
+              </div>
             </div>
+          </div>
 
+          {/* Scroll hint */}
+          <div
+            className={cx(
+              'absolute bottom-6 left-1/2 hidden -translate-x-1/2 flex-col items-center gap-2 sm:flex',
+              muted,
+            )}
+          >
+            <span className="text-[9px] uppercase tracking-[0.22em]">Scroll</span>
+            <ArrowDown size={13} className="animate-bounce" />
+          </div>
+
+          {/* Bottom fade into page */}
+          <div
+            className="absolute bottom-0 left-0 right-0 h-36 pointer-events-none"
+            style={{ background: `linear-gradient(to top, ${bg}, transparent)` }}
+          />
+        </section>
+
+        {/* ── STATS BAR ───────────────────────────────────────── */}
+        <div className={cx('border-y', border)}>
+          <dl
+            className={cx(
+              'mx-auto max-w-7xl grid grid-cols-2 md:grid-cols-4 divide-x',
+              divideColor,
+            )}
+          >
+            {stats.map(({ value, label }, i) => (
+              <div
+                key={label}
+                className={cx('reveal px-6 py-8 text-center', i > 0 && `reveal-delay-${i}`)}
+              >
+                <dt className={cx('text-2xl font-black md:text-3xl', n ? 'text-white' : 'text-black')}>
+                  {value}
+                </dt>
+                <dd className={cx('mt-1.5 text-[10px] uppercase tracking-[0.22em]', muted)}>
+                  {label}
+                </dd>
+              </div>
+            ))}
+          </dl>
+        </div>
+
+        {/* ── NOSOTROS ────────────────────────────────────────── */}
+        <section id="nosotros" className="mx-auto max-w-7xl px-5 py-20 sm:px-8 lg:px-10">
+          <div className="reveal mb-10">
+            <p className="text-[10px] uppercase tracking-[0.3em] text-red-400">Nosotros</p>
+            <div className="editorial-rule mt-3" />
+          </div>
+
+          <div className="grid gap-3 lg:grid-cols-3">
+            {/* Mission — large card spanning 2 cols */}
+            <article
+              className={cx(
+                'reveal rounded-[1.8rem] border p-7 lg:col-span-2 md:p-9 glass-card', n ? 'glass-card-night' : 'glass-card-day',
+                cardBase,
+              )}
+            >
+              <p className={cx('text-[10px] uppercase tracking-[0.26em] mb-5', muted)}>Misión</p>
+              <h2
+                className={cx(
+                  'text-xl font-bold leading-snug md:text-2xl md:leading-snug',
+                  n ? 'text-white' : 'text-black',
+                )}
+              >
+                Contribuir al propósito de nuestros clientes y talento, prestando un servicio
+                responsable que genere satisfacción real.
+              </h2>
+              <p className={cx('mt-6 text-sm leading-7', muted)}>
+                Empresa 100% formal, avalada por la Cámara de Comercio de Gamarra, con permiso del
+                Ministerio de Transporte.
+              </p>
+              <p className={cx('mt-2 text-sm leading-7', muted)}>
+                Av. Arica 1702, Cercado de Lima · Jr. Antonio Bazo 1218, La Victoria.
+              </p>
+            </article>
+
+            <div className="flex flex-col gap-3">
+              {/* Vision */}
+              <article className={cx('reveal reveal-delay-1 rounded-[1.8rem] border p-6 glass-card max-h-[11rem]', n ? 'glass-card-night' : 'glass-card-day', cardBase)}>
+                <p className={cx('text-[10px] uppercase tracking-[0.26em] mb-3', muted)}>Visión</p>
+                <p className={cx('text-sm leading-7', n ? 'text-white/75' : 'text-gray-600')}>
+                  Ser el referente de experiencias logísticas seguras y confiables del Perú.
+                </p>
+              </article>
+
+              {/* Values */}
+              <article
+                className={cx('reveal reveal-delay-2 rounded-[1.8rem] border p-6 flex-1 glass-card max-h-[11rem]', n ? 'glass-card-night' : 'glass-card-day', cardBase)}
+              >
+                <p className={cx('text-[10px] uppercase tracking-[0.26em] mb-4', muted)}>Valores</p>
+                <ul className="grid grid-cols-2 gap-y-2.5 gap-x-2">
+                  {values.map((v) => (
+                    <li
+                      key={v}
+                      className={cx('text-sm font-medium', n ? 'text-white/80' : 'text-black/70')}
+                    >
+                      <span className="text-red-500 mr-1.5 font-bold">·</span>
+                      {v}
+                    </li>
+                  ))}
+                </ul>
+              </article>
+            </div>
           </div>
         </section>
 
-        <section id="nosotros" className="mx-auto max-w-7xl px-5 py-18 sm:px-8 lg:px-10">
-          <div className="grid gap-8 lg:grid-cols-[0.95fr_1.05fr]">
-            <div>
-              <p className="text-xs uppercase tracking-[0.3em] text-red-300">Nosotros</p>
-              <h2 className="mt-3 text-4xl font-black tracking-[-0.06em] md:text-5xl">Nuestro objetivo es impulsar el crecimiento de tu marca.</h2>
-            </div>
-
-            <div className={joinClasses('space-y-4', mutedTextClass)}>
-              <p className="text-base leading-8">Somos el operador logístico oficial de Gamarra, avalados por la Cámara de Comercio de Gamarra.</p>
-              <p className="text-base leading-8">Empresa 100% formal con permiso del Ministerio de Transporte.</p>
-              <p className="text-base leading-8">Av. Arica 1702, Cercado de Lima · Jirón Antonio Bazo 1218, La Victoria.</p>
-            </div>
-          </div>
-        </section>
-
-        <section id="servicios" className={joinClasses('border-y', softBorderClass, sectionAltClass)}>
-          <div className="mx-auto max-w-7xl px-5 py-18 sm:px-8 lg:px-10">
-            <div className="mb-8 flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
-              <h2 className="text-4xl font-black tracking-[-0.06em] md:text-5xl">Servicios</h2>
+        {/* ── SERVICIOS ───────────────────────────────────────── */}
+        <section id="servicios" className={cx('border-y', border)}>
+          <div className="mx-auto max-w-7xl px-5 py-20 sm:px-8 lg:px-10">
+            <div className="reveal mb-10 flex flex-col gap-5 md:flex-row md:items-end md:justify-between">
+              <div>
+                <p className="text-[10px] uppercase tracking-[0.3em] text-red-400">Servicios</p>
+                <div className="editorial-rule mt-3" />
+                <h2
+                  className={cx(
+                    'mt-5 text-3xl font-black tracking-tight md:text-4xl',
+                    n ? 'text-white' : 'text-black',
+                  )}
+                >
+                  Soluciones logísticas
+                  <br />
+                  para tu negocio.
+                </h2>
+              </div>
               <a
                 href={whatsappPremiumUrl}
                 target="_blank"
                 rel="noreferrer"
-                className={joinClasses(
-                  'inline-flex items-center gap-2 rounded-full border px-5 py-2.5 text-sm font-semibold transition',
-                  isNight ? 'border-white/15 bg-white/5 text-white hover:bg-white/10' : 'border-black/15 bg-black/5 text-black hover:bg-black/10',
+                className={cx(
+                  'inline-flex items-center gap-2 rounded-full border px-5 py-2.5 text-sm font-semibold transition self-start',
+                  n
+                    ? 'border-white/15 text-white'
+                    : 'border-black/15 text-black',
                 )}
               >
-                Solicita tu plan premium
-                <ArrowRight size={16} />
+                Plan premium
+                <ArrowRight size={14} />
               </a>
             </div>
 
-            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-              {services.map(({ title, description, icon: Icon }) => (
-                <article key={title} className={joinClasses('rounded-[1.6rem] border p-5', softBorderClass, isNight ? 'bg-black/35' : 'bg-white')}>
-                  <Icon size={20} className="text-red-300" />
-                  <h3 className="mt-4 text-2xl font-semibold">{title}</h3>
-                  <p className={joinClasses('mt-3 text-sm leading-7', isNight ? 'text-white/70' : 'text-gray-600')}>{description}</p>
-                </article>
-              ))}
-            </div>
-          </div>
-        </section>
-
-        <section id="cobertura" className="mx-auto max-w-7xl px-5 py-18 sm:px-8 lg:px-10">
-          <div className="grid gap-6 lg:grid-cols-[0.95fr_1.05fr]">
-            <div>
-              <p className="text-xs uppercase tracking-[0.3em] text-red-300">Zona de cobertura</p>
-              <h2 className="mt-3 text-4xl font-black tracking-[-0.06em] md:text-5xl">Tarifario regular</h2>
-              <p className={joinClasses('mt-5 max-w-xl text-sm leading-7', isNight ? 'text-white/70' : 'text-gray-600')}>Precios referenciales para paquetes de 30cm x 20cm x 15cm o 1.5 kg. Medidas mayores, consultar.</p>
-            </div>
-
-            <div className="grid gap-3 sm:grid-cols-2">
-              {coverageHighlights.map(({ district, price }) => (
-                <article key={district} className={joinClasses('flex items-center justify-between rounded-[1.3rem] border px-4 py-3', softBorderClass, isNight ? 'bg-white/5' : 'bg-black/[0.02]')}>
-                  <div className={joinClasses('flex items-center gap-2', isNight ? 'text-white/85' : 'text-gray-700')}>
-                    <MapPinned size={16} className="text-red-300" />
-                    <span>{district}</span>
+            {/* Bento services grid */}
+            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+              {services.map(({ id, title, description, icon: Icon, featured }, i) => (
+                <article
+                  key={id}
+                  className={cx(
+                    'reveal rounded-[1.8rem] border p-6 transition-colors glass-card max-h-[15rem]', n ? 'glass-card-night' : 'glass-card-day',
+                    i > 0 && `reveal-delay-${i % 3}`,
+                    featured
+                      ? cx(
+                        'md:p-8',
+                        n
+                          ? 'bg-white/[0.06] border-white/[0.11]'
+                          : 'bg-black/[0.04] border-black/[0.09]',
+                      )
+                      : cardBase,
+                  )}
+                >
+                  <div
+                    className={cx(
+                      'inline-flex h-10 w-10 items-center justify-center rounded-2xl mb-5',
+                      n ? 'bg-white/[0.07]' : 'bg-black/[0.05]',
+                    )}
+                  >
+                    <Icon size={17} className="text-red-500" />
                   </div>
-                  <span className="font-semibold text-red-200">{price}</span>
+                  <h3
+                    className={cx(
+                      'font-bold',
+                      featured ? 'text-xl' : 'text-base',
+                      n ? 'text-white' : 'text-black',
+                    )}
+                  >
+                    {title}
+                  </h3>
+                  <p className={cx('mt-2.5 text-sm leading-6', muted)}>{description}</p>
                 </article>
               ))}
             </div>
           </div>
         </section>
 
-        <section className={joinClasses('border-y', softBorderClass, sectionAltClass)}>
-          <div className="mx-auto max-w-7xl px-5 py-18 sm:px-8 lg:px-10">
-            <div className="grid gap-8 lg:grid-cols-[1fr_1fr]">
-              <div>
-                <p className="text-xs uppercase tracking-[0.3em] text-red-300">Testimonios</p>
-                <h2 className="mt-3 text-4xl font-black tracking-[-0.06em] md:text-5xl">Nuestros clientes hablan por nosotros</h2>
-                <div className="mt-6 space-y-4">
-                  {testimonials.map(({ quote, author }) => (
-                    <article key={author} className={joinClasses('rounded-[1.4rem] border p-5', softBorderClass, cardClass)}>
-                      <div className="mb-3 flex gap-1 text-red-400">
-                        {Array.from({ length: 5 }).map((_, index) => (
-                          <Star key={`${author}-${index}`} size={14} fill="currentColor" />
+        {/* ── COBERTURA ───────────────────────────────────────── */}
+        <section id="cobertura" className="mx-auto max-w-7xl px-5 py-20 sm:px-8 lg:px-10">
+          <div className="reveal">
+            <p className="text-[10px] uppercase tracking-[0.3em] text-red-400">Cobertura</p>
+            <div className="editorial-rule mt-3" />
+            <h2
+              className={cx(
+                'mt-5 text-3xl font-black tracking-tight md:text-4xl uppercase',
+                n ? 'text-white' : 'text-black',
+              )}
+            >
+              Nuestra Cobertura
+            </h2>
+            <p className={cx('mt-5 max-w-4xl text-sm leading-7', muted)}>
+              Transportamos paquetes de 30cm x 20cm x 15cm o hasta 1.5 kg. Para pesos o medidas mayores, consultanos directamente.
+            </p>
+          </div>
+
+          <article className={cx('reveal relative mt-8 overflow-hidden glass-card p-1.5 min-h-[570px]', n ? 'glass-card-night' : 'glass-card-day', cardBase)}>
+            <a
+              href={whatsappSalesUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="absolute right-4 top-4 z-[500] inline-flex items-center gap-2 rounded-full bg-red-600 px-4 py-2 text-xs font-semibold text-white shadow-[0_12px_24px_-16px_rgba(220,38,38,0.9)] transition sm:text-sm"
+            >
+              <MessageCircle size={14} />
+              Consultar precio
+            </a>
+
+            <div className="overflow-hidden rounded-[1.15rem]">
+              <LeafletMap
+                center={[-12.06, -76.99]}
+                zoom={10}
+                scrollWheelZoom
+                attributionControl={false}
+                className="h-[550px] w-full"
+              >
+                <LeafletTiles
+                  url={
+                    n
+                      ? 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png'
+                      : 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png'
+                  }
+                />
+
+                {coverageGeoJson ? (
+                  <LeafletGeoJson
+                    data={coverageGeoJson}
+                    style={(feature: { properties?: Record<string, unknown>; geometry?: { type?: string } }) => {
+                      const geometryType = String(feature.geometry?.type ?? '');
+                      const strokeColor = n ? '#ffffff' : '#111111';
+                      const fillColor = '#0f9d58';
+
+                      if (geometryType === 'Polygon') {
+                        return {
+                          fillColor,
+                          fillOpacity: n ? 0.42 : 0.34,
+                          color: strokeColor,
+                          opacity: 0.95,
+                          weight: 2,
+                        };
+                      }
+
+                      if (geometryType === 'LineString') {
+                        return {
+                          color: strokeColor,
+                          opacity: 0.95,
+                          weight: 3,
+                        };
+                      }
+
+                      return {
+                        color: strokeColor,
+                        opacity: 0.95,
+                        weight: 1,
+                      };
+                    }}
+                    pointToLayer={(feature: { properties?: Record<string, unknown> }, latlng: { lat: number; lng: number }) => {
+                      const iconHref = feature.properties?.iconHref;
+                      const markerIcon = getMarkerIcon(typeof iconHref === 'string' ? iconHref : null);
+                      return L.marker([latlng.lat, latlng.lng], { icon: markerIcon });
+                    }}
+                    onEachFeature={(feature: { properties?: Record<string, unknown>; geometry?: { type?: string } }, layer: Record<string, unknown>) => {
+                      const name = String(feature.properties?.name ?? 'Sin nombre');
+                      const geometryType = String(feature.geometry?.type ?? '');
+                      const tariffDistrict = feature.properties?.tariffDistrict;
+
+                      const leafletLayer = layer as {
+                        bindPopup: (content: string) => void;
+                        on: (events: Record<string, (e: { target: { setStyle: (style: Record<string, unknown>) => void; getBounds: () => unknown; _map?: { fitBounds: (bounds: unknown) => void } } }) => void>) => void;
+                      };
+
+                      const popupTitle = typeof tariffDistrict === 'string' && tariffDistrict.trim().length > 0
+                        ? tariffDistrict
+                        : name;
+                      const safePopupTitle = escapeHtml(popupTitle);
+                      const infoUrl = buildTariffInfoWhatsappUrl(popupTitle);
+                      const popupHtml = `<strong>${safePopupTitle}</strong><br/><a href="${infoUrl}" target="_blank" rel="noreferrer" style="display:inline-block;margin-top:6px;color:#dc2626;font-weight:700;text-decoration:none;">Obtener más información</a>`;
+
+                      leafletLayer.bindPopup(popupHtml);
+
+                      leafletLayer.on({
+                        mouseover: (e) => {
+                          e.target.setStyle({
+                            weight: 4,
+                            color: n ? '#ffffff' : '#111111',
+                            fillColor: '#0b7a45',
+                            fillOpacity: n ? 0.64 : 0.56,
+                          });
+                        },
+                        mouseout: (e) => {
+                          const strokeColor = n ? '#ffffff' : '#111111';
+                          const fillColor = '#0f9d58';
+                          const baseWeight = geometryType === 'LineString' ? 3 : 2;
+
+                          e.target.setStyle({
+                            fillColor,
+                            fillOpacity: n ? 0.42 : 0.34,
+                            color: strokeColor,
+                            opacity: 0.95,
+                            weight: baseWeight,
+                          });
+                        },
+                      });
+
+                      if (geometryType === 'Polygon') {
+                        const tooltipLayer = layer as {
+                          bindTooltip: (content: string, options: Record<string, unknown>) => void;
+                        };
+                        tooltipLayer.bindTooltip(name, {
+                          permanent: true,
+                          direction: 'center',
+                          className: 'district-center-label',
+                          interactive: false,
+                          opacity: 1,
+                        });
+                      }
+                    }}
+                  />
+                ) : null}
+              </LeafletMap>
+            </div>
+          </article>
+
+          
+        </section>
+
+        {/* ── TESTIMONIOS ─────────────────────────────────────── */}
+        <section className={cx('relative overflow-visible border-t', border)}>
+          <div
+            aria-hidden="true"
+            className={cx(
+              'pointer-events-none absolute inset-0',
+              n
+                ? 'bg-[linear-gradient(180deg,rgba(8,8,8,0.96)_0%,rgba(239,68,68,0.20)_46%,rgba(8,8,8,0.96)_100%)]'
+                : 'bg-[linear-gradient(180deg,rgba(245,245,245,0.96)_0%,rgba(239,68,68,0.16)_46%,rgba(245,245,245,0.96)_100%)]',
+            )}
+          />
+          <div
+            aria-hidden="true"
+            className={cx(
+              'pointer-events-none absolute inset-0 landing-grid',
+              n ? 'opacity-[0.08]' : 'opacity-[0.05]',
+            )}
+          />
+          <div
+            aria-hidden="true"
+            className={cx(
+              'pointer-events-none absolute inset-0 landing-noise',
+              n ? 'opacity-[0.12]' : 'opacity-[0.06]',
+            )}
+          />
+
+          <div className="relative z-10 mx-auto max-w-7xl px-5 py-20 sm:px-8 lg:px-10">
+            <div className="reveal mb-10">
+              <p className="text-[10px] uppercase tracking-[0.3em] text-red-400">Testimonios</p>
+              <div className="editorial-rule mt-3" />
+              <h2
+                className={cx(
+                  'mt-5 text-3xl font-black tracking-tight text-left md:text-4xl uppercase',
+                  n ? 'text-white' : 'text-black',
+                )}
+              >
+                Lo que dicen nuestros clientes
+              </h2>
+            </div>
+
+            <div className="reveal relative">
+              <div className="pointer-events-none absolute right-[-36px] top-[-208px] z-20 xl:right-[-54px] xl:top-[-238px] 2xl:right-[-76px] 2xl:top-[-268px]">
+                <img
+                  src="/ImagenTestimonios.png"
+                  alt="Marco decorativo testimonios"
+                  aria-hidden="true"
+                  className="hidden w-[600px] max-w-none object-contain lg:block xl:w-[680px] 2xl:w-[740px]"
+                />
+              </div>
+
+              <div className="relative overflow-hidden rounded-[2rem]">
+                <div
+                  className="relative z-10 flex transition-transform duration-700 ease-out"
+                  style={{ transform: `translateX(-${activeTestimonialIndex * 100}%)` }}
+                >
+                  {testimonialSlides.map((slide, slideIndex) => (
+                    <div key={`slide-${slideIndex}`} className="min-w-full p-5 sm:p-7 lg:p-8">
+                      <div className={cx('grid gap-4', isDesktopTestimonials ? 'md:grid-cols-3' : 'grid-cols-1')}>
+                        {slide.map(({ quote, author, role }, i) => (
+                        <article
+                          key={author}
+                          className={cx(
+                            'glass-card reveal p-5 sm:p-6',
+                            n ? 'glass-card-night' : 'glass-card-day',
+                            i > 0 && `reveal-delay-${i}`,
+                          )}
+                        >
+                            <div className="mb-4 flex items-center justify-center">
+                              <div
+                                className={cx(
+                                  'inline-flex h-12 w-12 items-center justify-center overflow-hidden rounded-xl backdrop-blur-sm',
+                                  n ? 'border border-white/20 bg-white/8' : 'border border-white/35 bg-white/25',
+                                )}
+                              >
+                                <img
+                                  src="/icon-dinsides.png"
+                                  alt="Dinsides"
+                                  loading="lazy"
+                                  className="h-8 w-8 object-contain"
+                                />
+                              </div>
+                            </div>
+
+                            <div className="mb-4 flex justify-center gap-1">
+                              {Array.from({ length: 5 }).map((_, idx) => (
+                                <Star key={idx} size={14} className="text-red-500 fill-red-500" />
+                              ))}
+                            </div>
+
+                            <p className={cx('text-sm leading-7 text-center', muted)}>“{quote}”</p>
+
+                            <div className="mt-6 border-t pt-4" style={{ borderColor: n ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.10)' }}>
+                              <p className={cx('text-sm font-semibold text-center', n ? 'text-white' : 'text-black')}>
+                                {author}
+                              </p>
+                              <p className={cx('mt-0.5 text-[11px] text-center', muted)}>{role}</p>
+                            </div>
+                          </article>
                         ))}
                       </div>
-                      <p className={joinClasses('text-sm leading-7', mutedTextClass)}>“{quote}”</p>
-                      <p className={joinClasses('mt-4 text-sm font-semibold', isNight ? 'text-white' : 'text-black')}>{author}</p>
-                    </article>
+                    </div>
                   ))}
                 </div>
-              </div>
 
-              <div>
-                <p className="text-xs uppercase tracking-[0.3em] text-red-300">Normas ISO</p>
-                <h2 className="mt-3 text-4xl font-black tracking-[-0.06em] md:text-5xl">Formalidad y respaldo</h2>
-                <div className="mt-6 grid gap-3 sm:grid-cols-2">
-                  {isoCodes.map((code) => (
-                    <article key={code} className={joinClasses('rounded-[1.3rem] border p-4', softBorderClass, cardClass)}>
-                      <p className="text-lg font-semibold">{code}</p>
-                    </article>
+                <div className="pointer-events-none absolute inset-x-0 bottom-2 z-10 flex items-center justify-center gap-1.5">
+                  {testimonialSlides.map((_, index) => (
+                    <span
+                      key={`dot-${index}`}
+                      className={cx(
+                        'h-1.5 rounded-full transition-all duration-300',
+                        index === activeTestimonialIndex
+                          ? 'w-6 bg-red-500/70'
+                          : (n ? 'w-1.5 bg-white/35' : 'w-1.5 bg-black/25'),
+                      )}
+                      aria-hidden="true"
+                    />
                   ))}
                 </div>
               </div>
@@ -399,46 +1405,208 @@ export function LandingPage() {
           </div>
         </section>
 
-        <section id="contacto" className="mx-auto max-w-7xl px-5 py-18 sm:px-8 lg:px-10">
-          <div className="rounded-[2rem] border border-white/10 bg-[linear-gradient(135deg,rgba(127,29,29,0.55),rgba(8,8,8,0.96)_48%,rgba(255,255,255,0.04))] p-8 md:p-10">
-            <p className="text-xs uppercase tracking-[0.3em] text-red-200">Contacto</p>
-            <h2 className="mt-3 max-w-3xl text-4xl font-black tracking-[-0.06em] md:text-5xl">Lleva tu marca a su máximo potencial con Dinsides Courier.</h2>
-
-            <div className="mt-8 flex flex-col gap-3 sm:flex-row">
-              <a
-                href={whatsappSalesUrl}
-                target="_blank"
-                rel="noreferrer"
-                className="inline-flex items-center justify-center gap-2 rounded-full bg-white px-6 py-3 text-sm font-semibold text-black transition hover:bg-neutral-200"
-              >
-                <MessageCircle size={16} />
-                Escríbenos
-              </a>
-              <a
-                href={whatsappPremiumUrl}
-                target="_blank"
-                rel="noreferrer"
-                className="inline-flex items-center justify-center gap-2 rounded-full border border-white/15 bg-white/10 px-6 py-3 text-sm font-semibold text-white transition hover:bg-white/15"
-              >
-                Tarifario premium
-              </a>
-            </div>
-
-            <div className="mt-8 grid gap-4 md:grid-cols-2">
-              <article className="rounded-[1.4rem] border border-white/10 bg-black/30 p-5">
-                <p className="text-[11px] uppercase tracking-[0.26em] text-red-300">Sedes</p>
-                <p className="mt-3 text-sm leading-7 text-white/75">Av. Arica 1702, Cercado de Lima</p>
-                <p className="text-sm leading-7 text-white/75">Jirón Antonio Bazo 1220, La Victoria</p>
-              </article>
-              <article className="rounded-[1.4rem] border border-white/10 bg-black/30 p-5">
-                <p className="text-[11px] uppercase tracking-[0.26em] text-red-300">Canales</p>
-                <p className="mt-3 text-sm leading-7 text-white/75">922 509 459 · 992 565 076</p>
-                <p className="text-sm leading-7 text-white/75">contacto@dinsidescourier.com</p>
-              </article>
+        {/* ── CERTIFICACIONES ISO ─────────────────────────────── */}
+        <section className={cx('border-y', border)}>
+          <div className="mx-auto max-w-7xl px-5 py-11 sm:px-8 lg:px-10">
+            <div className="flex flex-col gap-6 md:flex-row md:items-center md:justify-between">
+              <div className="reveal shrink-0">
+                <p className={cx('text-[10px] uppercase tracking-[0.3em] mb-1', muted)}>
+                  Formalidad y respaldo
+                </p>
+                <p className={cx('text-sm font-semibold', n ? 'text-white/80' : 'text-black/70')}>
+                  Certificaciones internacionales
+                </p>
+              </div>
+              <div className="reveal reveal-delay-1 flex flex-wrap gap-2">
+                {isoCodes.map((code) => (
+                  <span
+                    key={code}
+                    className={cx(
+                      'iso-chip',
+                      'inline-flex gap-1.5 items-center bg-white/15 backdrop-blur-[8px] border-white/10 shadow-[0_8px_32px_rgba(0,0,0,0.1),inset_0_1px_0_rgba(255,255,255,0.5),inset_0_-1px_0_rgba(255,255,255,0.1),inset_0_0_2px_1px_rgba(255,255,255,0.1)] rounded-lg border px-3 py-1 text-xs font-medium transition',
+                      n
+                        ? 'border-white/[0.11] text-white/65'
+                        : 'border-black/[0.10] text-gray-500',
+                    )}
+                  >
+                    <Award size={11} className="text-red-500" />
+                    {code}
+                  </span>
+                ))}
+              </div>
             </div>
           </div>
         </section>
+
+        {/* ── CONTACTO ────────────────────────────────────────── */}
+        <section id="contacto" className="mx-auto max-w-7xl px-5 py-14 sm:px-8 sm:py-16 lg:px-10">
+          <div className="grid gap-3 lg:grid-cols-[0.98fr_1.02fr] lg:items-stretch">
+            <div className="reveal flex flex-col justify-center lg:pr-2">
+              <p className="text-[10px] uppercase tracking-[0.3em] text-red-400">Contacto</p>
+              <div className="editorial-rule mt-3" />
+              <h2
+                className={cx(
+                  'mt-4 text-3xl font-black tracking-tight md:text-4xl uppercase',
+                  n ? 'text-white' : 'text-black',
+                )}
+              >
+                Hablemos de tu operación logística
+              </h2>
+              <p className={cx('mt-3 max-w-xl text-sm leading-7', muted)}>
+                Te ayudamos a optimizar entregas, cobranza y fulfillment con procesos claros y respuesta rápida.
+              </p>
+
+              <div className="mt-5 space-y-3">
+                <div className={cx('flex items-start gap-3 rounded-2xl border-b border-l px-4 py-3', n ? 'border-white/[0.12]' : 'border-black/[0.10]')}>
+                  <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-red-600/90 text-white">
+                    <MapPin size={14} />
+                  </span>
+                  <div>
+                    <p className={cx('text-[10px] uppercase tracking-[0.22em] mb-1', muted)}>Sedes</p>
+                    <p className={cx('text-sm leading-6', n ? 'text-white/75' : 'text-gray-700')}>Av. Arica 1702, Cercado de Lima</p>
+                    <p className={cx('text-sm leading-6', n ? 'text-white/75' : 'text-gray-700')}>Jr. Antonio Bazo 1220, La Victoria</p>
+                  </div>
+                </div>
+
+                <div className={cx('flex items-start gap-3 rounded-2xl border-b border-l px-4 py-3', n ? 'border-white/[0.12]' : 'border-black/[0.10]')}>
+                  <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-red-600/90 text-white">
+                    <Phone size={14} />
+                  </span>
+                  <div>
+                    <p className={cx('text-[10px] uppercase tracking-[0.22em] mb-1', muted)}>Teléfonos</p>
+                    <p className={cx('text-sm leading-6', n ? 'text-white/75' : 'text-gray-700')}>+51 922 509 459</p>
+                    <p className={cx('text-sm leading-6', n ? 'text-white/75' : 'text-gray-700')}>+51 992 565 076</p>
+                  </div>
+                </div>
+
+                <div className={cx('flex items-start gap-3 rounded-2xl border-b border-l px-4 py-3', n ? 'border-white/[0.12]' : 'border-black/[0.10]')}>
+                  <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-red-600/90 text-white">
+                    <Mail size={14} />
+                  </span>
+                  <div>
+                    <p className={cx('text-[10px] uppercase tracking-[0.22em] mb-1', muted)}>Email</p>
+                    <p className={cx('text-sm leading-6', n ? 'text-white/75' : 'text-gray-700')}>contacto@dinsidescourier.com</p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="mt-5 flex flex-wrap gap-3">
+                <a
+                  href={whatsappSalesUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-2 rounded-full bg-red-600 px-5 py-2.5 text-sm font-semibold text-white transition"
+                >
+                  <MessageCircle size={15} />
+                  Ventas
+                </a>
+                <a
+                  href={whatsappPremiumUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className={cx(
+                    'inline-flex items-center gap-2 rounded-full border-bottom px-5 py-2.5 text-sm font-semibold transition',
+                    n
+                      ? 'border-white/20 text-white'
+                      : 'border-black/15 text-black',
+                  )}
+                >
+                  Tarifario premium
+                </a>
+              </div>
+            </div>
+
+            <article className={cx('reveal hidden overflow-hidden rounded-[1.5rem] lg:block')}>
+              <img
+                src="/ImagenContacto.png"
+                alt="Equipo de contacto Dinsides"
+                className="h-full min-h-[360px] w-full object-cover object-center"
+              />
+            </article>
+          </div>
+        </section>
+
+        {/* ── FOOTER ──────────────────────────────────────────── */}
+        <section className={cx('border-y', border)}>
+          <div className="mx-auto max-w-7xl px-5 py-11 sm:px-8 lg:px-10">
+            <div className="reveal flex flex-col items-center gap-5 text-center">
+              <p className={cx('text-sm font-semibold', n ? 'text-white/80' : 'text-black/70')}>
+                Conectá con Dinsides en cada plataforma
+              </p>
+
+              <div className="reveal reveal-delay-1 flex flex-wrap items-center justify-center gap-3">
+                {socialLinks.map(({ label, href, icon: Icon }) => (
+                  <a
+                    key={label}
+                    href={href}
+                    target="_blank"
+                    rel="noreferrer"
+                    aria-label={label}
+                    title={label}
+                    className={cx(
+                      'iso-chip inline-flex h-11 w-11 items-center justify-center rounded-full borders transition-transform duration-200 hover:-translate-y-0.5',
+                      'bg-white/15 backdrop-blur-[8px] border-white/30 shadow-[0_8px_32px_rgba(0,0,0,0.1),inset_0_1px_0_rgba(255,255,255,0.5),inset_0_-1px_0_rgba(255,255,255,0.1),inset_0_0_2px_1px_rgba(255,255,255,0.1)]',
+                    )}
+                  >
+                    <Icon size={18} className="text-red-500" />
+                  </a>
+                ))}
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <footer className={cx('border-t', border)}>
+          <div
+            className={cx(
+              'mx-auto max-w-7xl px-5 py-6 sm:px-8 lg:px-10 flex flex-col gap-2 text-[11px] sm:flex-row sm:items-center sm:justify-between',
+              muted,
+            )}
+          >
+            <div className="flex items-center gap-3">
+              <span>© 2026 Dinsides Courier. Todos los derechos reservados.</span>
+              <a
+                href="/libro-de-reclamaciones"
+                className={cx(
+                  'inline-flex items-center underline underline-offset-4 decoration-transparent transition-colors',
+                  n
+                    ? 'text-white/65 hover:text-white hover:decoration-white/60'
+                    : 'text-gray-600 hover:text-black hover:decoration-black/50',
+                )}
+              >
+                Libro de Reclamaciones
+              </a>
+            </div>
+            <span>Lima, Perú</span>
+          </div>
+        </footer>
       </main>
+
+      <a
+        href={whatsappSalesUrl}
+        target="_blank"
+        rel="noreferrer"
+        aria-label="WhatsApp Dinsides"
+        className="fixed bottom-6 right-6 z-[1300] inline-flex items-center gap-2 rounded-full bg-[#25D366] px-4 py-3 text-sm font-semibold text-white shadow-[0_14px_30px_-12px_rgba(37,211,102,0.8)] transition"
+      >
+        <MessageCircle size={18} />
+        WhatsApp
+      </a>
+
+      <a
+        href="#inicio"
+        aria-label="Subir al inicio"
+        onClick={handleScrollToTop}
+        className={cx(
+          'fixed bottom-6 left-1/2 z-[1200] inline-flex h-10 w-10 -translate-x-1/2 items-center justify-center rounded-full border backdrop-blur-sm transition-all duration-300 hover:-translate-y-0.5',
+          showScrollTop ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none translate-y-2',
+          n
+            ? 'border-white/20 bg-black/45 text-white/80 hover:bg-black/60'
+            : 'border-black/15 bg-white/70 text-gray-700',
+        )}
+      >
+        <ArrowUp size={16} />
+      </a>
     </div>
   );
 }

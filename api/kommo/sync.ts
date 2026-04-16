@@ -24,6 +24,7 @@ const DEFAULT_CHAT_MAX_PAGES = 10;
 const DINSIDES_BASE_URL = 'https://dinsidescourier.com';
 const DINSIDES_LOGIN_VALIDATE_URL = `${DINSIDES_BASE_URL}/login/validar`;
 const DINSIDES_ENVIOS_URL = `${DINSIDES_BASE_URL}/Admin/getlistadoBuscadorActualiza`;
+const DINSIDES_RECOJOS_URL = `${DINSIDES_BASE_URL}/admin/listado_recojo_recibido`;
 const DINSIDES_CLIENTES_LOOKUP_URL = `${DINSIDES_BASE_URL}/admin/datosclientenombre`;
 type StandardCustomFieldEntityType = typeof STANDARD_CUSTOM_FIELD_ENTITY_TYPES[number];
 type CustomFieldEntityType = typeof CUSTOM_FIELD_ENTITY_TYPES[number];
@@ -192,6 +193,12 @@ function parseNonNegativeInt(value: string | undefined, fallback = 0, max = 1_00
   return Math.min(parsed, max);
 }
 
+function parseBooleanQuery(value: string | undefined) {
+  if (!value) return false;
+  const normalized = value.trim().toLowerCase();
+  return normalized === '1' || normalized === 'true' || normalized === 'yes';
+}
+
 function extractSetCookieValuesFromResponse(response: Response) {
   const headers = response.headers as Headers & { getSetCookie?: () => string[] };
 
@@ -201,7 +208,7 @@ function extractSetCookieValuesFromResponse(response: Response) {
 
   const fallback = response.headers.get('set-cookie');
   if (!fallback) return [];
-  return fallback.split(/,(?=\s*[A-Za-z0-9_\-]+=)/g);
+  return fallback.split(/,(?=\s*[A-Za-z0-9_-]+=)/g);
 }
 
 function toCookieHeader(rawSetCookieValues: string[]) {
@@ -321,6 +328,84 @@ async function fetchDinsidesEnviosRows(args: {
   throw new Error('La respuesta de envíos no es un array ni objeto JSON reconocido.');
 }
 
+async function fetchDinsidesRecojosRows(args: {
+  cookieHeader: string;
+  negocioIds: Array<number | string> | number | string;
+  dia: string;
+  estado?: string;
+  detalle?: string;
+  statusPuntos?: string;
+}) {
+  const sourceIds = Array.isArray(args.negocioIds) ? args.negocioIds : [args.negocioIds];
+  const uniqueNegocioIds = Array.from(new Set(
+    sourceIds
+      .map((value) => String(value ?? '').trim())
+      .filter(Boolean),
+  ));
+
+  if (uniqueNegocioIds.length === 0) {
+    return [] as Array<Record<string, unknown>>;
+  }
+
+  const form = new URLSearchParams();
+  for (const negocioId of uniqueNegocioIds) {
+    form.append('negocios[]', negocioId);
+  }
+  form.append('dia', String(args.dia ?? '').trim());
+  form.append('estado', args.estado ?? '');
+  form.append('detalle', args.detalle ?? '');
+  form.append('status_puntos', args.statusPuntos ?? '');
+
+  const response = await fetch(DINSIDES_RECOJOS_URL, {
+    method: 'POST',
+    headers: {
+      Cookie: args.cookieHeader,
+      'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+      'X-Requested-With': 'XMLHttpRequest',
+      Origin: DINSIDES_BASE_URL,
+      Referer: `${DINSIDES_BASE_URL}/admin/listado_recojo_recibido`,
+      Accept: 'application/json, text/javascript, */*; q=0.01',
+    },
+    body: form.toString(),
+  });
+
+  const rawText = await response.text();
+  if (!response.ok) {
+    throw new Error(`Error al leer recojos. status=${response.status}, body=${rawText.slice(0, 180)}`);
+  }
+
+  let payload: unknown;
+  try {
+    payload = JSON.parse(rawText);
+  } catch {
+    throw new Error(`La respuesta de recojos no es JSON válido: ${rawText.slice(0, 220)}`);
+  }
+
+  if (Array.isArray(payload)) {
+    return payload as Array<Record<string, unknown>>;
+  }
+
+  if (payload && typeof payload === 'object') {
+    const candidate = payload as Record<string, unknown>;
+
+    if (candidate.error === false && Array.isArray(candidate.data)) {
+      return candidate.data as Array<Record<string, unknown>>;
+    }
+
+    const possibleArrayKeys = ['data', 'rows', 'result', 'results', 'listado', 'aaData'];
+    for (const key of possibleArrayKeys) {
+      const value = candidate[key];
+      if (Array.isArray(value)) {
+        return value as Array<Record<string, unknown>>;
+      }
+    }
+
+    return [] as Array<Record<string, unknown>>;
+  }
+
+  return [] as Array<Record<string, unknown>>;
+}
+
 async function lookupDinsidesClientIds(args: { cookieHeader: string; businessName: string }) {
   const form = new URLSearchParams({
     datos: args.businessName,
@@ -413,11 +498,33 @@ function parseNumeric(value: unknown) {
 function parseDateOnlyFromUnknown(value: unknown) {
   const raw = String(value ?? '').trim();
   if (!raw) return null;
+
+  const candidate = raw.slice(0, 10).replace(/\//g, '-');
+  const match = candidate.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (match) {
+    const year = Number.parseInt(match[1] ?? '', 10);
+    const month = Number.parseInt(match[2] ?? '', 10);
+    const day = Number.parseInt(match[3] ?? '', 10);
+
+    if (year > 0 && month >= 1 && month <= 12 && day >= 1 && day <= 31) {
+      const date = new Date(Date.UTC(year, month - 1, day));
+      const isSameDate = date.getUTCFullYear() === year
+        && (date.getUTCMonth() + 1) === month
+        && date.getUTCDate() === day;
+
+      if (isSameDate) {
+        return `${String(year).padStart(4, '0')}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+      }
+    }
+  }
+
   const parsed = new Date(raw.replace(' ', 'T'));
   if (Number.isNaN(parsed.getTime())) {
-    return raw.slice(0, 10) || null;
+    return null;
   }
-  return parsed.toISOString().slice(0, 10);
+
+  const isoDate = parsed.toISOString().slice(0, 10);
+  return isoDate === '0000-00-00' ? null : isoDate;
 }
 
 function normalizeLookupKey(value: unknown) {
@@ -1835,6 +1942,7 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
         let skippedMissingTarifa = 0;
         let skippedByEstado = 0;
         let skippedExisting = 0;
+        let skippedInvalidDate = 0;
 
         const existingStableIds = new Set<string>();
         if (onlyRemaining && finalRows.length > 0) {
@@ -1906,6 +2014,10 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
           const pagoMoto = Number((tarifa.pagoMoto ?? 0).toFixed(2));
           const cobroEntrega = Number((tarifa.cobroEntrega ?? 0).toFixed(2));
           const fechaEnvio = parseDateOnlyFromUnknown(row.fecha_entrega) ?? parseDateOnlyFromUnknown(row.fecha_pedido);
+          if (!fechaEnvio) {
+            skippedInvalidDate += 1;
+            continue;
+          }
 
           rowsToUpsert.push({
             stable_id: stableId,
@@ -1965,6 +2077,7 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
           skipped_missing_lead: skippedMissingLead,
           skipped_missing_destino: skippedMissingDestino,
           skipped_missing_tarifa: skippedMissingTarifa,
+          skipped_invalid_date: skippedInvalidDate,
           recalculated_leads: recalculatedLeads,
           recalculate_errors: recalculateErrors,
         });
@@ -1987,12 +2100,12 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
     if (mode === 'dinsides_envios_sync_cursor') {
       const batchLeads = parseEnviosProbeLimit(searchParams.get('batch_leads') ?? undefined, 120, 1000);
       const limitRows = parseEnviosProbeLimit(searchParams.get('limit_rows') ?? undefined, 2000, 10000);
+      const singleBusiness = searchParams.get('search_negocio')?.trim();
       const cursor = parseNonNegativeInt(
         searchParams.get('cursor') ?? searchParams.get('lead_offset') ?? undefined,
         0,
         1_000_000,
       );
-      const singleBusiness = searchParams.get('search_negocio')?.trim();
       const singleSearchTipo = searchParams.get('search_tipo')?.trim();
       const debug = ['1', 'true', 'yes'].includes((searchParams.get('debug') ?? '').toLowerCase());
 
@@ -2214,6 +2327,7 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
         let skippedMissingTarifa = 0;
         let skippedByEstado = 0;
         let skippedExisting = 0;
+        let skippedInvalidDate = 0;
 
         const existingStableIds = new Set<string>();
         if (onlyRemaining && finalRows.length > 0) {
@@ -2285,6 +2399,10 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
           const pagoMoto = Number((tarifa.pagoMoto ?? 0).toFixed(2));
           const cobroEntrega = Number((tarifa.cobroEntrega ?? 0).toFixed(2));
           const fechaEnvio = parseDateOnlyFromUnknown(row.fecha_entrega) ?? parseDateOnlyFromUnknown(row.fecha_pedido);
+          if (!fechaEnvio) {
+            skippedInvalidDate += 1;
+            continue;
+          }
 
           rowsToUpsert.push({
             stable_id: stableId,
@@ -2348,6 +2466,7 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
           skipped_missing_lead: skippedMissingLead,
           skipped_missing_destino: skippedMissingDestino,
           skipped_missing_tarifa: skippedMissingTarifa,
+          skipped_invalid_date: skippedInvalidDate,
           recalculated_leads: recalculatedLeads,
           recalculate_errors: recalculateErrors,
         });
@@ -2378,6 +2497,514 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
         scanned_leads: scannedLeadRows,
         limit_rows: limitRows,
         pulled: finalRows.length,
+      });
+    }
+
+    if (mode === 'dinsides_recojos_sync_cursor') {
+      const batchLeads = parseEnviosProbeLimit(searchParams.get('batch_leads') ?? undefined, 30, 200);
+      const maxQueries = parseEnviosProbeLimit(searchParams.get('max_queries') ?? undefined, 180, 800);
+      const limitRows = parseEnviosProbeLimit(searchParams.get('limit_rows') ?? undefined, 2000, 10000);
+      const negociosPerQuery = parseEnviosProbeLimit(searchParams.get('negocios_per_query') ?? undefined, 20, 60);
+      const maxClientIdsPerLead = parseEnviosProbeLimit(searchParams.get('max_client_ids_per_lead') ?? undefined, 8, 40);
+      const maxDaysPerLead = parseEnviosProbeLimit(searchParams.get('max_days_per_lead') ?? undefined, 12, 90);
+      const maxRecojoQueriesPerLead = parseEnviosProbeLimit(searchParams.get('max_recojo_queries_per_lead') ?? undefined, 18, 120);
+      const singleBusiness = searchParams.get('search_negocio')?.trim();
+      const cursor = parseNonNegativeInt(
+        searchParams.get('cursor') ?? searchParams.get('lead_offset') ?? undefined,
+        0,
+        1_000_000,
+      );
+      const dateFrom = parseDateOnlyFromUnknown(searchParams.get('date_from'));
+      const dateTo = parseDateOnlyFromUnknown(searchParams.get('date_to'));
+      const debug = parseBooleanQuery(searchParams.get('debug') ?? undefined);
+      const onlyRemaining = parseBooleanQuery(searchParams.get('only_remaining') ?? undefined);
+      const persist = parseBooleanQuery(searchParams.get('persist') ?? undefined);
+
+      const rawMaxRuntimeMs = asSingleQueryParam(req.query.max_runtime_ms)?.trim();
+      let requestedRuntimeMs = 45_000;
+      if (rawMaxRuntimeMs) {
+        const runtimeNumber = Number(rawMaxRuntimeMs);
+        if (!Number.isInteger(runtimeNumber) || runtimeNumber <= 0) {
+          return res.status(400).json({
+            error: 'El parámetro max_runtime_ms debe ser un número entero positivo para mode=dinsides_recojos_sync_cursor.',
+          });
+        }
+        requestedRuntimeMs = runtimeNumber;
+      }
+
+      const maxRuntimeMs = Math.min(120_000, Math.max(5_000, requestedRuntimeMs));
+      const runtimeSafetyMs = Math.min(6_000, Math.max(1_500, Math.floor(maxRuntimeMs * 0.12)));
+      const runtimeDeadlineMs = Math.max(1_000, maxRuntimeMs - runtimeSafetyMs);
+      const recojosStartedAt = Date.now();
+      const isRuntimeExceeded = () => (Date.now() - recojosStartedAt) >= runtimeDeadlineMs;
+
+      const supabase = getSupabaseAdminClient();
+
+      let leadQuery = supabase
+        .from('leads_ganados' as never)
+        .select('business_id,tienda_nombre_snapshot,vendedor_nombre_snapshot' as never)
+        .not('tienda_nombre_snapshot' as never, 'is' as never, null as never)
+        .neq('tienda_nombre_snapshot' as never, '' as never)
+        .order('business_id', { ascending: true });
+
+      if (singleBusiness) {
+        leadQuery = leadQuery.ilike('tienda_nombre_snapshot' as never, `%${singleBusiness}%` as never);
+      }
+
+      const { data: leadRowsRaw, error: leadError } = await leadQuery.range(
+        cursor,
+        cursor + batchLeads - 1,
+      );
+
+      if (leadError) {
+        throw new Error(`No se pudieron leer leads_ganados para recojos cursor sync: ${leadError.message}`);
+      }
+
+      const leadsRows = (leadRowsRaw ?? []) as Array<{ business_id: number | null; tienda_nombre_snapshot: string | null; vendedor_nombre_snapshot: string | null }>;
+      const hasMore = !singleBusiness && leadsRows.length === batchLeads;
+
+      const leadIds = leadsRows
+        .map((row) => Number(row.business_id ?? 0))
+        .filter((id) => Number.isFinite(id) && id > 0);
+
+      const leadMeta = new Map<number, { tienda: string; vendedor: string }>();
+      for (const row of leadsRows) {
+        const leadId = Number(row.business_id ?? 0);
+        if (!Number.isFinite(leadId) || leadId <= 0) continue;
+        leadMeta.set(leadId, {
+          tienda: String(row.tienda_nombre_snapshot ?? '').trim(),
+          vendedor: String(row.vendedor_nombre_snapshot ?? '').trim(),
+        });
+      }
+
+      const { cookieHeader } = await loginDinsidesAndGetCookieHeader();
+      const envioCountsByLeadDate = new Map<string, number>();
+      const datesByLead = new Map<number, string[]>();
+      const precomputedLeadIds = new Set<number>();
+      const recojoRawRows: Array<Record<string, unknown>> = [];
+      const recojoRawDedup = new Set<string>();
+      const dinsidesClientIdsByLead = new Map<number, string[]>();
+
+      let queriesUsed = 0;
+      let lookupQueriesUsed = 0;
+      let enviosQueriesUsed = 0;
+      let processedLeads = 0;
+      let budgetExceeded = false;
+      let runtimeExceeded = false;
+      const diagnostics = {
+        leads_total: leadIds.length,
+        leads_precomputed: 0,
+        leads_processed: 0,
+        queries_used: 0,
+        lookup_queries_used: 0,
+        envios_queries_used: 0,
+        leads_missing_client_ids: 0,
+        leads_no_days: 0,
+        leads_limited_by_days: 0,
+        leads_limited_by_recojo_queries: 0,
+        errors: [] as string[],
+      };
+
+      // Pre-cálculo: contar envíos ENTREGADO por fecha_pedido (día) en Dinsides.
+      for (const leadId of leadIds) {
+        if (isRuntimeExceeded()) {
+          runtimeExceeded = true;
+          break;
+        }
+
+        let clientIds = dinsidesClientIdsByLead.get(leadId);
+        if (!clientIds) {
+          lookupQueriesUsed += 1;
+          const tiendaNombre = leadMeta.get(leadId)?.tienda ?? '';
+          try {
+            clientIds = await lookupDinsidesClientIds({
+              cookieHeader,
+              businessName: tiendaNombre,
+            });
+          } catch {
+            clientIds = [];
+          }
+
+          const uniqueIds = Array.from(new Set((clientIds ?? []).map((id) => String(id).trim()).filter(Boolean)));
+          clientIds = uniqueIds.slice(0, maxClientIdsPerLead);
+          dinsidesClientIdsByLead.set(leadId, clientIds);
+        }
+
+        if (!clientIds || clientIds.length === 0) {
+          diagnostics.leads_missing_client_ids += 1;
+          precomputedLeadIds.add(leadId);
+          continue;
+        }
+
+        for (const clientId of clientIds) {
+          if (isRuntimeExceeded()) {
+            runtimeExceeded = true;
+            break;
+          }
+
+          if (queriesUsed + 1 > maxQueries) {
+            budgetExceeded = true;
+            break;
+          }
+
+          queriesUsed += 1;
+          enviosQueriesUsed += 1;
+
+          let rows: Array<Record<string, unknown>> = [];
+          try {
+            rows = await fetchDinsidesEnviosRows({
+              cookieHeader,
+              searchNegocio: clientId,
+            });
+          } catch {
+            rows = [];
+          }
+
+          for (const row of rows) {
+            const seguimiento = normalizeLookupKey(row.seguimiento);
+            if (seguimiento !== 'entregado') continue;
+
+            const fechaPedido = parseDateOnlyFromUnknown(row.fecha_pedido);
+            if (!fechaPedido) continue;
+
+            if (dateFrom && fechaPedido < dateFrom) continue;
+            if (dateTo && fechaPedido > dateTo) continue;
+
+            const key = `${leadId}__${fechaPedido}`;
+            envioCountsByLeadDate.set(key, (envioCountsByLeadDate.get(key) ?? 0) + 1);
+          }
+        }
+
+        if (runtimeExceeded || budgetExceeded) {
+          break;
+        }
+
+        const dayKeys = Array.from(envioCountsByLeadDate.keys())
+          .filter((key) => key.startsWith(`${leadId}__`))
+          .map((key) => key.split('__')[1])
+          .filter(Boolean);
+        const uniqueDays = Array.from(new Set(dayKeys)).sort((a, b) => a.localeCompare(b));
+        if (uniqueDays.length > maxDaysPerLead) {
+          diagnostics.leads_limited_by_days += 1;
+        }
+        const trimmedDays = uniqueDays.slice(Math.max(0, uniqueDays.length - maxDaysPerLead));
+        datesByLead.set(leadId, trimmedDays);
+        precomputedLeadIds.add(leadId);
+      }
+
+      for (const leadId of leadIds) {
+        if (runtimeExceeded || budgetExceeded || isRuntimeExceeded()) {
+          runtimeExceeded = runtimeExceeded || isRuntimeExceeded();
+          if (processedLeads === 0) {
+            processedLeads = 1;
+          }
+          break;
+        }
+
+        const days = datesByLead.get(leadId) ?? [];
+        if (days.length === 0) {
+          diagnostics.leads_no_days += 1;
+          processedLeads += 1;
+          continue;
+        }
+
+        let clientIds = dinsidesClientIdsByLead.get(leadId);
+        if (!clientIds) {
+          lookupQueriesUsed += 1;
+          const tiendaNombre = leadMeta.get(leadId)?.tienda ?? '';
+          try {
+            clientIds = await lookupDinsidesClientIds({
+              cookieHeader,
+              businessName: tiendaNombre,
+            });
+          } catch {
+            clientIds = [];
+          }
+
+          const uniqueIds = Array.from(new Set((clientIds ?? []).map((id) => String(id).trim()).filter(Boolean)));
+          clientIds = uniqueIds.slice(0, maxClientIdsPerLead);
+          dinsidesClientIdsByLead.set(leadId, clientIds);
+        }
+
+        if (!clientIds || clientIds.length === 0) {
+          diagnostics.leads_missing_client_ids += 1;
+          processedLeads += 1;
+          continue;
+        }
+
+        let activeClientIds = clientIds;
+        if (clientIds.length > 1 && days.length > 0) {
+          const probeDay = days[0];
+          const probeCandidates = clientIds.slice(0, Math.min(4, clientIds.length));
+          const matchedProbeIds: string[] = [];
+
+          for (const candidateId of probeCandidates) {
+            if (isRuntimeExceeded()) {
+              runtimeExceeded = true;
+              break;
+            }
+
+            if (queriesUsed + 1 > maxQueries) {
+              budgetExceeded = true;
+              break;
+            }
+
+            queriesUsed += 1;
+            const probeRows = await fetchDinsidesRecojosRows({
+              cookieHeader,
+              negocioIds: candidateId,
+              dia: probeDay,
+            });
+
+            if (probeRows.length > 0) {
+              matchedProbeIds.push(candidateId);
+              if (matchedProbeIds.length >= 2) break;
+            }
+          }
+
+          if (runtimeExceeded || budgetExceeded) {
+            if (processedLeads === 0) {
+              processedLeads = 1;
+            }
+            break;
+          }
+
+          if (matchedProbeIds.length > 0) {
+            activeClientIds = matchedProbeIds;
+          } else {
+            activeClientIds = [clientIds[0]];
+          }
+        }
+
+        const queryChunksPerDay = Math.max(1, Math.ceil(activeClientIds.length / Math.max(1, negociosPerQuery)));
+        const maxDaysByLeadBudget = Math.max(1, Math.floor(maxRecojoQueriesPerLead / queryChunksPerDay));
+        if (days.length > maxDaysByLeadBudget) {
+          diagnostics.leads_limited_by_recojo_queries += 1;
+        }
+        const effectiveDays = days.slice(Math.max(0, days.length - Math.max(1, Math.min(maxDaysPerLead, maxDaysByLeadBudget))));
+        const plannedQueriesForLead = effectiveDays.length * queryChunksPerDay;
+
+        if (queriesUsed + plannedQueriesForLead > maxQueries) {
+          if (processedLeads === 0) {
+            throw new Error(`batch_leads demasiado grande para max_queries actual. reduce batch_leads o aumenta max_queries. lead_id=${leadId}, dias=${days.length}, client_ids=${activeClientIds.length}, max_queries=${maxQueries}`);
+          }
+          budgetExceeded = true;
+          break;
+        }
+
+        for (const day of effectiveDays) {
+          if (isRuntimeExceeded()) {
+            runtimeExceeded = true;
+            break;
+          }
+
+          for (const clientIdChunk of chunkArray(activeClientIds, Math.max(1, negociosPerQuery))) {
+            if (isRuntimeExceeded()) {
+              runtimeExceeded = true;
+              break;
+            }
+
+            if (queriesUsed + 1 > maxQueries) {
+              budgetExceeded = true;
+              break;
+            }
+
+            queriesUsed += 1;
+            const rows = await fetchDinsidesRecojosRows({
+              cookieHeader,
+              negocioIds: clientIdChunk,
+              dia: day,
+            });
+
+            for (const row of rows) {
+              const rowDate = parseDateOnlyFromUnknown(row.fecha_recojo) ?? parseDateOnlyFromUnknown(day);
+              if (!rowDate) continue;
+              const rowLeadKey = `${leadId}__${rowDate}`;
+              if (!envioCountsByLeadDate.has(rowLeadKey)) {
+                // protege de ruido de fechas fuera del universo de envíos consultado
+                continue;
+              }
+
+              const recojoId = String(row.id_recojo_moto ?? '').trim();
+              const dedupeKey = recojoId
+                ? `${leadId}__${recojoId}`
+                : `${leadId}__${rowDate}__${String(row.detalle_recojo ?? '').trim()}__${String(row.nombre_motorizado ?? '').trim()}`;
+
+              if (recojoRawDedup.has(dedupeKey)) {
+                continue;
+              }
+              recojoRawDedup.add(dedupeKey);
+
+              recojoRawRows.push({
+                ...row,
+                __lead_id: leadId,
+                __fecha_dia: rowDate,
+              });
+            }
+          }
+
+          if (runtimeExceeded || budgetExceeded) {
+            break;
+          }
+        }
+
+        if (runtimeExceeded || budgetExceeded) {
+          if (processedLeads === 0) {
+            processedLeads = 1;
+          }
+          break;
+        }
+
+        processedLeads += 1;
+      }
+
+      diagnostics.leads_precomputed = precomputedLeadIds.size;
+      diagnostics.leads_processed = processedLeads;
+      diagnostics.queries_used = queriesUsed;
+      diagnostics.lookup_queries_used = lookupQueriesUsed;
+      diagnostics.envios_queries_used = enviosQueriesUsed;
+
+      const grouped = new Map<string, { leadId: number; fecha: string; tipoCobro: string; veces: number; observaciones: string | null }>();
+      for (const row of recojoRawRows) {
+        const leadId = Number(row.__lead_id ?? 0);
+        const fecha = String(row.__fecha_dia ?? '').trim();
+        if (!Number.isFinite(leadId) || leadId <= 0 || !fecha) continue;
+
+        const envioCount = envioCountsByLeadDate.get(`${leadId}__${fecha}`) ?? 0;
+        const tipoCobro = envioCount <= 1 ? '1 pedido' : '2+ pedidos';
+        const groupKey = `${leadId}__${tipoCobro}`;
+
+        const current = grouped.get(groupKey) ?? {
+          leadId,
+          fecha,
+          tipoCobro,
+          veces: 0,
+          observaciones: null,
+        };
+
+        current.veces += 1;
+        if (fecha > current.fecha) {
+          current.fecha = fecha;
+        }
+        if (!current.observaciones) {
+          const obs = String(row.observacion ?? '').trim();
+          current.observaciones = obs || null;
+        }
+
+        grouped.set(groupKey, current);
+      }
+
+      const rowsToUpsert: Array<Record<string, unknown>> = [];
+
+      for (const item of grouped.values()) {
+        if (rowsToUpsert.length >= limitRows) {
+          break;
+        }
+
+        const stableId = `recojo-dinsides-${item.leadId}-${item.tipoCobro === '1 pedido' ? 'tipo1' : 'tipo2'}`;
+        // Recojos requiere upsert determinístico por clave (lead+tipo).
+        // No salteamos existentes para evitar quedarse con "veces" desactualizado.
+
+        const cobroATienda = item.tipoCobro === '1 pedido' ? 8 : 0;
+        const pagoMoto = 4;
+        const ingresoRecojoTotal = item.veces * cobroATienda;
+        const costoRecojoTotal = item.veces * pagoMoto;
+        const meta = leadMeta.get(item.leadId);
+        const vendedor = meta?.vendedor ? ` | vendedor: ${meta.vendedor}` : '';
+
+        rowsToUpsert.push({
+          stable_id: stableId,
+          fecha: item.fecha,
+          id_lead_ganado: item.leadId,
+          tipo_cobro: item.tipoCobro,
+          veces: item.veces,
+          cobro_a_tienda: cobroATienda,
+          pago_a_moto: pagoMoto,
+          ingreso_recojo_total: ingresoRecojoTotal,
+          costo_recojo_total: costoRecojoTotal,
+          observaciones: `${item.observaciones ?? ''}${vendedor}`.trim() || null,
+        });
+      }
+
+      if (persist && rowsToUpsert.length > 0) {
+        const { error: upsertError } = await supabase
+          .from('recojos' as never)
+          .upsert(rowsToUpsert as never, { onConflict: 'stable_id' as never });
+
+        if (upsertError) {
+          throw new Error(`No se pudieron upsertar recojos desde Dinsides: ${upsertError.message}`);
+        }
+      }
+
+      const nextCursor = cursor + processedLeads;
+      const hasMoreFinal = hasMore || processedLeads < leadIds.length || runtimeExceeded || budgetExceeded;
+      const truncationReason: 'has_more' | 'max_runtime' | 'max_queries' | null = runtimeExceeded
+        ? 'max_runtime'
+        : budgetExceeded
+          ? 'max_queries'
+          : (hasMore || processedLeads < leadIds.length)
+            ? 'has_more'
+            : null;
+
+      if (debug) {
+        return res.status(200).json({
+          success: true,
+          mode,
+          search_negocio: singleBusiness ?? '',
+          cursor,
+          next_cursor: nextCursor,
+          has_more: hasMoreFinal,
+          batch_leads: batchLeads,
+          negocios_per_query: negociosPerQuery,
+          max_client_ids_per_lead: maxClientIdsPerLead,
+          max_days_per_lead: maxDaysPerLead,
+          max_recojo_queries_per_lead: maxRecojoQueriesPerLead,
+          limit_rows: limitRows,
+          max_queries: maxQueries,
+          max_runtime_ms: maxRuntimeMs,
+          runtime_deadline_ms: runtimeDeadlineMs,
+          scanned_leads: leadIds.length,
+          precomputed_leads: precomputedLeadIds.size,
+          processed_leads: processedLeads,
+          queries_used: queriesUsed,
+          runtime_exceeded: runtimeExceeded,
+          budget_exceeded: budgetExceeded,
+          truncation_reason: truncationReason,
+          pulled_raw: recojoRawRows.length,
+          grouped_rows: grouped.size,
+          rows_preview: rowsToUpsert.slice(0, 120),
+          diagnostics,
+        });
+      }
+
+      return res.status(200).json({
+        success: true,
+        mode,
+        search_negocio: singleBusiness ?? '',
+        only_remaining: onlyRemaining,
+        persist,
+        cursor,
+        next_cursor: nextCursor,
+        has_more: hasMoreFinal,
+        batch_leads: batchLeads,
+        negocios_per_query: negociosPerQuery,
+        max_client_ids_per_lead: maxClientIdsPerLead,
+        max_days_per_lead: maxDaysPerLead,
+        max_recojo_queries_per_lead: maxRecojoQueriesPerLead,
+        limit_rows: limitRows,
+        max_queries: maxQueries,
+        max_runtime_ms: maxRuntimeMs,
+        scanned_leads: leadIds.length,
+        precomputed_leads: precomputedLeadIds.size,
+        processed_leads: processedLeads,
+        queries_used: queriesUsed,
+        runtime_exceeded: runtimeExceeded,
+        budget_exceeded: budgetExceeded,
+        truncation_reason: truncationReason,
+        pulled_raw: recojoRawRows.length,
+        grouped_rows: grouped.size,
+        upserted: persist ? rowsToUpsert.length : 0,
+        prepared_rows: rowsToUpsert.length,
       });
     }
 

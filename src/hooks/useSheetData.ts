@@ -358,7 +358,7 @@ interface EnvioReferenceData {
   resultadoLabelById: Map<number, string>;
   tipoPuntoLabelById: Map<number, string>;
   leadGanadoLabelById: Map<number, string>;
-  leadGanadoSnapshotById: Map<number, { tienda: string; vendedor: string; fullfilment: string }>;
+  leadGanadoSnapshotById: Map<number, { tienda: string; vendedor: string; fullfilment: string; fechaLeadGanado?: string | null }>;
   normalTipoPuntoId: number | null;
   deliveredResultadoId: number | null;
   tarifaByDestinoId: Map<number, { cobroEntrega: number; pagoMoto: number }>;
@@ -366,7 +366,7 @@ interface EnvioReferenceData {
 
 interface RecojoReferenceData {
   leadGanadoLabelById: Map<number, string>;
-  leadGanadoSnapshotById: Map<number, { tienda: string; vendedor: string; fullfilment: string }>;
+  leadGanadoSnapshotById: Map<number, { tienda: string; vendedor: string; fullfilment: string; fechaLeadGanado?: string | null }>;
   tipoCobroOptions: string[];
 }
 
@@ -383,6 +383,7 @@ function toEnvioSheetRow(record: EnvioRecord, refs: EnvioReferenceData): SheetRo
   return {
     _id: record.stable_id,
     idEnvios: record.business_id,
+    __fecha_lead_ganado: snapshot?.fechaLeadGanado ?? '',
     'Fecha envio': toDmyDisplayDate(record.fecha_envio),
     'Lead Ganado': leadGanado,
     Tienda: tienda,
@@ -479,6 +480,7 @@ function toRecojoSheetRow(record: RecojoRecord, refs: RecojoReferenceData): Shee
   return {
     _id: record.stable_id,
     idRecojo: record.business_id,
+    __fecha_lead_ganado: snapshot?.fechaLeadGanado ?? '',
     'Fecha': toDmyDisplayDate(record.fecha),
     'Lead Ganado': leadGanado,
     Tienda: snapshot?.tienda ?? '',
@@ -498,9 +500,10 @@ function buildLeadGanadoEnvioMaps(rows: Array<{
   tienda_nombre_snapshot: string | null;
   vendedor_nombre_snapshot: string | null;
   fullfilment_snapshot: boolean | string | null;
+  fecha_lead_ganado?: string | null;
 }>) {
   const leadGanadoLabelById = new Map<number, string>();
-  const leadGanadoSnapshotById = new Map<number, { tienda: string; vendedor: string; fullfilment: string }>();
+  const leadGanadoSnapshotById = new Map<number, { tienda: string; vendedor: string; fullfilment: string; fechaLeadGanado: string | null }>();
 
   for (const row of rows) {
     const leadGanadoId = Number(row.business_id ?? 0);
@@ -509,6 +512,7 @@ function buildLeadGanadoEnvioMaps(rows: Array<{
     const tienda = String(row.tienda_nombre_snapshot ?? '').trim();
     const vendedor = String(row.vendedor_nombre_snapshot ?? '').trim();
     const fullfilment = toFullfilmentSnapshotLabel(row.fullfilment_snapshot);
+    const fechaLeadGanadoRaw = toIsoDateInput(row.fecha_lead_ganado);
     const baseLabel = tienda || 'Lead sin tienda';
 
     leadGanadoLabelById.set(leadGanadoId, `${baseLabel} — #${leadGanadoId}`);
@@ -516,6 +520,7 @@ function buildLeadGanadoEnvioMaps(rows: Array<{
       tienda,
       vendedor,
       fullfilment,
+      fechaLeadGanado: fechaLeadGanadoRaw || null,
     });
   }
 
@@ -812,7 +817,7 @@ async function fetchEnvioReferenceData(): Promise<EnvioReferenceData> {
 
   const { data: leadsData, error: leadsError } = await supabase
     .from('leads_ganados')
-    .select('business_id,tienda_nombre_snapshot,vendedor_nombre_snapshot,fullfilment_snapshot')
+    .select('business_id,tienda_nombre_snapshot,vendedor_nombre_snapshot,fullfilment_snapshot,fecha_lead_ganado')
     .order('business_id', { ascending: false })
     .limit(20000);
 
@@ -822,6 +827,7 @@ async function fetchEnvioReferenceData(): Promise<EnvioReferenceData> {
       tienda_nombre_snapshot: string | null;
       vendedor_nombre_snapshot: string | null;
       fullfilment_snapshot: boolean | string | null;
+      fecha_lead_ganado?: string | null;
     }>,
   );
 
@@ -848,7 +854,7 @@ async function fetchRecojoReferenceData(): Promise<RecojoReferenceData> {
     fetchReferenceMap('tipo_recojo', ['business_id', 'id'], ['tipo_recojo']),
     supabase
       .from('leads_ganados')
-      .select('business_id,tienda_nombre_snapshot,vendedor_nombre_snapshot,fullfilment_snapshot')
+      .select('business_id,tienda_nombre_snapshot,vendedor_nombre_snapshot,fullfilment_snapshot,fecha_lead_ganado')
       .order('business_id', { ascending: false })
       .limit(20000),
   ]);
@@ -860,6 +866,7 @@ async function fetchRecojoReferenceData(): Promise<RecojoReferenceData> {
       tienda_nombre_snapshot: string | null;
       vendedor_nombre_snapshot: string | null;
       fullfilment_snapshot: boolean | string | null;
+      fecha_lead_ganado?: string | null;
     }>,
   );
 

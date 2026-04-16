@@ -1,0 +1,8 @@
+User-agent: *
+Allow: /
+
+# Endpoints y zonas no indexables
+Disallow: /api/
+Disallow: /login
+
+Sitemap: https://dinsidesfabian.vercel.app/sitemap.xml

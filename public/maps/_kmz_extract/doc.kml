@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<kml xmlns="http://www.opengis.net/kml/2.2">
+  <Document>
+    <name>MAPA ZONA DE COBERTURA GENERAL</name>
+    <description><![CDATA[ZONAS ROJAS (FUERA DE COBERTURA)<br>ZONAS VERDES (ZONAS DE ENTREGA)<br>LINEADO AZUL (PUNTOS DE ENCUENTRO)<br>ZONA GRIS (AEROPUERTO)]]></description>
+    <NetworkLink>
+      <name>MAPA ZONA DE COBERTURA GENERAL</name>
+      <Link>
+        <href>https://www.google.com/maps/d/u/0/kml?mid=1ybY_sWYIA0Am6u-NvSg55xPo91dSVHY</href>
+      </Link>
+    </NetworkLink>
+  </Document>
+</kml>
