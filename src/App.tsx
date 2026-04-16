@@ -149,7 +149,7 @@ function Layout() {
   useEffect(() => {
     if (role !== 'user') return;
     if (USER_ALLOWED_PATHS.has(location.pathname)) return;
-    navigate('/meta/ads/dashboard', { replace: true });
+    navigate('/dashboard/meta/ads/dashboard', { replace: true });
   }, [location.pathname, navigate, role]);
 
   useEffect(() => {
@@ -216,7 +216,7 @@ function Layout() {
   }
 
   const adminOnly = (element: React.ReactElement) => (
-    role === 'admin' ? element : <Navigate to="/meta/ads/dashboard" replace />
+    role === 'admin' ? element : <Navigate to="/dashboard/meta/ads/dashboard" replace />
   );
 
   return (
@@ -327,47 +327,11 @@ export default function App() {
       <Route path="/login" element={<Login />} />
       <Route path="/land-page" element={<Navigate to="/" replace />} />
       <Route path="/404" element={<NotFoundPage />} />
-      <Route path="/dashboard/*" element={
+      <Route path="/*" element={
         <ProtectedRoute>
           <Layout />
         </ProtectedRoute>
       } />
-      <Route path="/tabla/*" element={
-        <ProtectedRoute>
-          <Layout />
-        </ProtectedRoute>
-      } />
-      <Route path="/sheet/*" element={
-        <ProtectedRoute>
-          <Layout />
-        </ProtectedRoute>
-      } />
-      <Route path="/kommo/*" element={
-        <ProtectedRoute>
-          <Layout />
-        </ProtectedRoute>
-      } />
-      <Route path="/meta/*" element={
-        <ProtectedRoute>
-          <Layout />
-        </ProtectedRoute>
-      } />
-      <Route path="/exports/*" element={
-        <ProtectedRoute>
-          <Layout />
-        </ProtectedRoute>
-      } />
-      <Route path="/admin/*" element={
-        <ProtectedRoute>
-          <Layout />
-        </ProtectedRoute>
-      } />
-      <Route path="/operativas/*" element={
-        <ProtectedRoute>
-          <Layout />
-        </ProtectedRoute>
-      } />
-      <Route path="*" element={<NotFoundPage />} />
     </Routes>
   );
 }

@@ -1326,7 +1326,7 @@ export function LandingPage() {
                   <span
                     key={code}
                     className={cx(
-                      'inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[11px] font-semibold',
+                      'inline-flex gap-1.5 items-center bg-white/15 backdrop-blur-[8px] border-white/10 shadow-[0_8px_32px_rgba(0,0,0,0.1),inset_0_1px_0_rgba(255,255,255,0.5),inset_0_-1px_0_rgba(255,255,255,0.1),inset_0_0_2px_1px_rgba(255,255,255,0.1)] rounded-lg border px-3 py-1 text-xs font-medium transition',
                       n
                         ? 'border-white/[0.11] text-white/65'
                         : 'border-black/[0.10] text-gray-500',
@@ -1447,8 +1447,8 @@ export function LandingPage() {
                     aria-label={label}
                     title={label}
                     className={cx(
-                      'inline-flex h-11 w-11 items-center justify-center rounded-full border transition-transform duration-200 hover:-translate-y-0.5',
-                      'bg-white/35 backdrop-blur-[8px] border-white/30 shadow-[0_8px_32px_rgba(0,0,0,0.1),inset_0_1px_0_rgba(255,255,255,0.5),inset_0_-1px_0_rgba(255,255,255,0.1),inset_0_0_2px_1px_rgba(255,255,255,0.1)]',
+                      'inline-flex h-11 w-11 items-center justify-center rounded-full borders transition-transform duration-200 hover:-translate-y-0.5',
+                      'bg-white/15 backdrop-blur-[8px] border-white/30 shadow-[0_8px_32px_rgba(0,0,0,0.1),inset_0_1px_0_rgba(255,255,255,0.5),inset_0_-1px_0_rgba(255,255,255,0.1),inset_0_0_2px_1px_rgba(255,255,255,0.1)]',
                       n ? 'hover:bg-white/45' : 'hover:bg-white/55',
                     )}
                   >
@@ -1468,7 +1468,7 @@ export function LandingPage() {
             )}
           >
             <div className="flex items-center gap-3">
-              <span>© 2025 Dinsides Courier. Todos los derechos reservados.</span>
+              <span>© 2026 Dinsides Courier. Todos los derechos reservados.</span>
               <a
                 href="/libro-de-reclamaciones"
                 className={cx(
