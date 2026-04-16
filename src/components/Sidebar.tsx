@@ -123,16 +123,16 @@ export function Sidebar({
 
       <nav className="min-h-0 flex-1 overflow-y-auto px-3 py-3 sm:px-4 sm:py-4">
         <Link
-          to="/"
+          to="/dashboard"
           onClick={() => onNavigate?.()}
           title={collapsed ? 'Resumen general' : undefined}
-          className={`group flex items-center w-full text-left px-4 py-3 rounded-xl border transition-all duration-200 ${location.pathname === '/'
+          className={`group flex items-center w-full text-left px-4 py-3 rounded-xl border transition-all duration-200 ${location.pathname === '/dashboard'
               ? 'bg-gradient-to-r from-red-700 to-red-600 text-white font-semibold border-red-400/80 shadow-[0_12px_24px_-16px_rgba(230,0,0,0.9)]'
               : 'text-gray-300 border-transparent hover:bg-white/5 hover:text-white hover:border-white/10'
             } ${collapsed ? 'md:justify-center md:px-2' : 'gap-3'}`}
           hidden={!isAdmin}
         >
-          <BookMarked size={18} className={location.pathname === '/' ? 'text-white' : 'text-red-500 group-hover:text-red-400'} />
+          <BookMarked size={18} className={location.pathname === '/dashboard' ? 'text-white' : 'text-red-500 group-hover:text-red-400'} />
           <span className={collapsed ? 'md:hidden' : 'text-xs text-gray-100 font-semibold uppercase tracking-[0.14em]'}>Resumen general</span>
         </Link>
 
