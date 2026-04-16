@@ -1,71 +1,72 @@
-import { useMemo, useState } from 'react';
+import { useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { Activity, AlertCircle, Filter } from 'lucide-react';
 import { DateRangePicker } from '../../components/DateRangePicker';
-import { useSheetData } from '../../hooks/useSheetData';
-import { formatCurrencyPen, formatNumberEs, normalizeText, parseDateValue, parseNumericValue } from '../../lib/tableHelpers';
+import { formatCurrencyPen, formatNumberEs, normalizeText, parseNumericValue } from '../../lib/tableHelpers';
+import { isSupabaseConfigured, supabase } from '../../lib/supabase';
 
-type Row = Record<string, unknown>;
-
-// Función para encontrar la primera columna que coincida con alguna de las opciones dadas, ignorando mayúsculas, espacios y caracteres especiales.
-function getColumnByCandidates(columns: string[], candidates: string[]) {
-  return (
-    columns.find((column) => {
-      const normalizedColumn = normalizeText(column);
-      return candidates.some((candidate) => normalizeText(candidate) === normalizedColumn);
-    }) ?? null
-  );
+interface LeadRow {
+  business_id: number | null;
+  fecha_lead_ganado: string | null;
+  distrito: string | null;
+  ingreso_anulados_fullfilment: number | null;
+  tienda_nombre_snapshot: string | null;
 }
 
-// Función para obtener un valor de una fila y columna dada, devolviendo una cadena vacía si la columna no existe o el valor es nulo/indefinido.
-function getStringValue(row: Row, column: string | null) {
-  if (!column) return '';
-  return String(row[column] ?? '').trim();
+interface EnvioRow {
+  id_lead_ganado: number | null;
+  fecha_envio: string | null;
+  ingreso_total_fila: number | null;
+  costo_total_fila: number | null;
 }
 
-// Función para obtener un valor numérico de una fila y columna dada, devolviendo 0 si la columna no existe o el valor no es un número válido.
-function getNumericValue(row: Row, column: string | null) {
-  if (!column) return 0;
-  return parseNumericValue(row[column]) ?? 0;
+interface RecojoRow {
+  id_lead_ganado: number | null;
+  fecha: string | null;
+  tipo_cobro: string | null;
+  veces: number | null;
+  cobro_a_tienda: number | null;
+  ingreso_recojo_total: number | null;
+  costo_recojo_total: number | null;
 }
 
-// Función para filtrar filas por un rango de fechas en una columna específica. Si no se proporciona una columna de fecha o ambos límites del rango están vacíos, devuelve las filas sin filtrar.
-function filterRowsByRange(rows: Row[], dateColumn: string | null, from: string, to: string) {
-  if (!dateColumn || (!from && !to)) return rows;
-
-  const fromDate = from ? parseDateValue(from) : null;
-  const toDateRaw = to ? parseDateValue(to) : null;
-  const toDate = toDateRaw ? new Date(toDateRaw) : null;
-
-  if (toDate) {
-    toDate.setHours(23, 59, 59, 999);
-  }
-
-  return rows.filter((row) => {
-    const value = row[dateColumn];
-    const parsed = parseDateValue(value);
-    if (!parsed) return false;
-
-    if (fromDate && parsed < fromDate) return false;
-    if (toDate && parsed > toDate) return false;
-
-    return true;
-  });
+interface DashboardMetrics {
+  periodo: string;
+  tiendasRegistradas: number;
+  leadsGanados: number;
+  enviosTotales: number;
+  promedioTE: number;
+  ingresosAnuladosFullfilment: number;
+  ingresoTotalOperativo: number;
+  costoTotalOperativo: number;
+  margenTotalOperativo: number;
+  ticketPromedioMes: number;
+  costoOperativoPorLeadGanado: number;
+  ingresoPorLeadGanado: number;
+  recojosCobrados: number;
+  recojosGratis: number;
+  pagoTotalMotorizadoRecojo: number;
+  distritoLeadGanadoFrecuente: string;
 }
 
-// Función para realizar una división segura, devolviendo 0 si el denominador es 0 o no es un número válido.
+const PAGE_SIZE = 1000;
+
+function toIsoDate(date: Date) {
+  return date.toISOString().slice(0, 10);
+}
+
 function safeDivide(numerator: number, denominator: number) {
   if (!denominator) return 0;
   return numerator / denominator;
 }
 
-function getMostFrequentNormalized(values: string[]) {
+function getMostFrequent(values: string[]) {
   const countByNormalized = new Map<string, number>();
   const displayByNormalized = new Map<string, string>();
 
   for (const raw of values) {
     const value = String(raw ?? '').trim();
     if (!value) continue;
-
     const normalized = normalizeText(value);
     if (!normalized) continue;
 
@@ -75,182 +76,204 @@ function getMostFrequentNormalized(values: string[]) {
     }
   }
 
-  let winnerNormalized = '';
+  let winner = '';
   let winnerCount = 0;
   for (const [normalized, count] of countByNormalized.entries()) {
     if (count > winnerCount) {
-      winnerNormalized = normalized;
+      winner = normalized;
       winnerCount = count;
     }
   }
 
-  return winnerNormalized ? displayByNormalized.get(winnerNormalized) ?? '' : '';
+  return winner ? displayByNormalized.get(winner) ?? '' : '';
 }
 
-// Función para encontrar el ID de negocio de tipo de recojo basado en etiquetas candidatas, buscando en las filas de la hoja de "TIPO DE RECOJO". Devuelve null si no encuentra una coincidencia o si no puede determinar las columnas relevantes.
-function findTipoRecojoBusinessId(rows: Row[], labelCandidates: string[]) {
-  if (!rows.length) return null;
-  const columns = Object.keys(rows[0]);
-  const idColumn = getColumnByCandidates(columns, ['idTipoRecojo', 'business_id', 'id']);
-  const textColumn = getColumnByCandidates(columns, ['tipo de recojo', 'Tipo de Recojo', 'tipo_recojo', 'nombre']);
-  if (!idColumn || !textColumn) return null;
+async function ensureSupabaseSession() {
+  if (!supabase) throw new Error('Supabase no está configurado');
 
-  for (const row of rows) {
-    const text = normalizeText(String(row[textColumn] ?? ''));
-    if (labelCandidates.some((candidate) => text.includes(normalizeText(candidate)))) {
-      return parseNumericValue(row[idColumn]);
-    }
+  const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+  if (sessionError) {
+    throw new Error(`No se pudo validar sesión Supabase: ${sessionError.message}`);
   }
 
-  return null;
+  if (sessionData.session) return;
+
+  const { error: anonError } = await supabase.auth.signInAnonymously();
+  if (anonError) {
+    throw new Error(`Falló signInAnonymously en Supabase: ${anonError.message}`);
+  }
 }
 
-// Componente principal del dashboard que muestra un resumen general de KPIs y métricas operativas, con la capacidad de filtrar por rango de fechas. Utiliza datos de varias hojas (envíos, recojos, leads, tipo de recojo) para calcular las métricas y mostrarlas en tarjetas.
-export function DashboardOverview() {
-  const [dateFrom, setDateFrom] = useState('');
-  const [dateTo, setDateTo] = useState('');
+async function fetchAllPaged<T>(
+  fetchPage: (from: number, to: number) => Promise<{ data: T[] | null; error: { message?: string } | null }>,
+) {
+  const rows: T[] = [];
+  let from = 0;
 
-  const enviosQuery = useSheetData('ENVIOS');
-  const recojosQuery = useSheetData('RECOJOS');
-  const leadsQuery = useSheetData('LEADS GANADOS');
-  const tipoRecojoQuery = useSheetData('TIPO DE RECOJO');
+  while (true) {
+    const to = from + PAGE_SIZE - 1;
+    const { data, error } = await fetchPage(from, to);
+    if (error) {
+      throw new Error(error.message || 'No se pudieron cargar datos desde Supabase');
+    }
 
-  const isLoading =
-    enviosQuery.isLoading ||
-    recojosQuery.isLoading ||
-    leadsQuery.isLoading ||
-    tipoRecojoQuery.isLoading;
+    const batch = data ?? [];
+    rows.push(...batch);
 
-  const error =
-    enviosQuery.error ||
-    recojosQuery.error ||
-    leadsQuery.error ||
-    tipoRecojoQuery.error;
+    if (batch.length < PAGE_SIZE) break;
+    from += PAGE_SIZE;
+  }
 
-  const metrics = useMemo(() => {
-    const enviosColumns = enviosQuery.data?.columns ?? [];
-    const enviosRows = (enviosQuery.data?.rows ?? []) as Row[];
-    const recojosColumns = recojosQuery.data?.columns ?? [];
-    const recojosRows = (recojosQuery.data?.rows ?? []) as Row[];
-    const leadsColumns = leadsQuery.data?.columns ?? [];
-    const leadsRows = (leadsQuery.data?.rows ?? []) as Row[];
-    const tipoRecojoRows = (tipoRecojoQuery.data?.rows ?? []) as Row[];
+  return rows;
+}
 
-    const enviosDateColumn = getColumnByCandidates(enviosColumns, ['Fecha envio', 'Fecha envío', 'fecha_envio', 'Mes', 'mes', 'Fecha']);
-    const recojosDateColumn = getColumnByCandidates(recojosColumns, ['Fecha', 'fecha', 'Fecha de recojo', 'Mes', 'mes']);
-    const leadsDateColumn = getColumnByCandidates(leadsColumns, ['Fecha Lead Ganado', 'fecha_lead_ganado']);
+async function fetchDashboardMetrics(dateFrom: string, dateTo: string): Promise<DashboardMetrics> {
+  if (!supabase || !isSupabaseConfigured()) {
+    throw new Error('Supabase no está configurado para el dashboard');
+  }
 
-    const enviosInRange = filterRowsByRange(enviosRows, enviosDateColumn, dateFrom, dateTo);
-    const recojosInRange = filterRowsByRange(recojosRows, recojosDateColumn, dateFrom, dateTo);
-    const leadsInRange = filterRowsByRange(leadsRows, leadsDateColumn, dateFrom, dateTo);
+  const client = supabase;
 
-    const tiendaLeadCol = getColumnByCandidates(leadsColumns, ['Tienda', 'tienda']);
-    const ingresosAnuladosCol = getColumnByCandidates(leadsColumns, [
-      'Ingreso anulados fullfilment',
-      'Ingresos anulados fullfilment',
-      'ingreso anulados fullfilment',
-      'ingreso anulados full filment',
-    ]);
-    const distritoLeadCol = getColumnByCandidates(leadsColumns, ['Distrito', 'distrito']);
+  await ensureSupabaseSession();
 
-    const tiendasRegistradas = new Set(
-      leadsInRange.map((row) => normalizeText(getStringValue(row, tiendaLeadCol))).filter(Boolean),
-    ).size;
+  const leadsRows = await fetchAllPaged<LeadRow>(async (from, to) => {
+    let query = client
+      .from('leads_ganados')
+      .select('business_id,fecha_lead_ganado,distrito,ingreso_anulados_fullfilment,tienda_nombre_snapshot')
+      .order('business_id', { ascending: true })
+      .range(from, to);
 
-    const leadsGanados = leadsRows.length;
-    const leadsGanadosDelPeriodo = leadsInRange.length;
+    if (dateFrom) query = query.gte('fecha_lead_ganado', dateFrom);
+    if (dateTo) query = query.lte('fecha_lead_ganado', dateTo);
 
-    const enviosTotales = enviosInRange.length;
-    const promedioTE = safeDivide(enviosTotales, tiendasRegistradas);
+    const { data, error } = await query;
 
-    const ingresosAnuladosFullfilment = leadsInRange.reduce(
-      (acc, row) => acc + getNumericValue(row, ingresosAnuladosCol),
-      0,
-    );
+    return { data: (data ?? []) as LeadRow[], error };
+  });
 
-    const ingresoTotalEnviosCol = getColumnByCandidates(enviosColumns, ['Ingreso total fila', 'Ingreso total', 'ingreso total']);
-    const costoTotalEnviosCol = getColumnByCandidates(enviosColumns, ['Costo total fila', 'Costo total', 'costo total']);
+  const leadIds = new Set(
+    leadsRows
+      .map((row) => Number(row.business_id ?? 0))
+      .filter((id) => Number.isFinite(id) && id > 0),
+  );
 
-    const ingresoRecojoTotalCol = getColumnByCandidates(recojosColumns, ['Ingreso recojo total', 'ingreso recojo total']);
-    const costoRecojoTotalCol = getColumnByCandidates(recojosColumns, ['Costo recojo total', 'costo recojo total']);
+  const [enviosRowsRaw, recojosRowsRaw] = await Promise.all([
+    fetchAllPaged<EnvioRow>(async (from, to) => {
+      let query = client
+        .from('envios')
+        .select('id_lead_ganado,fecha_envio,ingreso_total_fila,costo_total_fila')
+        .order('business_id', { ascending: true })
+        .range(from, to);
 
-    const ingresoTotalEnvios = enviosInRange.reduce((acc, row) => acc + getNumericValue(row, ingresoTotalEnviosCol), 0);
-    const ingresoTotalRecojos = recojosInRange.reduce((acc, row) => acc + getNumericValue(row, ingresoRecojoTotalCol), 0);
-    const ingresoTotalOperativo = ingresoTotalEnvios + ingresoTotalRecojos + ingresosAnuladosFullfilment;
+      if (dateFrom) query = query.gte('fecha_envio', dateFrom);
+      if (dateTo) query = query.lte('fecha_envio', dateTo);
 
-    const costoTotalEnvios = enviosInRange.reduce((acc, row) => acc + getNumericValue(row, costoTotalEnviosCol), 0);
-    const costoTotalRecojos = recojosInRange.reduce((acc, row) => acc + getNumericValue(row, costoRecojoTotalCol), 0);
-    const costoTotalOperativo = costoTotalEnvios + costoTotalRecojos;
+      const { data, error } = await query;
 
-    const margenTotalOperativo = ingresoTotalOperativo - costoTotalOperativo;
-    const ticketPromedioMes = safeDivide(ingresoTotalOperativo, enviosTotales);
-    const costoOperativoPorLeadGanado = safeDivide(costoTotalOperativo, leadsGanadosDelPeriodo);
-    const ingresoPorLeadGanado = safeDivide(ingresoTotalOperativo, leadsGanadosDelPeriodo);
+      return { data: (data ?? []) as EnvioRow[], error };
+    }),
+    fetchAllPaged<RecojoRow>(async (from, to) => {
+      let query = client
+        .from('recojos')
+        .select('id_lead_ganado,fecha,tipo_cobro,veces,cobro_a_tienda,ingreso_recojo_total,costo_recojo_total')
+        .order('business_id', { ascending: true })
+        .range(from, to);
 
-    const recojoCobradoId = findTipoRecojoBusinessId(tipoRecojoRows, ['cobrado', 'recojo cobrado']) ?? 1;
-    const recojoGratisId = findTipoRecojoBusinessId(tipoRecojoRows, ['gratis', 'recojo gratis']) ?? 2;
+      if (dateFrom) query = query.gte('fecha', dateFrom);
+      if (dateTo) query = query.lte('fecha', dateTo);
 
-    const idTipoRecojoColumn = getColumnByCandidates(recojosColumns, ['idTipoRecojo', 'id tipo recojo']);
-    const tipoRecojoColumn = getColumnByCandidates(recojosColumns, ['Tipo de cobro', 'tipo de cobro', 'Tipo de Recojo', 'tipo de recojo']);
-    const vecesRecojoColumn = getColumnByCandidates(recojosColumns, ['Veces', 'veces']);
+      const { data, error } = await query;
 
-    const recojoRowsByType = recojosInRange.map((row) => {
-      const veces = Math.max(0, getNumericValue(row, vecesRecojoColumn));
-      const tipoById = getNumericValue(row, idTipoRecojoColumn);
-      const tipoByLabel = normalizeText(getStringValue(row, tipoRecojoColumn));
-
-      const isGratisById = tipoById > 0 && tipoById === recojoGratisId;
-      const isCobradoById = tipoById > 0 && tipoById === recojoCobradoId;
-      const isGratisByLabel = tipoByLabel.includes('gratis');
-      const isCobradoByLabel = tipoByLabel.includes('cobra') || tipoByLabel.includes('pedido');
-
-      return {
-        veces,
-        isGratis: isGratisById || (!isCobradoById && isGratisByLabel),
-        isCobrado: isCobradoById || (!isGratisById && isCobradoByLabel),
-      };
-    });
-
-    const recojosCobrados = recojoRowsByType.reduce((acc, row) => (row.isCobrado ? acc + row.veces : acc), 0);
-    const recojosGratis = recojoRowsByType.reduce((acc, row) => (row.isGratis ? acc + row.veces : acc), 0);
-
-    const pagoTotalMotorizadoRecojo = recojosInRange.reduce(
-      (acc, row) => acc + getNumericValue(row, costoRecojoTotalCol),
-      0,
-    );
-
-    const distritoLeadGanadoFrecuente = getMostFrequentNormalized(
-      leadsInRange.map((row) => getStringValue(row, distritoLeadCol)).filter(Boolean),
-    );
-
-    return {
-      periodo: dateFrom || dateTo ? `${dateFrom || '...'} → ${dateTo || '...'}` : 'Sin filtro (todo el periodo)',
-      tiendasRegistradas,
-      leadsGanados,
-      enviosTotales,
-      promedioTE,
-      ingresosAnuladosFullfilment,
-      ingresoTotalOperativo,
-      costoTotalOperativo,
-      margenTotalOperativo,
-      ticketPromedioMes,
-      costoOperativoPorLeadGanado,
-      ingresoPorLeadGanado,
-      recojosCobrados,
-      recojosGratis,
-      pagoTotalMotorizadoRecojo,
-      distritoLeadGanadoFrecuente,
-    };
-  }, [
-    enviosQuery.data,
-    recojosQuery.data,
-    leadsQuery.data,
-    tipoRecojoQuery.data,
-    dateFrom,
-    dateTo,
+      return { data: (data ?? []) as RecojoRow[], error };
+    }),
   ]);
 
-  if (isLoading) {
+  const enviosRows = enviosRowsRaw.filter((row) => leadIds.has(Number(row.id_lead_ganado ?? 0)));
+  // Para KPIs de recojos se filtra SOLO por fecha de recojo (query SQL), sin cruce por fecha_lead_ganado.
+  const recojosRows = recojosRowsRaw;
+
+  const tiendasRegistradas = new Set(
+    leadsRows
+      .map((row) => normalizeText(row.tienda_nombre_snapshot ?? ''))
+      .filter(Boolean),
+  ).size;
+
+  const leadsGanados = leadsRows.length;
+  const enviosTotales = enviosRows.length;
+  const promedioTE = safeDivide(enviosTotales, tiendasRegistradas);
+
+  const ingresosAnuladosFullfilment = leadsRows.reduce(
+    (acc, row) => acc + (parseNumericValue(row.ingreso_anulados_fullfilment) ?? 0),
+    0,
+  );
+
+  const ingresoTotalEnvios = enviosRows.reduce((acc, row) => acc + (parseNumericValue(row.ingreso_total_fila) ?? 0), 0);
+  const costoTotalEnvios = enviosRows.reduce((acc, row) => acc + (parseNumericValue(row.costo_total_fila) ?? 0), 0);
+
+  const ingresoTotalRecojos = recojosRows.reduce((acc, row) => acc + (parseNumericValue(row.ingreso_recojo_total) ?? 0), 0);
+  const costoTotalRecojos = recojosRows.reduce((acc, row) => acc + (parseNumericValue(row.costo_recojo_total) ?? 0), 0);
+
+  const ingresoTotalOperativo = ingresoTotalEnvios + ingresoTotalRecojos + ingresosAnuladosFullfilment;
+  const costoTotalOperativo = costoTotalEnvios + costoTotalRecojos;
+  const margenTotalOperativo = ingresoTotalOperativo - costoTotalOperativo;
+  const ticketPromedioMes = safeDivide(ingresoTotalOperativo, enviosTotales);
+  const costoOperativoPorLeadGanado = safeDivide(costoTotalOperativo, leadsGanados);
+  const ingresoPorLeadGanado = safeDivide(ingresoTotalOperativo, leadsGanados);
+
+  const recojosCobrados = recojosRows.reduce((acc, row) => {
+    const tipo = normalizeText(row.tipo_cobro ?? '');
+    if (!tipo.includes('1 pedido')) return acc;
+    return acc + (parseNumericValue(row.veces) ?? 0);
+  }, 0);
+
+  const recojosGratis = recojosRows.reduce((acc, row) => {
+    const tipo = normalizeText(row.tipo_cobro ?? '');
+    if (!tipo.includes('2+ pedido')) return acc;
+    return acc + (parseNumericValue(row.veces) ?? 0);
+  }, 0);
+
+  const pagoTotalMotorizadoRecojo = recojosRows.reduce(
+    (acc, row) => acc + (parseNumericValue(row.costo_recojo_total) ?? 0),
+    0,
+  );
+
+  const distritoLeadGanadoFrecuente = getMostFrequent(
+    leadsRows.map((row) => String(row.distrito ?? '').trim()).filter(Boolean),
+  );
+
+  return {
+    periodo: dateFrom || dateTo ? `${dateFrom || '...'} → ${dateTo || '...'}` : 'Sin filtro (todo el periodo)',
+    tiendasRegistradas,
+    leadsGanados,
+    enviosTotales,
+    promedioTE,
+    ingresosAnuladosFullfilment,
+    ingresoTotalOperativo,
+    costoTotalOperativo,
+    margenTotalOperativo,
+    ticketPromedioMes,
+    costoOperativoPorLeadGanado,
+    ingresoPorLeadGanado,
+    recojosCobrados,
+    recojosGratis,
+    pagoTotalMotorizadoRecojo,
+    distritoLeadGanadoFrecuente,
+  };
+}
+
+export function DashboardOverview() {
+  const today = toIsoDate(new Date());
+  const monthStart = `${today.slice(0, 8)}01`;
+  const [dateFrom, setDateFrom] = useState(monthStart);
+  const [dateTo, setDateTo] = useState(today);
+
+  const metricsQuery = useQuery({
+    queryKey: ['dashboard-summary', dateFrom, dateTo],
+    queryFn: () => fetchDashboardMetrics(dateFrom, dateTo),
+    staleTime: 60 * 1000,
+  });
+
+  if (metricsQuery.isLoading) {
     return (
       <div className="flex items-center justify-center h-full text-gray-500 bg-white rounded-2xl border border-gray-200 shadow-sm p-6">
         <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-red-600 mr-3"></div>
@@ -259,15 +282,19 @@ export function DashboardOverview() {
     );
   }
 
-  if (error) {
+  if (metricsQuery.error || !metricsQuery.data) {
     return (
       <div className="flex flex-col items-center justify-center h-full text-red-500 space-y-4">
         <AlertCircle size={48} />
         <p className="text-lg font-medium">Error al cargar el dashboard</p>
-        <p className="text-sm text-red-400">{error instanceof Error ? error.message : 'Error desconocido'}</p>
+        <p className="text-sm text-red-400">
+          {metricsQuery.error instanceof Error ? metricsQuery.error.message : 'Error desconocido'}
+        </p>
       </div>
     );
   }
+
+  const metrics = metricsQuery.data;
 
   return (
     <div className="space-y-4">
@@ -337,7 +364,6 @@ export function DashboardOverview() {
   );
 }
 
-// Sección genérica con título y contenido, utilizada para organizar el dashboard en bloques temáticos.
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <div className="space-y-3">
@@ -347,12 +373,10 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   );
 }
 
-// Componente para mostrar una cuadrícula de tarjetas de KPI, adaptándose a diferentes tamaños de pantalla.
 function KpiGrid({ children }: { children: React.ReactNode }) {
   return <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">{children}</div>;
 }
 
-// Componente para mostrar una tarjeta de KPI con título y valor, formateando el valor según corresponda (número o moneda) y aplicando estilos visuales.
 function KpiCard({ title, value }: { title: string; value: string }) {
   return (
     <div className="bg-white p-4 rounded-2xl shadow-[0_20px_42px_-34px_rgba(15,23,42,0.9)] border border-gray-200">

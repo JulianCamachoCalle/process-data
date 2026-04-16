@@ -37,10 +37,22 @@ export function Sidebar({
 
   const isKommoExplorerActive = location.pathname === '/kommo' || (location.pathname.startsWith('/kommo/') && !location.pathname.startsWith('/kommo/leads-insights'));
   const isKommoInsightsActive = location.pathname === '/kommo/leads-insights';
-  const isMetaAdsDashboardActive = location.pathname === '/meta/ads/dashboard' || location.pathname === '/meta/ads';
+  const isMetaAdsDashboardActive =
+    location.pathname === '/meta/ads/dashboard' ||
+    location.pathname === '/meta/ads' ||
+    location.pathname === '/dashboard/meta/ads/dashboard' ||
+    location.pathname === '/dashboard/meta/ads';
   const isMetaAdsDataActive = location.pathname === '/meta/ads/data';
-  const isMetaCompareActive = location.pathname === '/meta/compare/dashboard' || location.pathname === '/meta/compare';
-  const isMetaPagesActive = location.pathname === '/meta/pages/dashboard' || location.pathname === '/meta/pages';
+  const isMetaCompareActive =
+    location.pathname === '/meta/compare/dashboard' ||
+    location.pathname === '/meta/compare' ||
+    location.pathname === '/dashboard/meta/compare/dashboard' ||
+    location.pathname === '/dashboard/meta/compare';
+  const isMetaPagesActive =
+    location.pathname === '/meta/pages/dashboard' ||
+    location.pathname === '/meta/pages' ||
+    location.pathname === '/dashboard/meta/pages/dashboard' ||
+    location.pathname === '/dashboard/meta/pages';
   const isGoogleSheetsExportActive = location.pathname === '/exports/google-sheets';
   const isAdminUsersActive = location.pathname === '/admin/users';
   const isEstadisticasVendedorActive = location.pathname === '/operativas/estadisticas-vendedor';
