@@ -370,13 +370,13 @@ export function DynamicTable({ sheetName, columns, rows, onEdit }: DynamicTableP
       const recojosGratis = filteredRows.reduce((acc, row) => {
         const tipo = normalizeText(String(row[tipoCol ?? ''] ?? ''));
         const veces = Math.max(0, parseNumericValue(row[vecesCol ?? '']) ?? 0);
-        return tipo.includes('gratis') ? acc + veces : acc;
+        return tipo.includes('2+ pedido') ? acc + veces : acc;
       }, 0);
 
       const recojosCobrados = filteredRows.reduce((acc, row) => {
         const tipo = normalizeText(String(row[tipoCol ?? ''] ?? ''));
         const veces = Math.max(0, parseNumericValue(row[vecesCol ?? '']) ?? 0);
-        return tipo.includes('cobra') || tipo.includes('pedido') ? acc + veces : acc;
+        return tipo.includes('1 pedido') ? acc + veces : acc;
       }, 0);
 
       const margenRecojos = sumByColumn(ingresoCol) - sumByColumn(costoCol);
@@ -390,12 +390,12 @@ export function DynamicTable({ sheetName, columns, rows, onEdit }: DynamicTableP
         {
           label: 'Recojos cobrados (veces)',
           value: formatNumberEs(recojosCobrados),
-          helper: 'Suma de veces con tipo cobrado',
+          helper: 'Suma de veces con tipo 1 pedido',
         },
         {
           label: 'Recojos gratis (veces)',
           value: formatNumberEs(recojosGratis),
-          helper: 'Suma de veces con tipo gratis',
+          helper: 'Suma de veces con tipo 2+ pedido',
         },
         {
           label: 'Margen recojos visible',
