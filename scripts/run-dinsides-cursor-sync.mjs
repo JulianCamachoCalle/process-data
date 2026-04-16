@@ -18,6 +18,8 @@ const DEFAULTS = {
   recojosNegociosPerQuery: parsePositiveInt(process.env.RECOJOS_NEGOCIOS_PER_QUERY, 20),
   recojosMaxRuntimeMs: parsePositiveInt(process.env.RECOJOS_MAX_RUNTIME_MS, 50000),
   recojosMaxClientIdsPerLead: parsePositiveInt(process.env.RECOJOS_MAX_CLIENT_IDS_PER_LEAD, 8),
+  recojosMaxDaysPerLead: parsePositiveInt(process.env.RECOJOS_MAX_DAYS_PER_LEAD, 12),
+  recojosMaxQueriesPerLead: parsePositiveInt(process.env.RECOJOS_MAX_RECOJO_QUERIES_PER_LEAD, 18),
 };
 
 function parsePositiveInt(value, fallback) {
@@ -264,6 +266,8 @@ async function processRecojos({ baseUrl, headers, state, sleepMs, maxRetries, da
       negocios_per_query: DEFAULTS.recojosNegociosPerQuery,
       max_runtime_ms: DEFAULTS.recojosMaxRuntimeMs,
       max_client_ids_per_lead: DEFAULTS.recojosMaxClientIdsPerLead,
+      max_days_per_lead: DEFAULTS.recojosMaxDaysPerLead,
+      max_recojo_queries_per_lead: DEFAULTS.recojosMaxQueriesPerLead,
       date_from: dateFrom,
       date_to: dateTo,
     };
