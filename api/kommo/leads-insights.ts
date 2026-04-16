@@ -135,6 +135,7 @@ type SellerLeadSummaryOption = {
 
 type SellerLeadSummaryRow = {
   lead_id: number;
+  vendedor_nombre: string;
   fecha_ingreso_lead: string | null;
   fecha_lead_ganado: string | null;
   dias_lead_a_ganado: number;
@@ -532,7 +533,7 @@ export default async function kommoLeadsInsightsHandler(req: VercelRequest, res:
       return res.status(200).json({ success: true, options });
     }
 
-    if (mode === 'seller_lead_summary_options') {
+    if (mode === 'store_lead_summary_options' || mode === 'seller_lead_summary_options') {
       const supabase = getSupabaseAdminClient();
       const optionsMap = new Map<string, string>();
       let from = 0;
@@ -542,18 +543,18 @@ export default async function kommoLeadsInsightsHandler(req: VercelRequest, res:
         const to = from + pageSize - 1;
         const { data, error } = await supabase
           .from('leads_ganados' as never)
-          .select('vendedor_nombre_snapshot' as never)
-          .not('vendedor_nombre_snapshot' as never, 'is' as never, null as never)
-          .neq('vendedor_nombre_snapshot' as never, '' as never)
+          .select('tienda_nombre_snapshot' as never)
+          .not('tienda_nombre_snapshot' as never, 'is' as never, null as never)
+          .neq('tienda_nombre_snapshot' as never, '' as never)
           .range(from, to);
 
         if (error) {
-          throw new Error(error.message || 'No se pudo cargar la lista de vendedores de leads ganados.');
+          throw new Error(error.message || 'No se pudo cargar la lista de tiendas de leads ganados.');
         }
 
-        const chunk = (data ?? []) as Array<{ vendedor_nombre_snapshot: string | null }>;
+        const chunk = (data ?? []) as Array<{ tienda_nombre_snapshot: string | null }>;
         for (const row of chunk) {
-          const label = String(row.vendedor_nombre_snapshot ?? '').trim();
+          const label = String(row.tienda_nombre_snapshot ?? '').trim();
           if (!label) continue;
           const normalized = normalizeText(label);
           if (!normalized) continue;
@@ -573,18 +574,22 @@ export default async function kommoLeadsInsightsHandler(req: VercelRequest, res:
       return res.status(200).json({ success: true, options });
     }
 
-    if (mode === 'seller_lead_summary') {
+    if (mode === 'store_lead_summary' || mode === 'seller_lead_summary') {
+      const storeNameParam = asSingleQueryParam(req.query.store_name);
       const sellerNameParam = asSingleQueryParam(req.query.seller_name);
-      const sellerName = typeof sellerNameParam === 'string' ? sellerNameParam.trim() : '';
+      const storeName = typeof storeNameParam === 'string' && storeNameParam.trim()
+        ? storeNameParam.trim()
+        : (typeof sellerNameParam === 'string' ? sellerNameParam.trim() : '');
 
-      if (!sellerName) {
-        return res.status(400).json({ success: false, error: 'Falta seller_name.' });
+      if (!storeName) {
+        return res.status(400).json({ success: false, error: 'Falta store_name.' });
       }
 
       const supabase = getSupabaseAdminClient();
 
       const leadsGanados: Array<{
         business_id: number | null;
+        vendedor_nombre_snapshot: string | null;
         fecha_ingreso_lead: string | null;
         fecha_lead_ganado: string | null;
         dias_lead_a_ganado: number | null;
@@ -597,8 +602,8 @@ export default async function kommoLeadsInsightsHandler(req: VercelRequest, res:
         const to = from + pageSize - 1;
         let leadsQuery = supabase
           .from('leads_ganados' as never)
-          .select('business_id,fecha_ingreso_lead,fecha_lead_ganado,dias_lead_a_ganado' as never)
-          .eq('vendedor_nombre_snapshot' as never, sellerName as never)
+          .select('business_id,vendedor_nombre_snapshot,fecha_ingreso_lead,fecha_lead_ganado,dias_lead_a_ganado' as never)
+          .eq('tienda_nombre_snapshot' as never, storeName as never)
           .range(from, to);
 
         if (startDate) leadsQuery = leadsQuery.gte('fecha_lead_ganado' as never, startDate as never);
@@ -607,11 +612,12 @@ export default async function kommoLeadsInsightsHandler(req: VercelRequest, res:
         const { data, error } = await leadsQuery;
 
         if (error) {
-          throw new Error(error.message || 'No se pudieron cargar leads ganados para el vendedor.');
+          throw new Error(error.message || 'No se pudieron cargar leads ganados para la tienda.');
         }
 
         const chunk = (data ?? []) as Array<{
           business_id: number | null;
+          vendedor_nombre_snapshot: string | null;
           fecha_ingreso_lead: string | null;
           fecha_lead_ganado: string | null;
           dias_lead_a_ganado: number | null;
@@ -625,6 +631,7 @@ export default async function kommoLeadsInsightsHandler(req: VercelRequest, res:
       const leadRows = leadsGanados
         .map((row) => ({
           leadId: Number(row.business_id ?? 0),
+          vendedorNombre: String(row.vendedor_nombre_snapshot ?? '').trim(),
           fechaIngresoLead: row.fecha_ingreso_lead,
           fechaLeadGanado: row.fecha_lead_ganado,
           diasLeadAGanado: Number(row.dias_lead_a_ganado ?? 0),
@@ -633,7 +640,7 @@ export default async function kommoLeadsInsightsHandler(req: VercelRequest, res:
 
       const leadIds = Array.from(new Set(leadRows.map((row) => row.leadId)));
       if (leadIds.length === 0) {
-        return res.status(200).json({ success: true, seller: sellerName, rows: [] as SellerLeadSummaryRow[] });
+        return res.status(200).json({ success: true, store: storeName, rows: [] as SellerLeadSummaryRow[] });
       }
 
       const resultados = await safeSelectPaginated<{ business_id: number; resultado: string | null }>('resultados', 'business_id,resultado', { batchSize: 500 });
@@ -683,7 +690,7 @@ export default async function kommoLeadsInsightsHandler(req: VercelRequest, res:
           const { data, error } = await enviosQuery;
 
           if (error) {
-            throw new Error(error.message || 'No se pudieron cargar envíos para el resumen de vendedor.');
+            throw new Error(error.message || 'No se pudieron cargar envíos para el resumen de tienda.');
           }
 
           const chunkRows = (data ?? []) as Array<{
@@ -712,7 +719,7 @@ export default async function kommoLeadsInsightsHandler(req: VercelRequest, res:
           const { data, error } = await recojosQuery;
 
           if (error) {
-            throw new Error(error.message || 'No se pudieron cargar recojos para el resumen de vendedor.');
+            throw new Error(error.message || 'No se pudieron cargar recojos para el resumen de tienda.');
           }
 
           const chunkRows = (data ?? []) as Array<{
@@ -812,6 +819,7 @@ export default async function kommoLeadsInsightsHandler(req: VercelRequest, res:
 
           return {
             lead_id: lead.leadId,
+            vendedor_nombre: lead.vendedorNombre,
             fecha_ingreso_lead: lead.fechaIngresoLead,
             fecha_lead_ganado: lead.fechaLeadGanado,
             dias_lead_a_ganado: lead.diasLeadAGanado,
@@ -836,7 +844,7 @@ export default async function kommoLeadsInsightsHandler(req: VercelRequest, res:
           return b.lead_id - a.lead_id;
         });
 
-      return res.status(200).json({ success: true, seller: sellerName, rows });
+      return res.status(200).json({ success: true, store: storeName, rows });
     }
 
     if (mode === 'seller_stats') {

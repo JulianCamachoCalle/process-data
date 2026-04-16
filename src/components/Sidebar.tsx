@@ -56,7 +56,11 @@ export function Sidebar({
   const isGoogleSheetsExportActive = location.pathname === '/exports/google-sheets';
   const isAdminUsersActive = location.pathname === '/admin/users';
   const isEstadisticasVendedorActive = location.pathname === '/operativas/estadisticas-vendedor' || location.pathname === '/dashboard/operativas/estadisticas-vendedor';
-  const isResumenVendedorActive = location.pathname === '/operativas/resumen-vendedor' || location.pathname === '/dashboard/operativas/resumen-vendedor';
+  const isResumenVendedorActive =
+    location.pathname === '/operativas/resumen-tienda' ||
+    location.pathname === '/dashboard/operativas/resumen-tienda' ||
+    location.pathname === '/operativas/resumen-vendedor' ||
+    location.pathname === '/dashboard/operativas/resumen-vendedor';
 
   const renderGroup = (groupName: string, icon: ReactNode, groupSheets: string[]) => {
     if (!groupSheets.length) return null;
@@ -175,16 +179,16 @@ export function Sidebar({
         )}
         {isAdmin && (
           <Link
-            to="/operativas/resumen-vendedor"
+            to="/operativas/resumen-tienda"
             onClick={() => onNavigate?.()}
-            title={collapsed ? 'Resumen vendedor' : undefined}
+            title={collapsed ? 'Resumen tienda' : undefined}
             className={`group mt-1 flex items-center w-full text-left px-4 py-2.5 rounded-xl border transition-all duration-200 ${isResumenVendedorActive
                 ? 'bg-white/10 text-white font-semibold border-red-500/70 shadow-[0_8px_24px_-18px_rgba(255,255,255,0.8)]'
                 : 'text-gray-400 border-transparent hover:bg-white/5 hover:text-gray-100 hover:border-white/10'
               } ${collapsed ? 'md:justify-center md:px-2' : 'gap-3'}`}
           >
             <UserCog size={16} className={isResumenVendedorActive ? 'text-red-500' : 'text-gray-500 group-hover:text-red-400'} />
-            <span className={`text-[12px] text-gray-400 font-semibold uppercase tracking-[0.05em] ${collapsed ? 'md:hidden' : ''}`}>Resumen vendedor</span>
+            <span className={`text-[12px] text-gray-400 font-semibold uppercase tracking-[0.05em] ${collapsed ? 'md:hidden' : ''}`}>Resumen tienda</span>
           </Link>
         )}
 
