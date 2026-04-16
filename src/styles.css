@@ -300,6 +300,43 @@ body.landing-mode-night::-webkit-scrollbar-button {
 	will-change: transform;
 }
 
+.landing-lowperf .landing-noise,
+.landing-lowperf .landing-grid {
+	display: none;
+}
+
+.landing-lowperf .glass-card {
+	backdrop-filter: none;
+	-webkit-backdrop-filter: none;
+}
+
+.landing-lowperf .hero-parallax {
+	will-change: auto;
+}
+
+.landing-lowperf .reveal {
+	opacity: 1;
+	transform: none;
+	transition: none;
+}
+
+.landing-lowperf .iso-chip::after {
+	display: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.reveal,
+	.reveal.in-view {
+		opacity: 1;
+		transform: none;
+		transition: none;
+	}
+
+	.hero-parallax {
+		will-change: auto;
+	}
+}
+
 .district-center-label {
 	background: transparent;
 	border: 0;
