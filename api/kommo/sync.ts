@@ -2505,6 +2505,7 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
       const maxQueries = parseEnviosProbeLimit(searchParams.get('max_queries') ?? undefined, 180, 800);
       const limitRows = parseEnviosProbeLimit(searchParams.get('limit_rows') ?? undefined, 2000, 10000);
       const negociosPerQuery = parseEnviosProbeLimit(searchParams.get('negocios_per_query') ?? undefined, 20, 60);
+      const maxClientIdsPerLead = parseEnviosProbeLimit(searchParams.get('max_client_ids_per_lead') ?? undefined, 8, 40);
       const singleBusiness = searchParams.get('search_negocio')?.trim();
       const cursor = parseNonNegativeInt(
         searchParams.get('cursor') ?? searchParams.get('lead_offset') ?? undefined,
@@ -2620,7 +2621,7 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
           }
 
           const uniqueIds = Array.from(new Set((clientIds ?? []).map((id) => String(id).trim()).filter(Boolean)));
-          clientIds = uniqueIds;
+          clientIds = uniqueIds.slice(0, maxClientIdsPerLead);
           dinsidesClientIdsByLead.set(leadId, clientIds);
         }
 
@@ -2685,6 +2686,9 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
       for (const leadId of leadIds) {
         if (runtimeExceeded || budgetExceeded || isRuntimeExceeded()) {
           runtimeExceeded = runtimeExceeded || isRuntimeExceeded();
+          if (processedLeads === 0) {
+            processedLeads = 1;
+          }
           break;
         }
 
@@ -2708,7 +2712,7 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
           }
 
           const uniqueIds = Array.from(new Set((clientIds ?? []).map((id) => String(id).trim()).filter(Boolean)));
-          clientIds = uniqueIds;
+          clientIds = uniqueIds.slice(0, maxClientIdsPerLead);
           dinsidesClientIdsByLead.set(leadId, clientIds);
         }
 
@@ -2749,6 +2753,9 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
           }
 
           if (runtimeExceeded || budgetExceeded) {
+            if (processedLeads === 0) {
+              processedLeads = 1;
+            }
             break;
           }
 
@@ -2827,6 +2834,9 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
         }
 
         if (runtimeExceeded || budgetExceeded) {
+          if (processedLeads === 0) {
+            processedLeads = 1;
+          }
           break;
         }
 
@@ -2931,6 +2941,7 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
           has_more: hasMoreFinal,
           batch_leads: batchLeads,
           negocios_per_query: negociosPerQuery,
+          max_client_ids_per_lead: maxClientIdsPerLead,
           limit_rows: limitRows,
           max_queries: maxQueries,
           max_runtime_ms: maxRuntimeMs,
@@ -2960,6 +2971,7 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
         has_more: hasMoreFinal,
         batch_leads: batchLeads,
         negocios_per_query: negociosPerQuery,
+        max_client_ids_per_lead: maxClientIdsPerLead,
         limit_rows: limitRows,
         max_queries: maxQueries,
         max_runtime_ms: maxRuntimeMs,

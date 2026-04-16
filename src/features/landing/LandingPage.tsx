@@ -82,7 +82,7 @@ const services = [
   {
     id: 'reutilizado',
     title: 'Reutilizado',
-    description: 'Si no se concreta una venta, el pedido se redirige — nada se pierde.',
+    description: 'Si no se concreta una venta, el pedido se redirige nada se pierde.',
     icon: BadgeCheck,
     featured: false,
   },
@@ -935,7 +935,7 @@ export function LandingPage() {
 
             <div className="flex flex-col gap-3">
               {/* Vision */}
-              <article className={cx('reveal reveal-delay-1 rounded-[1.8rem] border p-6', cardBase)}>
+              <article className={cx('reveal reveal-delay-1 rounded-[1.8rem] border p-6 glass-card max-h-[11rem]', n ? 'glass-card-night' : 'glass-card-day', cardBase)}>
                 <p className={cx('text-[10px] uppercase tracking-[0.26em] mb-3', muted)}>Visión</p>
                 <p className={cx('text-sm leading-7', n ? 'text-white/75' : 'text-gray-600')}>
                   Ser el referente de experiencias logísticas seguras y confiables del Perú.
@@ -944,7 +944,7 @@ export function LandingPage() {
 
               {/* Values */}
               <article
-                className={cx('reveal reveal-delay-2 rounded-[1.8rem] border p-6 flex-1', cardBase)}
+                className={cx('reveal reveal-delay-2 rounded-[1.8rem] border p-6 flex-1 glass-card max-h-[11rem]', n ? 'glass-card-night' : 'glass-card-day', cardBase)}
               >
                 <p className={cx('text-[10px] uppercase tracking-[0.26em] mb-4', muted)}>Valores</p>
                 <ul className="grid grid-cols-2 gap-y-2.5 gap-x-2">
@@ -1003,7 +1003,7 @@ export function LandingPage() {
                 <article
                   key={id}
                   className={cx(
-                    'reveal rounded-[1.8rem] border p-6 transition-colors',
+                    'reveal rounded-[1.8rem] border p-6 transition-colors glass-card max-h-[15rem]', n ? 'glass-card-night' : 'glass-card-day',
                     i > 0 && `reveal-delay-${i % 3}`,
                     featured
                       ? cx(
@@ -1057,7 +1057,7 @@ export function LandingPage() {
             </p>
           </div>
 
-          <article className={cx('reveal relative mt-8 overflow-hidden rounded-[1.5rem] border p-2', cardBase)}>
+          <article className={cx('reveal relative mt-8 overflow-hidden glass-card p-1.5 min-h-[570px]', n ? 'glass-card-night' : 'glass-card-day', cardBase)}>
             <a
               href={whatsappSalesUrl}
               target="_blank"
@@ -1074,7 +1074,7 @@ export function LandingPage() {
                 zoom={10}
                 scrollWheelZoom
                 attributionControl={false}
-                className="h-[620px] w-full"
+                className="h-[550px] w-full"
               >
                 <LeafletTiles
                   url={
