@@ -541,6 +541,8 @@ export function LandingPage() {
   const [coverageGeoJson, setCoverageGeoJson] = useState<AnyProps | null>(null);
   const landingRootRef = useRef<HTMLDivElement>(null);
   const heroBgRef = useRef<HTMLDivElement>(null);
+  const cursorGlowRef = useRef<HTMLDivElement>(null);
+  const cursorRingRef = useRef<HTMLDivElement>(null);
   const mapIconCache = useRef(new Map<string, L.Icon>());
   const cursorInteractiveRef = useRef(false);
   const showScrollTopRef = useRef(false);
@@ -705,18 +707,27 @@ export function LandingPage() {
 
     const root = landingRootRef.current;
     if (!root) return;
+    const glowEl = cursorGlowRef.current;
+    const ringEl = cursorRingRef.current;
+
+    const applyCursorTransform = (x: number, y: number) => {
+      if (glowEl) {
+        glowEl.style.transform = `translate3d(${x - 160}px, ${y - 160}px, 0)`;
+      }
+      if (ringEl) {
+        ringEl.style.transform = `translate3d(${x - 10}px, ${y - 10}px, 0)`;
+      }
+    };
 
     if (!cursorEnabled) {
       cursorInteractiveRef.current = false;
-      root.style.setProperty('--landing-cursor-x', '-9999px');
-      root.style.setProperty('--landing-cursor-y', '-9999px');
+      applyCursorTransform(-9999, -9999);
       root.dataset.cursorHover = '0';
       return;
     }
 
     cursorInteractiveRef.current = false;
     root.dataset.cursorHover = '0';
-    const interactiveSelector = 'a,button,[role="button"],input,select,textarea,summary,.leaflet-interactive,.leaflet-control-zoom a,[data-cursor="circle"]';
     let frame: number | null = null;
     let nextX = -9999;
     let nextY = -9999;
@@ -724,8 +735,7 @@ export function LandingPage() {
 
     const flushCursorFrame = () => {
       frame = null;
-      root.style.setProperty('--landing-cursor-x', `${nextX}px`);
-      root.style.setProperty('--landing-cursor-y', `${nextY}px`);
+      applyCursorTransform(nextX, nextY);
       if (root.dataset.cursorHover !== nextHover) {
         root.dataset.cursorHover = nextHover;
       }
@@ -736,21 +746,25 @@ export function LandingPage() {
       frame = window.requestAnimationFrame(flushCursorFrame);
     };
 
-    const handleMouseMove = (event: MouseEvent) => {
+    const handlePointerMove = (event: PointerEvent) => {
       nextX = event.clientX;
       nextY = event.clientY;
 
+      scheduleCursorFrame();
+    };
+
+    const interactiveSelector = 'a,button,[role="button"],input,select,textarea,summary,.leaflet-interactive,.leaflet-control-zoom a,[data-cursor="circle"]';
+    const handlePointerOver = (event: Event) => {
       const target = event.target instanceof Element ? event.target : null;
       const interactive = Boolean(target?.closest(interactiveSelector));
       if (interactive !== cursorInteractiveRef.current) {
         cursorInteractiveRef.current = interactive;
         nextHover = interactive ? '1' : '0';
+        scheduleCursorFrame();
       }
-
-      scheduleCursorFrame();
     };
 
-    const handleMouseLeave = () => {
+    const handlePointerLeave = () => {
       nextX = -9999;
       nextY = -9999;
       cursorInteractiveRef.current = false;
@@ -758,17 +772,18 @@ export function LandingPage() {
       scheduleCursorFrame();
     };
 
-    window.addEventListener('mousemove', handleMouseMove, { passive: true });
-    window.addEventListener('mouseleave', handleMouseLeave);
+    window.addEventListener('pointermove', handlePointerMove, { passive: true });
+    window.addEventListener('pointerleave', handlePointerLeave);
+    root.addEventListener('pointerover', handlePointerOver, true);
 
     return () => {
-      window.removeEventListener('mousemove', handleMouseMove);
-      window.removeEventListener('mouseleave', handleMouseLeave);
+      window.removeEventListener('pointermove', handlePointerMove);
+      window.removeEventListener('pointerleave', handlePointerLeave);
+      root.removeEventListener('pointerover', handlePointerOver, true);
       if (frame !== null) {
         window.cancelAnimationFrame(frame);
       }
-      root.style.setProperty('--landing-cursor-x', '-9999px');
-      root.style.setProperty('--landing-cursor-y', '-9999px');
+      applyCursorTransform(-9999, -9999);
       root.dataset.cursorHover = '0';
     };
   }, [cursorEnabled]);
@@ -911,10 +926,12 @@ export function LandingPage() {
       style={{ backgroundColor: bg }}
     >
       <div
+        ref={cursorGlowRef}
         aria-hidden="true"
         className={cx('landing-cursor-glow', cursorEnabled && 'is-active')}
       />
       <div
+        ref={cursorRingRef}
         aria-hidden="true"
         className={cx('landing-cursor-ring', cursorEnabled && 'is-active')}
       />
