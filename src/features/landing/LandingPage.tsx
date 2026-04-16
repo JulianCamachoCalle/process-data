@@ -910,7 +910,7 @@ export function LandingPage() {
             {/* Mission — large card spanning 2 cols */}
             <article
               className={cx(
-                'reveal rounded-[1.8rem] border p-7 lg:col-span-2 md:p-9',
+                'reveal rounded-[1.8rem] border p-7 lg:col-span-2 md:p-9 glass-card', n ? 'glass-card-night' : 'glass-card-day',
                 cardBase,
               )}
             >

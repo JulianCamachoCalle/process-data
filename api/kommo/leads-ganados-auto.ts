@@ -5,6 +5,7 @@ const DINSIDES_LOGIN_VALIDATE_URL = `${DINSIDES_BASE_URL}/login/validar`;
 const DINSIDES_CLIENTES_LOOKUP_URL = `${DINSIDES_BASE_URL}/admin/datosclientenombre`;
 const distritoByBusinessNameCache = new Map<string, string>();
 let dinsidesCookieHeaderPromise: Promise<string | null> | null = null;
+let anuladoResultadoIdsCache: { expiresAt: number; ids: number[] } | null = null;
 
 type JsonObject = Record<string, unknown>;
 
@@ -154,7 +155,36 @@ function extractSetCookieValuesFromResponse(response: Response) {
 
   const fallback = response.headers.get('set-cookie');
   if (!fallback) return [];
-  return fallback.split(/,(?=\s*[A-Za-z0-9_\-]+=)/g);
+  return fallback.split(/,(?=\s*[A-Za-z0-9_-]+=)/g);
+}
+
+async function getAnuladoResultadoIds(supabase: SupabaseClient): Promise<number[]> {
+  const now = Date.now();
+  if (anuladoResultadoIdsCache && anuladoResultadoIdsCache.expiresAt > now) {
+    return anuladoResultadoIdsCache.ids;
+  }
+
+  const { data: resultadosData, error: resultadosError } = await supabase
+    .from('resultados' as never)
+    .select('business_id,resultado')
+    .limit(5000);
+
+  if (resultadosError) {
+    throw new Error(resultadosError.message || 'No se pudieron leer resultados para recalcular lead ganado');
+  }
+
+  const ids = ((resultadosData ?? []) as Array<{ business_id: number | null; resultado: string | null }>)
+    .filter((row) => isAnuladoResultado(String(row.resultado ?? '')))
+    .map((row) => Number(row.business_id ?? 0))
+    .filter((id) => Number.isFinite(id) && id > 0);
+
+  const deduped = Array.from(new Set(ids));
+  anuladoResultadoIdsCache = {
+    ids: deduped,
+    expiresAt: now + 5 * 60 * 1000,
+  };
+
+  return deduped;
 }
 
 function toCookieHeader(rawSetCookieValues: string[]) {
@@ -640,42 +670,31 @@ export async function recalculateLeadGanadoCountersByBusinessId(
     return { updated: false };
   }
 
-  const { data: enviosData, error: enviosError } = await supabase
+  const { count: cantidadEnviosRaw, error: enviosCountError } = await supabase
     .from('envios' as never)
-    // Nuevo modelo ENVIOS: el vínculo operativo es exclusivamente `id_lead_ganado`.
-    .select('id_lead_ganado,id_resultado')
+    .select('stable_id', { count: 'exact', head: true })
     .eq('id_lead_ganado', leadGanadoBusinessId);
 
-  if (enviosError) {
-    throw new Error(enviosError.message || 'No se pudieron leer envíos para recalcular lead ganado');
+  if (enviosCountError) {
+    throw new Error(enviosCountError.message || 'No se pudo contar envíos para recalcular lead ganado');
   }
 
-  const envios = ((enviosData ?? []) as Array<{ id_lead_ganado: number | null; id_resultado: number | null }>);
-  const cantidadEnvios = envios.length;
-  const resultadoIds = Array.from(new Set(envios.map((row) => Number(row.id_resultado ?? 0)).filter((id) => id > 0)));
+  const cantidadEnvios = Number(cantidadEnviosRaw ?? 0);
 
-  const resultadoById = new Map<number, string>();
-  if (resultadoIds.length > 0) {
-    const { data: resultadosData, error: resultadosError } = await supabase
-      .from('resultados' as never)
-      .select('business_id,resultado')
-      .in('business_id', resultadoIds);
-
-    if (resultadosError) {
-      throw new Error(resultadosError.message || 'No se pudieron leer resultados para recalcular lead ganado');
-    }
-
-    for (const row of ((resultadosData ?? []) as Array<{ business_id: number; resultado: string | null }>)) {
-      resultadoById.set(Number(row.business_id), String(row.resultado ?? ''));
-    }
-  }
-
+  const anuladoResultadoIds = await getAnuladoResultadoIds(supabase);
   let anuladosFullfilment = 0;
-  for (const envio of envios) {
-    const resultText = resultadoById.get(Number(envio.id_resultado ?? 0)) ?? '';
-    if (isAnuladoResultado(resultText)) {
-      anuladosFullfilment += 1;
+  if (anuladoResultadoIds.length > 0) {
+    const { count: anuladosCountRaw, error: anuladosCountError } = await supabase
+      .from('envios' as never)
+      .select('stable_id', { count: 'exact', head: true })
+      .eq('id_lead_ganado', leadGanadoBusinessId)
+      .in('id_resultado', anuladoResultadoIds);
+
+    if (anuladosCountError) {
+      throw new Error(anuladosCountError.message || 'No se pudo contar envíos anulados para recalcular lead ganado');
     }
+
+    anuladosFullfilment = Number(anuladosCountRaw ?? 0);
   }
 
   const ingresoAnuladosFullfilment = anuladosFullfilment * 2;

@@ -15,6 +15,8 @@ const DEFAULTS = {
   recojosMaxQueries: parsePositiveInt(process.env.RECOJOS_MAX_QUERIES, 450),
   recojosMaxQueriesCap: parsePositiveInt(process.env.RECOJOS_MAX_QUERIES_CAP, 800),
   recojosQueriesSafetyBuffer: parsePositiveInt(process.env.RECOJOS_QUERIES_SAFETY_BUFFER, 25),
+  recojosNegociosPerQuery: parsePositiveInt(process.env.RECOJOS_NEGOCIOS_PER_QUERY, 20),
+  recojosMaxRuntimeMs: parsePositiveInt(process.env.RECOJOS_MAX_RUNTIME_MS, 50000),
 };
 
 function parsePositiveInt(value, fallback) {
@@ -258,6 +260,8 @@ async function processRecojos({ baseUrl, headers, state, sleepMs, maxRetries, da
       batch_leads: DEFAULTS.recojosBatchLeads,
       limit_rows: DEFAULTS.recojosLimitRows,
       max_queries: dynamicMaxQueries,
+      negocios_per_query: DEFAULTS.recojosNegociosPerQuery,
+      max_runtime_ms: DEFAULTS.recojosMaxRuntimeMs,
       date_from: dateFrom,
       date_to: dateTo,
     };
@@ -303,13 +307,14 @@ async function processRecojos({ baseUrl, headers, state, sleepMs, maxRetries, da
     }
 
     const summary = compactSummary('recojos', payload);
+    const truncationReason = typeof payload.truncation_reason === 'string' ? payload.truncation_reason : null;
     state.recojos.iterations += 1;
     state.recojos.cursor = summary.next_cursor;
     state.recojos.done = !summary.has_more;
     state.recojos.lastResponse = summary;
     await onProgress();
 
-    console.log(`[recojos] iter=${state.recojos.iterations} cursor=${summary.cursor} -> next=${summary.next_cursor} has_more=${summary.has_more} pulled=${summary.pulled} grouped=${summary.grouped_rows} upserted=${summary.upserted} queries=${summary.queries_used}`);
+    console.log(`[recojos] iter=${state.recojos.iterations} cursor=${summary.cursor} -> next=${summary.next_cursor} has_more=${summary.has_more} pulled=${summary.pulled} grouped=${summary.grouped_rows} upserted=${summary.upserted} queries=${summary.queries_used}${truncationReason ? ` truncation=${truncationReason}` : ''}`);
 
     if (!state.recojos.done) {
       await sleep(sleepMs);
