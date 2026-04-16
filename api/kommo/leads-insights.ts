@@ -128,6 +128,31 @@ type SellerStatsPayload = {
   topTiendas: Array<{ tienda: string; enviosEntregados: number }>;
 };
 
+type SellerLeadSummaryOption = {
+  value: string;
+  label: string;
+};
+
+type SellerLeadSummaryRow = {
+  lead_id: number;
+  vendedor_nombre: string;
+  fecha_ingreso_lead: string | null;
+  fecha_lead_ganado: string | null;
+  dias_lead_a_ganado: number;
+  envios_entregados: number;
+  envios_rechazados: number;
+  ingreso_envios: number;
+  costo_envios: number;
+  margen_envios: number;
+  recojos_cobrados_veces: number;
+  recojos_gratis_veces: number;
+  ingreso_recojos: number;
+  costo_recojos: number;
+  ingreso_total: number;
+  costo_total: number;
+  margen_total: number;
+};
+
 type LeadsInsightsResponse = {
   filters: {
     start_date: string | null;
@@ -506,6 +531,353 @@ export default async function kommoLeadsInsightsHandler(req: VercelRequest, res:
 
       options.sort((a, b) => a.label.localeCompare(b.label, 'es'));
       return res.status(200).json({ success: true, options });
+    }
+
+    if (mode === 'store_lead_summary_options' || mode === 'seller_lead_summary_options') {
+      const supabase = getSupabaseAdminClient();
+      const optionsMap = new Map<string, string>();
+      let from = 0;
+      const pageSize = 1000;
+
+      while (true) {
+        const to = from + pageSize - 1;
+        const { data, error } = await supabase
+          .from('leads_ganados' as never)
+          .select('tienda_nombre_snapshot' as never)
+          .not('tienda_nombre_snapshot' as never, 'is' as never, null as never)
+          .neq('tienda_nombre_snapshot' as never, '' as never)
+          .range(from, to);
+
+        if (error) {
+          throw new Error(error.message || 'No se pudo cargar la lista de tiendas de leads ganados.');
+        }
+
+        const chunk = (data ?? []) as Array<{ tienda_nombre_snapshot: string | null }>;
+        for (const row of chunk) {
+          const label = String(row.tienda_nombre_snapshot ?? '').trim();
+          if (!label) continue;
+          const normalized = normalizeText(label);
+          if (!normalized) continue;
+          if (!optionsMap.has(normalized)) {
+            optionsMap.set(normalized, label);
+          }
+        }
+
+        if (chunk.length < pageSize) break;
+        from += pageSize;
+      }
+
+      const options: SellerLeadSummaryOption[] = Array.from(optionsMap.entries())
+        .map(([value, label]) => ({ value, label }))
+        .sort((a, b) => a.label.localeCompare(b.label, 'es'));
+
+      return res.status(200).json({ success: true, options });
+    }
+
+    if (mode === 'store_lead_summary' || mode === 'seller_lead_summary') {
+      const storeNameParam = asSingleQueryParam(req.query.store_name);
+      const sellerNameParam = asSingleQueryParam(req.query.seller_name);
+      const storeName = typeof storeNameParam === 'string' && storeNameParam.trim()
+        ? storeNameParam.trim()
+        : (typeof sellerNameParam === 'string' ? sellerNameParam.trim() : '');
+
+      if (!storeName) {
+        return res.status(400).json({ success: false, error: 'Falta store_name.' });
+      }
+
+      const supabase = getSupabaseAdminClient();
+
+      const storeLeadIdsAll: number[] = [];
+      {
+        let allFrom = 0;
+        const allPageSize = 1000;
+        while (true) {
+          const allTo = allFrom + allPageSize - 1;
+          const { data, error } = await supabase
+            .from('leads_ganados' as never)
+            .select('business_id' as never)
+            .eq('tienda_nombre_snapshot' as never, storeName as never)
+            .range(allFrom, allTo);
+
+          if (error) {
+            throw new Error(error.message || 'No se pudieron cargar leads de la tienda.');
+          }
+
+          const chunk = (data ?? []) as Array<{ business_id: number | null }>;
+          for (const row of chunk) {
+            const leadId = Number(row.business_id ?? 0);
+            if (Number.isFinite(leadId) && leadId > 0) {
+              storeLeadIdsAll.push(leadId);
+            }
+          }
+
+          if (chunk.length < allPageSize) break;
+          allFrom += allPageSize;
+        }
+      }
+
+      const leadsGanados: Array<{
+        business_id: number | null;
+        vendedor_nombre_snapshot: string | null;
+        fecha_ingreso_lead: string | null;
+        fecha_lead_ganado: string | null;
+        dias_lead_a_ganado: number | null;
+      }> = [];
+
+      let from = 0;
+      const pageSize = 1000;
+
+      while (true) {
+        const to = from + pageSize - 1;
+        let leadsQuery = supabase
+          .from('leads_ganados' as never)
+          .select('business_id,vendedor_nombre_snapshot,fecha_ingreso_lead,fecha_lead_ganado,dias_lead_a_ganado' as never)
+          .eq('tienda_nombre_snapshot' as never, storeName as never)
+          .range(from, to);
+
+        if (startDate) leadsQuery = leadsQuery.gte('fecha_lead_ganado' as never, startDate as never);
+        if (endDate) leadsQuery = leadsQuery.lte('fecha_lead_ganado' as never, endDate as never);
+
+        const { data, error } = await leadsQuery;
+
+        if (error) {
+          throw new Error(error.message || 'No se pudieron cargar leads ganados para la tienda.');
+        }
+
+        const chunk = (data ?? []) as Array<{
+          business_id: number | null;
+          vendedor_nombre_snapshot: string | null;
+          fecha_ingreso_lead: string | null;
+          fecha_lead_ganado: string | null;
+          dias_lead_a_ganado: number | null;
+        }>;
+
+        leadsGanados.push(...chunk);
+        if (chunk.length < pageSize) break;
+        from += pageSize;
+      }
+
+      const leadRows = leadsGanados
+        .map((row) => ({
+          leadId: Number(row.business_id ?? 0),
+          vendedorNombre: String(row.vendedor_nombre_snapshot ?? '').trim(),
+          fechaIngresoLead: row.fecha_ingreso_lead,
+          fechaLeadGanado: row.fecha_lead_ganado,
+          diasLeadAGanado: Number(row.dias_lead_a_ganado ?? 0),
+        }))
+        .filter((row) => Number.isFinite(row.leadId) && row.leadId > 0);
+
+      const leadIds = Array.from(new Set(leadRows.map((row) => row.leadId)));
+      if (leadIds.length === 0) {
+        return res.status(200).json({ success: true, store: storeName, rows: [] as SellerLeadSummaryRow[] });
+      }
+
+      const storeLeadIds = Array.from(new Set(storeLeadIdsAll));
+
+      const resultados = await safeSelectPaginated<{ business_id: number; resultado: string | null }>('resultados', 'business_id,resultado', { batchSize: 500 });
+      const deliveredResultIds = new Set<number>();
+      const rejectedResultIds = new Set<number>();
+      for (const row of resultados) {
+        const resultId = Number(row.business_id ?? 0);
+        if (!Number.isFinite(resultId) || resultId <= 0) continue;
+        const normalized = normalizeText(row.resultado ?? '');
+        if (normalized.includes('entregado')) {
+          deliveredResultIds.add(resultId);
+        }
+        if (normalized.includes('rechaz')) {
+          rejectedResultIds.add(resultId);
+        }
+      }
+
+      const enviosRows: Array<{
+        id_lead_ganado: number | null;
+        id_resultado: number | null;
+        ingreso_total_fila: number | null;
+        costo_total_fila: number | null;
+      }> = [];
+      const recojosRows: Array<{
+        id_lead_ganado: number | null;
+        tipo_cobro: string | null;
+        veces: number | null;
+        ingreso_recojo_total: number | null;
+        costo_recojo_total: number | null;
+      }> = [];
+
+      for (let index = 0; index < leadIds.length; index += 200) {
+        const chunk = leadIds.slice(index, index + 200);
+
+        let envFrom = 0;
+        while (true) {
+          const envTo = envFrom + pageSize - 1;
+          const enviosQuery = supabase
+            .from('envios' as never)
+            .select('id_lead_ganado,id_resultado,ingreso_total_fila,costo_total_fila' as never)
+            .in('id_lead_ganado' as never, chunk as never)
+            .range(envFrom, envTo);
+
+          const { data, error } = await enviosQuery;
+
+          if (error) {
+            throw new Error(error.message || 'No se pudieron cargar envíos para el resumen de tienda.');
+          }
+
+          const chunkRows = (data ?? []) as Array<{
+            id_lead_ganado: number | null;
+            id_resultado: number | null;
+            ingreso_total_fila: number | null;
+            costo_total_fila: number | null;
+          }>;
+          enviosRows.push(...chunkRows);
+          if (chunkRows.length < pageSize) break;
+          envFrom += pageSize;
+        }
+
+      }
+
+      for (let index = 0; index < storeLeadIds.length; index += 200) {
+        const chunk = storeLeadIds.slice(index, index + 200);
+        let recFrom = 0;
+
+        while (true) {
+          const recTo = recFrom + pageSize - 1;
+          let recojosQuery = supabase
+            .from('recojos' as never)
+            .select('id_lead_ganado,tipo_cobro,veces,ingreso_recojo_total,costo_recojo_total' as never)
+            .in('id_lead_ganado' as never, chunk as never)
+            .range(recFrom, recTo);
+
+          if (startDate) recojosQuery = recojosQuery.gte('fecha' as never, startDate as never);
+          if (endDate) recojosQuery = recojosQuery.lte('fecha' as never, endDate as never);
+
+          const { data, error } = await recojosQuery;
+
+          if (error) {
+            throw new Error(error.message || 'No se pudieron cargar recojos para el resumen de tienda.');
+          }
+
+          const chunkRows = (data ?? []) as Array<{
+            id_lead_ganado: number | null;
+            tipo_cobro: string | null;
+            veces: number | null;
+            ingreso_recojo_total: number | null;
+            costo_recojo_total: number | null;
+          }>;
+          recojosRows.push(...chunkRows);
+          if (chunkRows.length < pageSize) break;
+          recFrom += pageSize;
+        }
+      }
+
+      const enviosByLead = new Map<number, {
+        entregados: number;
+        rechazados: number;
+        ingreso: number;
+        costo: number;
+      }>();
+
+      for (const envio of enviosRows) {
+        const leadId = Number(envio.id_lead_ganado ?? 0);
+        if (!Number.isFinite(leadId) || leadId <= 0) continue;
+
+        const current = enviosByLead.get(leadId) ?? {
+          entregados: 0,
+          rechazados: 0,
+          ingreso: 0,
+          costo: 0,
+        };
+
+        const resultId = Number(envio.id_resultado ?? 0);
+        if (deliveredResultIds.has(resultId)) current.entregados += 1;
+        if (rejectedResultIds.has(resultId)) current.rechazados += 1;
+
+        current.ingreso += toNumberOrZero(envio.ingreso_total_fila);
+        current.costo += toNumberOrZero(envio.costo_total_fila);
+
+        enviosByLead.set(leadId, current);
+      }
+
+      const recojosByLead = new Map<number, {
+        cobradosVeces: number;
+        gratisVeces: number;
+        ingreso: number;
+        costo: number;
+      }>();
+
+      for (const recojo of recojosRows) {
+        const leadId = Number(recojo.id_lead_ganado ?? 0);
+        if (!Number.isFinite(leadId) || leadId <= 0) continue;
+
+        const current = recojosByLead.get(leadId) ?? {
+          cobradosVeces: 0,
+          gratisVeces: 0,
+          ingreso: 0,
+          costo: 0,
+        };
+
+        const tipo = normalizeText(recojo.tipo_cobro ?? '');
+        const veces = Math.max(0, toNumberOrZero(recojo.veces));
+        if (tipo.includes('1 pedido')) {
+          current.cobradosVeces += veces;
+        }
+        if (tipo.includes('2+ pedido')) {
+          current.gratisVeces += veces;
+        }
+
+        current.ingreso += toNumberOrZero(recojo.ingreso_recojo_total);
+        current.costo += toNumberOrZero(recojo.costo_recojo_total);
+
+        recojosByLead.set(leadId, current);
+      }
+
+      const rows: SellerLeadSummaryRow[] = leadRows
+        .map((lead) => {
+          const envios = enviosByLead.get(lead.leadId) ?? {
+            entregados: 0,
+            rechazados: 0,
+            ingreso: 0,
+            costo: 0,
+          };
+
+          const recojos = recojosByLead.get(lead.leadId) ?? {
+            cobradosVeces: 0,
+            gratisVeces: 0,
+            ingreso: 0,
+            costo: 0,
+          };
+
+          const margenEnvios = envios.ingreso - envios.costo;
+          const ingresoTotal = envios.ingreso + recojos.ingreso;
+          const costoTotal = envios.costo + recojos.costo;
+          const margenTotal = ingresoTotal - costoTotal;
+
+          return {
+            lead_id: lead.leadId,
+            vendedor_nombre: lead.vendedorNombre,
+            fecha_ingreso_lead: lead.fechaIngresoLead,
+            fecha_lead_ganado: lead.fechaLeadGanado,
+            dias_lead_a_ganado: lead.diasLeadAGanado,
+            envios_entregados: envios.entregados,
+            envios_rechazados: envios.rechazados,
+            ingreso_envios: envios.ingreso,
+            costo_envios: envios.costo,
+            margen_envios: margenEnvios,
+            recojos_cobrados_veces: recojos.cobradosVeces,
+            recojos_gratis_veces: recojos.gratisVeces,
+            ingreso_recojos: recojos.ingreso,
+            costo_recojos: recojos.costo,
+            ingreso_total: ingresoTotal,
+            costo_total: costoTotal,
+            margen_total: margenTotal,
+          };
+        })
+        .sort((a, b) => {
+          const dateA = a.fecha_lead_ganado ?? '';
+          const dateB = b.fecha_lead_ganado ?? '';
+          if (dateA !== dateB) return dateB.localeCompare(dateA);
+          return b.lead_id - a.lead_id;
+        });
+
+      return res.status(200).json({ success: true, store: storeName, rows });
     }
 
     if (mode === 'seller_stats') {

@@ -18,6 +18,7 @@ import { NotFoundPage } from './features/error/NotFoundPage';
 import { GoogleSheetsExportPage } from './features/exports/GoogleSheetsExportTester';
 import { AdminUsersPage } from './features/admin/AdminUsersPage';
 import { EstadisticasVendedorPage } from './features/operativas/EstadisticasVendedorPage';
+import { ResumenTiendaPage } from './features/operativas/ResumenVendedorPage';
 import { prefetchSheetData } from './hooks/useSheetData';
 import { isSupabaseConfigured, supabase } from './lib/supabase';
 
@@ -307,8 +308,12 @@ function Layout() {
               <Route path="/dashboard/admin" element={adminOnly(<Navigate to="/admin/users" replace />)} />
               <Route path="/dashboard/admin/users" element={adminOnly(<Navigate to="/admin/users" replace />)} />
               <Route path="/operativas/estadisticas-vendedor" element={adminOnly(<EstadisticasVendedorPage />)} />
+              <Route path="/operativas/resumen-tienda" element={adminOnly(<ResumenTiendaPage />)} />
+              <Route path="/operativas/resumen-vendedor" element={adminOnly(<Navigate to="/operativas/resumen-tienda" replace />)} />
               <Route path="/dashboard/operativas" element={adminOnly(<Navigate to="/operativas/estadisticas-vendedor" replace />)} />
               <Route path="/dashboard/operativas/estadisticas-vendedor" element={adminOnly(<Navigate to="/operativas/estadisticas-vendedor" replace />)} />
+              <Route path="/dashboard/operativas/resumen-tienda" element={adminOnly(<Navigate to="/operativas/resumen-tienda" replace />)} />
+              <Route path="/dashboard/operativas/resumen-vendedor" element={adminOnly(<Navigate to="/operativas/resumen-tienda" replace />)} />
               <Route path="*" element={<NotFoundPage inPanel />} />
             </Routes>
           </div>

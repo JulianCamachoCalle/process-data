@@ -729,6 +729,20 @@ export function LandingPage() {
   }, [cursorEnabled]);
 
   useEffect(() => {
+    if (typeof document === 'undefined') return;
+    const { body } = document;
+    const dayClass = 'landing-mode-day';
+    const nightClass = 'landing-mode-night';
+
+    body.classList.remove(dayClass, nightClass);
+    body.classList.add(isNight ? nightClass : dayClass);
+
+    return () => {
+      body.classList.remove(dayClass, nightClass);
+    };
+  }, [isNight]);
+
+  useEffect(() => {
     const handleScroll = () => {
       if (heroBgRef.current) {
         heroBgRef.current.style.transform = `translateY(${window.scrollY * 0.32}px)`;
