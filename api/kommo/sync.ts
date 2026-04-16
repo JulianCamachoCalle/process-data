@@ -2506,6 +2506,8 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
       const limitRows = parseEnviosProbeLimit(searchParams.get('limit_rows') ?? undefined, 2000, 10000);
       const negociosPerQuery = parseEnviosProbeLimit(searchParams.get('negocios_per_query') ?? undefined, 20, 60);
       const maxClientIdsPerLead = parseEnviosProbeLimit(searchParams.get('max_client_ids_per_lead') ?? undefined, 8, 40);
+      const maxDaysPerLead = parseEnviosProbeLimit(searchParams.get('max_days_per_lead') ?? undefined, 12, 90);
+      const maxRecojoQueriesPerLead = parseEnviosProbeLimit(searchParams.get('max_recojo_queries_per_lead') ?? undefined, 18, 120);
       const singleBusiness = searchParams.get('search_negocio')?.trim();
       const cursor = parseNonNegativeInt(
         searchParams.get('cursor') ?? searchParams.get('lead_offset') ?? undefined,
@@ -2597,6 +2599,9 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
         lookup_queries_used: 0,
         envios_queries_used: 0,
         leads_missing_client_ids: 0,
+        leads_no_days: 0,
+        leads_limited_by_days: 0,
+        leads_limited_by_recojo_queries: 0,
         errors: [] as string[],
       };
 
@@ -2679,7 +2684,11 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
           .map((key) => key.split('__')[1])
           .filter(Boolean);
         const uniqueDays = Array.from(new Set(dayKeys)).sort((a, b) => a.localeCompare(b));
-        datesByLead.set(leadId, uniqueDays);
+        if (uniqueDays.length > maxDaysPerLead) {
+          diagnostics.leads_limited_by_days += 1;
+        }
+        const trimmedDays = uniqueDays.slice(Math.max(0, uniqueDays.length - maxDaysPerLead));
+        datesByLead.set(leadId, trimmedDays);
         precomputedLeadIds.add(leadId);
       }
 
@@ -2694,6 +2703,7 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
 
         const days = datesByLead.get(leadId) ?? [];
         if (days.length === 0) {
+          diagnostics.leads_no_days += 1;
           processedLeads += 1;
           continue;
         }
@@ -2767,7 +2777,12 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
         }
 
         const queryChunksPerDay = Math.max(1, Math.ceil(activeClientIds.length / Math.max(1, negociosPerQuery)));
-        const plannedQueriesForLead = days.length * queryChunksPerDay;
+        const maxDaysByLeadBudget = Math.max(1, Math.floor(maxRecojoQueriesPerLead / queryChunksPerDay));
+        if (days.length > maxDaysByLeadBudget) {
+          diagnostics.leads_limited_by_recojo_queries += 1;
+        }
+        const effectiveDays = days.slice(Math.max(0, days.length - Math.max(1, Math.min(maxDaysPerLead, maxDaysByLeadBudget))));
+        const plannedQueriesForLead = effectiveDays.length * queryChunksPerDay;
 
         if (queriesUsed + plannedQueriesForLead > maxQueries) {
           if (processedLeads === 0) {
@@ -2777,7 +2792,7 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
           break;
         }
 
-        for (const day of days) {
+        for (const day of effectiveDays) {
           if (isRuntimeExceeded()) {
             runtimeExceeded = true;
             break;
@@ -2942,6 +2957,8 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
           batch_leads: batchLeads,
           negocios_per_query: negociosPerQuery,
           max_client_ids_per_lead: maxClientIdsPerLead,
+          max_days_per_lead: maxDaysPerLead,
+          max_recojo_queries_per_lead: maxRecojoQueriesPerLead,
           limit_rows: limitRows,
           max_queries: maxQueries,
           max_runtime_ms: maxRuntimeMs,
@@ -2972,6 +2989,8 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
         batch_leads: batchLeads,
         negocios_per_query: negociosPerQuery,
         max_client_ids_per_lead: maxClientIdsPerLead,
+        max_days_per_lead: maxDaysPerLead,
+        max_recojo_queries_per_lead: maxRecojoQueriesPerLead,
         limit_rows: limitRows,
         max_queries: maxQueries,
         max_runtime_ms: maxRuntimeMs,

@@ -429,8 +429,8 @@ function Header({
             className={cx(
               'hidden md:inline-flex h-8 w-8 items-center justify-center rounded-full border transition duration-500',
               isNight
-                ? 'border-white/15 bg-white/5 text-white hover:bg-white/10'
-                : 'border-black/15 bg-black/5 text-black hover:bg-black/10',
+                ? 'border-white/15 bg-white/5 text-white'
+                : 'border-black/15 bg-black/5 text-black',
               isAnimating && 'ring-2 ring-red-500/30',
             )}
           >
@@ -441,8 +441,8 @@ function Header({
             className={cx(
               'hidden sm:inline-flex h-8 items-center justify-center gap-1.5 rounded-full border px-3 shadow-[0_10px_20px_-12px_rgba(220,38,38,0.9)] transition-all duration-200 hover:-translate-y-0.5 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-300/80 focus-visible:ring-offset-2',
               isNight
-                ? 'border-red-500/80 bg-red-600 text-white hover:bg-red-500'
-                : 'border-red-500/80 bg-red-600 text-white hover:bg-red-500',
+                ? 'border-red-500/80 bg-red-600 text-white'
+                : 'border-red-500/80 bg-red-600 text-white',
             )}
             aria-label="Login"
             title="Login"
@@ -458,8 +458,8 @@ function Header({
             className={cx(
               'inline-flex h-8 w-8 items-center justify-center rounded-full border transition md:hidden',
               isNight
-                ? 'border-white/15 bg-white/5 text-white hover:bg-white/10'
-                : 'border-black/15 bg-black/5 text-black hover:bg-black/10',
+                ? 'border-white/15 bg-white/5 text-white'
+                : 'border-black/15 bg-black/5 text-black',
             )}
           >
             {mobileMenuOpen ? <X size={15} /> : <Menu size={15} />}
@@ -501,8 +501,8 @@ function Header({
               className={cx(
                 'inline-flex h-9 flex-1 items-center justify-center gap-2 rounded-xl border text-sm font-semibold transition duration-500',
                 isNight
-                  ? 'border-white/15 bg-white/5 text-white hover:bg-white/10'
-                  : 'border-black/15 bg-black/5 text-black hover:bg-black/10',
+                  ? 'border-white/15 bg-white/5 text-white'
+                  : 'border-black/15 bg-black/5 text-black',
                 isAnimating && 'ring-2 ring-red-500/30',
               )}
             >
@@ -512,7 +512,7 @@ function Header({
 
             <a
               href="/dashboard"
-              className="inline-flex h-9 items-center justify-center gap-1.5 rounded-xl border border-red-500/80 bg-red-600 px-3 text-sm font-semibold text-white shadow-[0_10px_20px_-12px_rgba(220,38,38,0.9)] transition-all duration-200 hover:bg-red-500"
+              className="inline-flex h-9 items-center justify-center gap-1.5 rounded-xl border border-red-500/80 bg-red-600 px-3 text-sm font-semibold text-white shadow-[0_10px_20px_-12px_rgba(220,38,38,0.9)] transition-all duration-200"
             >
               <CircleUserRound size={15} />
               Clientes
@@ -527,6 +527,7 @@ function Header({
 export function LandingPage() {
   const [isNight, setIsNight] = useState(false);
   const [isThemeAnimating, setIsThemeAnimating] = useState(false);
+  const [cursorEnabled, setCursorEnabled] = useState(false);
   const [activeTestimonialSlide, setActiveTestimonialSlide] = useState(0);
   const [isDesktopTestimonials, setIsDesktopTestimonials] = useState(() => {
     if (typeof window === 'undefined') return false;
@@ -534,8 +535,10 @@ export function LandingPage() {
   });
   const [showScrollTop, setShowScrollTop] = useState(false);
   const [coverageGeoJson, setCoverageGeoJson] = useState<AnyProps | null>(null);
+  const landingRootRef = useRef<HTMLDivElement>(null);
   const heroBgRef = useRef<HTMLDivElement>(null);
   const mapIconCache = useRef(new Map<string, L.Icon>());
+  const cursorInteractiveRef = useRef(false);
 
   useScrollReveal(isNight);
 
@@ -658,6 +661,74 @@ export function LandingPage() {
   };
 
   useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const mediaQuery = window.matchMedia('(hover: hover) and (pointer: fine)');
+    const sync = () => {
+      setCursorEnabled(mediaQuery.matches);
+    };
+
+    sync();
+
+    if (typeof mediaQuery.addEventListener === 'function') {
+      mediaQuery.addEventListener('change', sync);
+      return () => mediaQuery.removeEventListener('change', sync);
+    }
+
+    mediaQuery.addListener(sync);
+    return () => mediaQuery.removeListener(sync);
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const root = landingRootRef.current;
+    if (!root) return;
+
+    if (!cursorEnabled) {
+      cursorInteractiveRef.current = false;
+      root.style.setProperty('--landing-cursor-x', '-9999px');
+      root.style.setProperty('--landing-cursor-y', '-9999px');
+      root.dataset.cursorHover = '0';
+      return;
+    }
+
+    cursorInteractiveRef.current = false;
+    root.dataset.cursorHover = '0';
+    const interactiveSelector = 'a,button,[role="button"],input,select,textarea,summary,.leaflet-interactive,.leaflet-control-zoom a,[data-cursor="circle"]';
+
+    const handleMouseMove = (event: MouseEvent) => {
+      root.style.setProperty('--landing-cursor-x', `${event.clientX}px`);
+      root.style.setProperty('--landing-cursor-y', `${event.clientY}px`);
+
+      const target = event.target instanceof Element ? event.target : null;
+      const interactive = Boolean(target?.closest(interactiveSelector));
+      if (interactive !== cursorInteractiveRef.current) {
+        cursorInteractiveRef.current = interactive;
+        root.dataset.cursorHover = interactive ? '1' : '0';
+      }
+    };
+
+    const handleMouseLeave = () => {
+      root.style.setProperty('--landing-cursor-x', '-9999px');
+      root.style.setProperty('--landing-cursor-y', '-9999px');
+      cursorInteractiveRef.current = false;
+      root.dataset.cursorHover = '0';
+    };
+
+    window.addEventListener('mousemove', handleMouseMove, { passive: true });
+    window.addEventListener('mouseleave', handleMouseLeave);
+
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseleave', handleMouseLeave);
+      root.style.setProperty('--landing-cursor-x', '-9999px');
+      root.style.setProperty('--landing-cursor-y', '-9999px');
+      root.dataset.cursorHover = '0';
+    };
+  }, [cursorEnabled]);
+
+  useEffect(() => {
     const handleScroll = () => {
       if (heroBgRef.current) {
         heroBgRef.current.style.transform = `translateY(${window.scrollY * 0.32}px)`;
@@ -750,12 +821,23 @@ export function LandingPage() {
 
   return (
     <div
+      ref={landingRootRef}
       className={cx(
         'relative min-h-screen overflow-x-hidden selection:bg-red-600 selection:text-white landing-root',
+        cursorEnabled && 'landing-cursor-enabled',
         n ? 'text-white' : 'text-gray-900',
       )}
       style={{ backgroundColor: bg }}
     >
+      <div
+        aria-hidden="true"
+        className={cx('landing-cursor-glow', cursorEnabled && 'is-active')}
+      />
+      <div
+        aria-hidden="true"
+        className={cx('landing-cursor-ring', cursorEnabled && 'is-active')}
+      />
+
       {/* Theme transition flash */}
       <div
         className={cx(
@@ -824,7 +906,7 @@ export function LandingPage() {
                     href={whatsappSalesUrl}
                     target="_blank"
                     rel="noreferrer"
-                    className="inline-flex items-center gap-2 rounded-full bg-red-600 px-6 py-3 text-sm font-semibold text-white transition hover:bg-red-500"
+                    className="inline-flex items-center gap-2 rounded-full bg-red-600 px-6 py-3 text-sm font-semibold text-white transition"
                   >
                     <MessageCircle size={15} />
                     Contáctanos
@@ -835,8 +917,8 @@ export function LandingPage() {
                   className={cx(
                     'inline-flex items-center gap-2 rounded-full border px-6 py-3 text-sm font-semibold transition',
                     n
-                        ? 'border-white/20 text-white hover:bg-white/8'
-                        : 'border-black/20 text-black hover:bg-black/5',
+                        ? 'border-white/20 text-white'
+                        : 'border-black/20 text-black',
                     )}
                   >
                     Ver servicios
@@ -988,8 +1070,8 @@ export function LandingPage() {
                 className={cx(
                   'inline-flex items-center gap-2 rounded-full border px-5 py-2.5 text-sm font-semibold transition self-start',
                   n
-                    ? 'border-white/15 text-white hover:bg-white/[0.07]'
-                    : 'border-black/15 text-black hover:bg-black/[0.05]',
+                    ? 'border-white/15 text-white'
+                    : 'border-black/15 text-black',
                 )}
               >
                 Plan premium
@@ -1062,7 +1144,7 @@ export function LandingPage() {
               href={whatsappSalesUrl}
               target="_blank"
               rel="noreferrer"
-              className="absolute right-4 top-4 z-[500] inline-flex items-center gap-2 rounded-full bg-red-600 px-4 py-2 text-xs font-semibold text-white shadow-[0_12px_24px_-16px_rgba(220,38,38,0.9)] transition hover:bg-red-500 sm:text-sm"
+              className="absolute right-4 top-4 z-[500] inline-flex items-center gap-2 rounded-full bg-red-600 px-4 py-2 text-xs font-semibold text-white shadow-[0_12px_24px_-16px_rgba(220,38,38,0.9)] transition sm:text-sm"
             >
               <MessageCircle size={14} />
               Consultar precio
@@ -1326,6 +1408,7 @@ export function LandingPage() {
                   <span
                     key={code}
                     className={cx(
+                      'iso-chip',
                       'inline-flex gap-1.5 items-center bg-white/15 backdrop-blur-[8px] border-white/10 shadow-[0_8px_32px_rgba(0,0,0,0.1),inset_0_1px_0_rgba(255,255,255,0.5),inset_0_-1px_0_rgba(255,255,255,0.1),inset_0_0_2px_1px_rgba(255,255,255,0.1)] rounded-lg border px-3 py-1 text-xs font-medium transition',
                       n
                         ? 'border-white/[0.11] text-white/65'
@@ -1398,7 +1481,7 @@ export function LandingPage() {
                   href={whatsappSalesUrl}
                   target="_blank"
                   rel="noreferrer"
-                  className="inline-flex items-center gap-2 rounded-full bg-red-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-red-500"
+                  className="inline-flex items-center gap-2 rounded-full bg-red-600 px-5 py-2.5 text-sm font-semibold text-white transition"
                 >
                   <MessageCircle size={15} />
                   Ventas
@@ -1410,8 +1493,8 @@ export function LandingPage() {
                   className={cx(
                     'inline-flex items-center gap-2 rounded-full border-bottom px-5 py-2.5 text-sm font-semibold transition',
                     n
-                      ? 'border-white/20 text-white hover:bg-white/8'
-                      : 'border-black/15 text-black hover:bg-black/5',
+                      ? 'border-white/20 text-white'
+                      : 'border-black/15 text-black',
                   )}
                 >
                   Tarifario premium
@@ -1447,9 +1530,8 @@ export function LandingPage() {
                     aria-label={label}
                     title={label}
                     className={cx(
-                      'inline-flex h-11 w-11 items-center justify-center rounded-full borders transition-transform duration-200 hover:-translate-y-0.5',
+                      'iso-chip inline-flex h-11 w-11 items-center justify-center rounded-full borders transition-transform duration-200 hover:-translate-y-0.5',
                       'bg-white/15 backdrop-blur-[8px] border-white/30 shadow-[0_8px_32px_rgba(0,0,0,0.1),inset_0_1px_0_rgba(255,255,255,0.5),inset_0_-1px_0_rgba(255,255,255,0.1),inset_0_0_2px_1px_rgba(255,255,255,0.1)]',
-                      n ? 'hover:bg-white/45' : 'hover:bg-white/55',
                     )}
                   >
                     <Icon size={18} className="text-red-500" />
@@ -1491,7 +1573,7 @@ export function LandingPage() {
         target="_blank"
         rel="noreferrer"
         aria-label="WhatsApp Dinsides"
-        className="fixed bottom-6 right-6 z-[1300] inline-flex items-center gap-2 rounded-full bg-[#25D366] px-4 py-3 text-sm font-semibold text-white shadow-[0_14px_30px_-12px_rgba(37,211,102,0.8)] transition hover:bg-[#1EBE57]"
+        className="fixed bottom-6 right-6 z-[1300] inline-flex items-center gap-2 rounded-full bg-[#25D366] px-4 py-3 text-sm font-semibold text-white shadow-[0_14px_30px_-12px_rgba(37,211,102,0.8)] transition"
       >
         <MessageCircle size={18} />
         WhatsApp
@@ -1506,7 +1588,7 @@ export function LandingPage() {
           showScrollTop ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none translate-y-2',
           n
             ? 'border-white/20 bg-black/45 text-white/80 hover:bg-black/60'
-            : 'border-black/15 bg-white/70 text-gray-700 hover:bg-white',
+            : 'border-black/15 bg-white/70 text-gray-700',
         )}
       >
         <ArrowUp size={16} />
