@@ -41,24 +41,98 @@ h3 {
 }
 
 * {
-	scrollbar-width: thin;
-	scrollbar-color: #c8cfdd transparent;
+	scrollbar-width: auto;
+	scrollbar-color: rgba(179, 187, 201, 0.65) var(--fondo-principal);
 }
 
 *::-webkit-scrollbar {
-	width: 10px;
-	height: 10px;
+	width: 14px;
+	height: 14px;
 }
 
 *::-webkit-scrollbar-thumb {
-	background: linear-gradient(180deg, #d6dbe7, #c7cfdd);
+	background: linear-gradient(180deg, rgba(188, 196, 209, 0.78), rgba(173, 182, 198, 0.72));
 	border-radius: 999px;
-	border: 2px solid transparent;
+	border: 3px solid transparent;
 	background-clip: content-box;
 }
 
 *::-webkit-scrollbar-track {
-	background: transparent;
+	background: var(--fondo-principal);
+	border-radius: 999px;
+}
+
+*::-webkit-scrollbar-button {
+	display: block;
+	height: 14px;
+	width: 14px;
+	background-color: var(--fondo-principal);
+	border-radius: 8px;
+}
+
+*::-webkit-scrollbar-button:hover {
+	background-color: rgba(195, 203, 216, 0.45);
+}
+
+/* ── Sidebar scrollbar (immersive dark) ────────────────── */
+.app-sidebar,
+.app-sidebar * {
+	scrollbar-color: rgba(255, 0, 17, 0.52) rgba(11, 13, 18, 0.94);
+}
+
+.app-sidebar *::-webkit-scrollbar-track {
+	background: rgba(11, 13, 18, 0.94);
+}
+
+.app-sidebar *::-webkit-scrollbar-thumb {
+	background: linear-gradient(180deg, rgba(129, 145, 168, 0.66), rgba(108, 124, 148, 0.62));
+	border: 3px solid rgba(11, 13, 18, 0.94);
+	background-clip: content-box;
+}
+
+.app-sidebar *::-webkit-scrollbar-button {
+	background-color: rgba(11, 13, 18, 0.94);
+}
+
+.app-sidebar *::-webkit-scrollbar-button:hover {
+	background-color: rgba(123, 138, 160, 0.25);
+}
+
+/* ── Landing viewport scrollbar day/night ──────────────── */
+body.landing-mode-day {
+	scrollbar-color: rgba(179, 187, 201, 0.68) #f6f7fb;
+}
+
+body.landing-mode-day::-webkit-scrollbar-track {
+	background: #f6f7fb;
+}
+
+body.landing-mode-day::-webkit-scrollbar-thumb {
+	background: linear-gradient(180deg, rgba(188, 196, 209, 0.82), rgba(173, 182, 198, 0.76));
+	border: 3px solid #f6f7fb;
+	background-clip: content-box;
+}
+
+body.landing-mode-day::-webkit-scrollbar-button {
+	background-color: #f6f7fb;
+}
+
+body.landing-mode-night {
+	scrollbar-color: rgba(133, 148, 170, 0.62) #0b0d12;
+}
+
+body.landing-mode-night::-webkit-scrollbar-track {
+	background: #0b0d12;
+}
+
+body.landing-mode-night::-webkit-scrollbar-thumb {
+	background: linear-gradient(180deg, rgba(141, 156, 179, 0.72), rgba(121, 136, 161, 0.66));
+	border: 3px solid #0b0d12;
+	background-clip: content-box;
+}
+
+body.landing-mode-night::-webkit-scrollbar-button {
+	background-color: #0b0d12;
 }
 
 .landing-grid {
