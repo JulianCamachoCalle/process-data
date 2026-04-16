@@ -587,6 +587,35 @@ export default async function kommoLeadsInsightsHandler(req: VercelRequest, res:
 
       const supabase = getSupabaseAdminClient();
 
+      const storeLeadIdsAll: number[] = [];
+      {
+        let allFrom = 0;
+        const allPageSize = 1000;
+        while (true) {
+          const allTo = allFrom + allPageSize - 1;
+          const { data, error } = await supabase
+            .from('leads_ganados' as never)
+            .select('business_id' as never)
+            .eq('tienda_nombre_snapshot' as never, storeName as never)
+            .range(allFrom, allTo);
+
+          if (error) {
+            throw new Error(error.message || 'No se pudieron cargar leads de la tienda.');
+          }
+
+          const chunk = (data ?? []) as Array<{ business_id: number | null }>;
+          for (const row of chunk) {
+            const leadId = Number(row.business_id ?? 0);
+            if (Number.isFinite(leadId) && leadId > 0) {
+              storeLeadIdsAll.push(leadId);
+            }
+          }
+
+          if (chunk.length < allPageSize) break;
+          allFrom += allPageSize;
+        }
+      }
+
       const leadsGanados: Array<{
         business_id: number | null;
         vendedor_nombre_snapshot: string | null;
@@ -642,6 +671,8 @@ export default async function kommoLeadsInsightsHandler(req: VercelRequest, res:
       if (leadIds.length === 0) {
         return res.status(200).json({ success: true, store: storeName, rows: [] as SellerLeadSummaryRow[] });
       }
+
+      const storeLeadIds = Array.from(new Set(storeLeadIdsAll));
 
       const resultados = await safeSelectPaginated<{ business_id: number; resultado: string | null }>('resultados', 'business_id,resultado', { batchSize: 500 });
       const deliveredResultIds = new Set<number>();
@@ -701,14 +732,22 @@ export default async function kommoLeadsInsightsHandler(req: VercelRequest, res:
           envFrom += pageSize;
         }
 
+      }
+
+      for (let index = 0; index < storeLeadIds.length; index += 200) {
+        const chunk = storeLeadIds.slice(index, index + 200);
         let recFrom = 0;
+
         while (true) {
           const recTo = recFrom + pageSize - 1;
-          const recojosQuery = supabase
+          let recojosQuery = supabase
             .from('recojos' as never)
             .select('id_lead_ganado,tipo_cobro,veces,ingreso_recojo_total,costo_recojo_total' as never)
             .in('id_lead_ganado' as never, chunk as never)
             .range(recFrom, recTo);
+
+          if (startDate) recojosQuery = recojosQuery.gte('fecha' as never, startDate as never);
+          if (endDate) recojosQuery = recojosQuery.lte('fecha' as never, endDate as never);
 
           const { data, error } = await recojosQuery;
 

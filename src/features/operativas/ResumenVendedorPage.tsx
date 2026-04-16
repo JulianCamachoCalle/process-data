@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { DateRangePicker } from '../../components/DateRangePicker';
 
@@ -106,8 +106,10 @@ async function fetchSellerLeadSummary(input: { storeName: string; startDate: str
 
 export function ResumenTiendaPage() {
   const [storeInput, setStoreInput] = useState('');
+  const [storeMenuOpen, setStoreMenuOpen] = useState(false);
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
+  const selectorRef = useRef<HTMLDivElement>(null);
 
   const sellersQuery = useQuery({
     queryKey: ['operativas', 'resumen-tienda', 'stores'],
@@ -117,11 +119,31 @@ export function ResumenTiendaPage() {
   });
 
   const sellerOptions = useMemo(() => sellersQuery.data ?? [], [sellersQuery.data]);
+  const filteredStoreOptions = useMemo(() => {
+    const query = normalizeText(storeInput);
+    if (!query) return sellerOptions.slice(0, 80);
+    return sellerOptions
+      .filter((option) => normalizeText(option.label).includes(query))
+      .slice(0, 80);
+  }, [storeInput, sellerOptions]);
+
   const selectedOption = useMemo(() => {
     const target = normalizeText(storeInput);
     if (!target) return null;
     return sellerOptions.find((option) => normalizeText(option.label) === target) ?? null;
   }, [storeInput, sellerOptions]);
+
+  useEffect(() => {
+    const handleOutsideClick = (event: MouseEvent) => {
+      if (!selectorRef.current) return;
+      const target = event.target as Node | null;
+      if (target && selectorRef.current.contains(target)) return;
+      setStoreMenuOpen(false);
+    };
+
+    document.addEventListener('mousedown', handleOutsideClick);
+    return () => document.removeEventListener('mousedown', handleOutsideClick);
+  }, []);
 
   const summaryQuery = useQuery({
     queryKey: ['operativas', 'resumen-tienda', 'rows', selectedOption?.label ?? 'none', startDate || 'none', endDate || 'none'],
@@ -201,23 +223,45 @@ export function ResumenTiendaPage() {
             className="lg:col-span-2"
           />
 
-          <div>
+          <div ref={selectorRef} className="relative">
             <label htmlFor="store-summary-input" className="mb-1 block text-xs font-semibold uppercase tracking-[0.14em] text-gray-500">
               Tienda
             </label>
             <input
               id="store-summary-input"
-              list="store-summary-options"
               value={storeInput}
-              onChange={(event) => setStoreInput(event.target.value)}
+              autoComplete="off"
+              onFocus={() => setStoreMenuOpen(true)}
+              onChange={(event) => {
+                setStoreInput(event.target.value);
+                setStoreMenuOpen(true);
+              }}
               placeholder={sellersQuery.isLoading ? 'Cargando tiendas…' : 'Escribí o seleccioná una tienda'}
               className="w-full rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm text-gray-800 shadow-sm focus:border-red-400 focus:outline-none focus:ring-2 focus:ring-red-100"
             />
-            <datalist id="store-summary-options">
-              {sellerOptions.map((option) => (
-                <option key={option.value} value={option.label} />
-              ))}
-            </datalist>
+
+            {storeMenuOpen && (
+              <div className="absolute z-20 mt-1 max-h-56 w-full overflow-auto rounded-xl border border-gray-200 bg-white shadow-lg">
+                {filteredStoreOptions.length === 0 ? (
+                  <div className="px-3 py-2 text-sm text-gray-500">Sin coincidencias.</div>
+                ) : (
+                  filteredStoreOptions.map((option) => (
+                    <button
+                      key={option.value}
+                      type="button"
+                      onMouseDown={(event) => {
+                        event.preventDefault();
+                        setStoreInput(option.label);
+                        setStoreMenuOpen(false);
+                      }}
+                      className="w-full px-3 py-2 text-left text-sm text-gray-700 hover:bg-red-50/70"
+                    >
+                      {option.label}
+                    </button>
+                  ))
+                )}
+              </div>
+            )}
           </div>
         </div>
       </div>
