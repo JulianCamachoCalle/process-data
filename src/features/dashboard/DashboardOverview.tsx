@@ -11,10 +11,17 @@ interface LeadRow {
   distrito: string | null;
   ingreso_anulados_fullfilment: number | null;
   tienda_nombre_snapshot: string | null;
+  vendedor_nombre_snapshot: string | null;
+}
+
+interface ResultadoRow {
+  business_id: number | null;
+  resultado: string | null;
 }
 
 interface EnvioRow {
   id_lead_ganado: number | null;
+  id_resultado: number | null;
   fecha_envio: string | null;
   ingreso_total_fila: number | null;
   costo_total_fila: number | null;
@@ -47,6 +54,11 @@ interface DashboardMetrics {
   recojosGratis: number;
   pagoTotalMotorizadoRecojo: number;
   distritoLeadGanadoFrecuente: string;
+  topTiendasPorVendedor: Array<{
+    tienda: string;
+    vendedor: string;
+    enviosEntregados: number;
+  }>;
 }
 
 const PAGE_SIZE = 1000;
@@ -139,7 +151,7 @@ async function fetchDashboardMetrics(dateFrom: string, dateTo: string): Promise<
   const leadsRows = await fetchAllPaged<LeadRow>(async (from, to) => {
     let query = client
       .from('leads_ganados')
-      .select('business_id,fecha_lead_ganado,distrito,ingreso_anulados_fullfilment,tienda_nombre_snapshot')
+      .select('business_id,fecha_lead_ganado,distrito,ingreso_anulados_fullfilment,tienda_nombre_snapshot,vendedor_nombre_snapshot')
       .order('business_id', { ascending: true })
       .range(from, to);
 
@@ -157,11 +169,28 @@ async function fetchDashboardMetrics(dateFrom: string, dateTo: string): Promise<
       .filter((id) => Number.isFinite(id) && id > 0),
   );
 
+  const resultadosRows = await fetchAllPaged<ResultadoRow>(async (from, to) => {
+    const { data, error } = await client
+      .from('resultados')
+      .select('business_id,resultado')
+      .order('business_id', { ascending: true })
+      .range(from, to);
+
+    return { data: (data ?? []) as ResultadoRow[], error };
+  });
+
+  const deliveredResultIds = new Set(
+    resultadosRows
+      .filter((row) => normalizeText(row.resultado ?? '').includes('entregado'))
+      .map((row) => Number(row.business_id ?? 0))
+      .filter((id) => Number.isFinite(id) && id > 0),
+  );
+
   const [enviosRowsRaw, recojosRowsRaw] = await Promise.all([
     fetchAllPaged<EnvioRow>(async (from, to) => {
       let query = client
         .from('envios')
-        .select('id_lead_ganado,fecha_envio,ingreso_total_fila,costo_total_fila')
+        .select('id_lead_ganado,id_resultado,fecha_envio,ingreso_total_fila,costo_total_fila')
         .order('business_id', { ascending: true })
         .range(from, to);
 
@@ -241,6 +270,39 @@ async function fetchDashboardMetrics(dateFrom: string, dateTo: string): Promise<
     leadsRows.map((row) => String(row.distrito ?? '').trim()).filter(Boolean),
   );
 
+  const tiendaVendedorByLead = new Map<number, { tienda: string; vendedor: string }>();
+  for (const row of leadsRows) {
+    const leadId = Number(row.business_id ?? 0);
+    if (!Number.isFinite(leadId) || leadId <= 0) continue;
+
+    const tienda = String(row.tienda_nombre_snapshot ?? '').trim() || `Lead #${leadId}`;
+    const vendedor = String(row.vendedor_nombre_snapshot ?? '').trim() || 'N/D';
+    tiendaVendedorByLead.set(leadId, { tienda, vendedor });
+  }
+
+  const deliveredCounter = new Map<string, { tienda: string; vendedor: string; enviosEntregados: number }>();
+
+  for (const envio of enviosRows) {
+    const leadId = Number(envio.id_lead_ganado ?? 0);
+    if (!Number.isFinite(leadId) || leadId <= 0) continue;
+
+    const envioResultId = Number(envio.id_resultado ?? 0);
+    if (!deliveredResultIds.has(envioResultId)) continue;
+
+    const snapshot = tiendaVendedorByLead.get(leadId);
+    const tienda = snapshot?.tienda ?? `Lead #${leadId}`;
+    const vendedor = snapshot?.vendedor ?? 'N/D';
+    const key = `${normalizeText(tienda)}__${normalizeText(vendedor)}`;
+
+    const current = deliveredCounter.get(key) ?? { tienda, vendedor, enviosEntregados: 0 };
+    current.enviosEntregados += 1;
+    deliveredCounter.set(key, current);
+  }
+
+  const topTiendasPorVendedor = Array.from(deliveredCounter.values())
+    .sort((a, b) => b.enviosEntregados - a.enviosEntregados)
+    .slice(0, 20);
+
   return {
     periodo: dateFrom || dateTo ? `${dateFrom || '...'} → ${dateTo || '...'}` : 'Sin filtro (todo el periodo)',
     tiendasRegistradas,
@@ -258,6 +320,7 @@ async function fetchDashboardMetrics(dateFrom: string, dateTo: string): Promise<
     recojosGratis,
     pagoTotalMotorizadoRecojo,
     distritoLeadGanadoFrecuente,
+    topTiendasPorVendedor,
   };
 }
 
@@ -359,6 +422,37 @@ export function DashboardOverview() {
             value={metrics.distritoLeadGanadoFrecuente || 'N/D'}
           />
         </KpiGrid>
+      </Section>
+
+      <Section title="TIERLIST · TOP 20 TIENDAS X VENDEDOR">
+        <div className="overflow-x-auto rounded-2xl border border-gray-200 bg-white shadow-[0_20px_42px_-34px_rgba(15,23,42,0.9)]">
+          <table className="min-w-full divide-y divide-gray-200">
+            <thead className="bg-gray-50">
+              <tr>
+                <th className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.12em] text-gray-500">#</th>
+                <th className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.12em] text-gray-500">Nombre tienda</th>
+                <th className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.12em] text-gray-500">Nombre vendedor</th>
+                <th className="px-4 py-3 text-right text-[11px] font-semibold uppercase tracking-[0.12em] text-gray-500">Envíos entregados</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100">
+              {metrics.topTiendasPorVendedor.length === 0 ? (
+                <tr>
+                  <td className="px-4 py-4 text-sm text-gray-500" colSpan={4}>Sin envíos entregados para el filtro seleccionado.</td>
+                </tr>
+              ) : (
+                metrics.topTiendasPorVendedor.map((item, index) => (
+                  <tr key={`${item.tienda}-${item.vendedor}-${index}`} className="hover:bg-red-50/40">
+                    <td className="px-4 py-3 text-sm font-semibold text-gray-700">#{index + 1}</td>
+                    <td className="px-4 py-3 text-sm text-gray-800">{item.tienda}</td>
+                    <td className="px-4 py-3 text-sm text-gray-700">{item.vendedor}</td>
+                    <td className="px-4 py-3 text-right text-sm font-semibold text-gray-900">{formatNumberEs(item.enviosEntregados)}</td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
       </Section>
     </div>
   );
