@@ -534,13 +534,34 @@ export function LandingPage() {
     return window.matchMedia('(min-width: 1024px)').matches;
   });
   const [showScrollTop, setShowScrollTop] = useState(false);
+  const [isLowPerfMode, setIsLowPerfMode] = useState(() => {
+    if (typeof window === 'undefined') return false;
+    return window.matchMedia('(prefers-reduced-motion: reduce), (max-width: 1024px)').matches;
+  });
   const [coverageGeoJson, setCoverageGeoJson] = useState<AnyProps | null>(null);
   const landingRootRef = useRef<HTMLDivElement>(null);
   const heroBgRef = useRef<HTMLDivElement>(null);
   const mapIconCache = useRef(new Map<string, L.Icon>());
   const cursorInteractiveRef = useRef(false);
+  const showScrollTopRef = useRef(false);
 
   useScrollReveal(isNight);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const mediaQuery = window.matchMedia('(prefers-reduced-motion: reduce), (max-width: 1024px)');
+    const sync = () => setIsLowPerfMode(mediaQuery.matches);
+    sync();
+
+    if (typeof mediaQuery.addEventListener === 'function') {
+      mediaQuery.addEventListener('change', sync);
+      return () => mediaQuery.removeEventListener('change', sync);
+    }
+
+    mediaQuery.addListener(sync);
+    return () => mediaQuery.removeListener(sync);
+  }, [isLowPerfMode]);
 
   const tariffLookup = useRef(
     new Map(
@@ -665,7 +686,7 @@ export function LandingPage() {
 
     const mediaQuery = window.matchMedia('(hover: hover) and (pointer: fine)');
     const sync = () => {
-      setCursorEnabled(mediaQuery.matches);
+      setCursorEnabled(mediaQuery.matches && !isLowPerfMode);
     };
 
     sync();
@@ -677,7 +698,7 @@ export function LandingPage() {
 
     mediaQuery.addListener(sync);
     return () => mediaQuery.removeListener(sync);
-  }, []);
+  }, [isLowPerfMode]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -696,24 +717,45 @@ export function LandingPage() {
     cursorInteractiveRef.current = false;
     root.dataset.cursorHover = '0';
     const interactiveSelector = 'a,button,[role="button"],input,select,textarea,summary,.leaflet-interactive,.leaflet-control-zoom a,[data-cursor="circle"]';
+    let frame: number | null = null;
+    let nextX = -9999;
+    let nextY = -9999;
+    let nextHover: '0' | '1' = '0';
+
+    const flushCursorFrame = () => {
+      frame = null;
+      root.style.setProperty('--landing-cursor-x', `${nextX}px`);
+      root.style.setProperty('--landing-cursor-y', `${nextY}px`);
+      if (root.dataset.cursorHover !== nextHover) {
+        root.dataset.cursorHover = nextHover;
+      }
+    };
+
+    const scheduleCursorFrame = () => {
+      if (frame !== null) return;
+      frame = window.requestAnimationFrame(flushCursorFrame);
+    };
 
     const handleMouseMove = (event: MouseEvent) => {
-      root.style.setProperty('--landing-cursor-x', `${event.clientX}px`);
-      root.style.setProperty('--landing-cursor-y', `${event.clientY}px`);
+      nextX = event.clientX;
+      nextY = event.clientY;
 
       const target = event.target instanceof Element ? event.target : null;
       const interactive = Boolean(target?.closest(interactiveSelector));
       if (interactive !== cursorInteractiveRef.current) {
         cursorInteractiveRef.current = interactive;
-        root.dataset.cursorHover = interactive ? '1' : '0';
+        nextHover = interactive ? '1' : '0';
       }
+
+      scheduleCursorFrame();
     };
 
     const handleMouseLeave = () => {
-      root.style.setProperty('--landing-cursor-x', '-9999px');
-      root.style.setProperty('--landing-cursor-y', '-9999px');
+      nextX = -9999;
+      nextY = -9999;
       cursorInteractiveRef.current = false;
-      root.dataset.cursorHover = '0';
+      nextHover = '0';
+      scheduleCursorFrame();
     };
 
     window.addEventListener('mousemove', handleMouseMove, { passive: true });
@@ -722,6 +764,9 @@ export function LandingPage() {
     return () => {
       window.removeEventListener('mousemove', handleMouseMove);
       window.removeEventListener('mouseleave', handleMouseLeave);
+      if (frame !== null) {
+        window.cancelAnimationFrame(frame);
+      }
       root.style.setProperty('--landing-cursor-x', '-9999px');
       root.style.setProperty('--landing-cursor-y', '-9999px');
       root.dataset.cursorHover = '0';
@@ -743,18 +788,38 @@ export function LandingPage() {
   }, [isNight]);
 
   useEffect(() => {
-    const handleScroll = () => {
-      if (heroBgRef.current) {
-        heroBgRef.current.style.transform = `translateY(${window.scrollY * 0.32}px)`;
+    let frame: number | null = null;
+
+    const updateScrollEffects = () => {
+      frame = null;
+      const scrollY = window.scrollY;
+
+      if (!isLowPerfMode && heroBgRef.current) {
+        heroBgRef.current.style.transform = `translate3d(0, ${scrollY * 0.32}px, 0)`;
       }
 
-      setShowScrollTop(window.scrollY > 220);
+      const nextShowScrollTop = scrollY > 220;
+      if (nextShowScrollTop !== showScrollTopRef.current) {
+        showScrollTopRef.current = nextShowScrollTop;
+        setShowScrollTop(nextShowScrollTop);
+      }
     };
 
-    handleScroll();
+    const handleScroll = () => {
+      if (frame !== null) return;
+      frame = window.requestAnimationFrame(updateScrollEffects);
+    };
+
+    updateScrollEffects();
     window.addEventListener('scroll', handleScroll, { passive: true });
-    return () => window.removeEventListener('scroll', handleScroll);
-  }, []);
+
+    return () => {
+      window.removeEventListener('scroll', handleScroll);
+      if (frame !== null) {
+        window.cancelAnimationFrame(frame);
+      }
+    };
+  }, [isLowPerfMode]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -774,7 +839,7 @@ export function LandingPage() {
 
     mediaQuery.addListener(sync);
     return () => mediaQuery.removeListener(sync);
-  }, []);
+  }, [isLowPerfMode]);
 
   const testimonialSlides = useMemo(() => {
     const chunkSize = isDesktopTestimonials ? 3 : 1;
@@ -788,6 +853,7 @@ export function LandingPage() {
   }, [isDesktopTestimonials]);
 
   useEffect(() => {
+    if (isLowPerfMode) return;
     const totalSlides = testimonialSlides.length;
     if (!totalSlides) return;
 
@@ -796,7 +862,7 @@ export function LandingPage() {
     }, 6000);
 
     return () => window.clearInterval(timer);
-  }, [testimonialSlides.length]);
+  }, [isLowPerfMode, testimonialSlides.length]);
 
   const handleToggleTheme = () => {
     setIsThemeAnimating(true);
@@ -839,6 +905,7 @@ export function LandingPage() {
       className={cx(
         'relative min-h-screen overflow-x-hidden selection:bg-red-600 selection:text-white landing-root',
         cursorEnabled && 'landing-cursor-enabled',
+        isLowPerfMode && 'landing-lowperf',
         n ? 'text-white' : 'text-gray-900',
       )}
       style={{ backgroundColor: bg }}
