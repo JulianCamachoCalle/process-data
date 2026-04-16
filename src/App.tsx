@@ -46,6 +46,13 @@ const USER_ALLOWED_PATHS = new Set([
   '/meta/pages',
   '/meta/pages/dashboard',
   '/kommo/leads-insights',
+  '/dashboard/meta/ads',
+  '/dashboard/meta/ads/dashboard',
+  '/dashboard/meta/compare',
+  '/dashboard/meta/compare/dashboard',
+  '/dashboard/meta/pages',
+  '/dashboard/meta/pages/dashboard',
+  '/dashboard/kommo/leads-insights',
 ]);
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
@@ -261,21 +268,47 @@ function Layout() {
           <div className="mx-auto w-full max-w-7xl print:max-w-none">
             <Routes>
               <Route path="/dashboard" element={adminOnly(<DashboardOverview />)} />
+              <Route path="/dashboard/resumen-general" element={<Navigate to="/dashboard" replace />} />
+              <Route path="/dashboard/tablas-base" element={adminOnly(<Navigate to="/tabla/DESTINOS" replace />)} />
+              <Route path="/dashboard/tablas-operativas" element={adminOnly(<Navigate to="/tabla/ENVIOS" replace />)} />
+              <Route path="/dashboard/meta-ads" element={<Navigate to="/meta/ads/dashboard" replace />} />
+              <Route path="/dashboard/meta-pages" element={<Navigate to="/meta/pages/dashboard" replace />} />
+              <Route path="/dashboard/kommo-crm" element={adminOnly(<Navigate to="/kommo" replace />)} />
+              <Route path="/dashboard/exportaciones" element={adminOnly(<Navigate to="/exports/google-sheets" replace />)} />
+              <Route path="/dashboard/acceso" element={adminOnly(<Navigate to="/admin/users" replace />)} />
               <Route path="/tabla/:sheetName" element={adminOnly(<SheetRouteWrapper />)} />
+              <Route path="/dashboard/tabla/:sheetName" element={adminOnly(<DashboardPrefixedSheetRedirect />)} />
               <Route path="/sheet/:sheetName" element={adminOnly(<LegacySheetRedirect />)} />
+              <Route path="/dashboard/sheet/:sheetName" element={adminOnly(<DashboardPrefixedSheetRedirect />)} />
               <Route path="/kommo" element={adminOnly(<KommoExplorer />)} />
+              <Route path="/dashboard/kommo" element={adminOnly(<Navigate to="/kommo" replace />)} />
               <Route path="/kommo/leads-insights" element={<KommoLeadsInsights />} />
+              <Route path="/dashboard/kommo/leads-insights" element={<Navigate to="/kommo/leads-insights" replace />} />
               <Route path="/kommo/:resource" element={adminOnly(<KommoExplorer />)} />
+              <Route path="/dashboard/kommo/:resource" element={adminOnly(<DashboardPrefixedKommoRedirect />)} />
               <Route path="/meta/ads" element={<Navigate to="/meta/ads/dashboard" replace />} />
+              <Route path="/dashboard/meta/ads" element={<Navigate to="/meta/ads/dashboard" replace />} />
               <Route path="/meta/ads/dashboard" element={<MetaAdsDashboard />} />
+              <Route path="/dashboard/meta/ads/dashboard" element={<Navigate to="/meta/ads/dashboard" replace />} />
               <Route path="/meta/ads/data" element={adminOnly(<MetaAdsDataPage />)} />
+              <Route path="/dashboard/meta/ads/data" element={adminOnly(<Navigate to="/meta/ads/data" replace />)} />
               <Route path="/meta/compare" element={<Navigate to="/meta/compare/dashboard" replace />} />
+              <Route path="/dashboard/meta/compare" element={<Navigate to="/meta/compare/dashboard" replace />} />
               <Route path="/meta/compare/dashboard" element={<MetaAdsOrganicDashboard />} />
+              <Route path="/dashboard/meta/compare/dashboard" element={<Navigate to="/meta/compare/dashboard" replace />} />
               <Route path="/meta/pages" element={<Navigate to="/meta/pages/dashboard" replace />} />
+              <Route path="/dashboard/meta/pages" element={<Navigate to="/meta/pages/dashboard" replace />} />
               <Route path="/meta/pages/dashboard" element={<MetaPagesDashboard />} />
+              <Route path="/dashboard/meta/pages/dashboard" element={<Navigate to="/meta/pages/dashboard" replace />} />
               <Route path="/exports/google-sheets" element={adminOnly(<GoogleSheetsExportPage />)} />
+              <Route path="/dashboard/exports" element={adminOnly(<Navigate to="/exports/google-sheets" replace />)} />
+              <Route path="/dashboard/exports/google-sheets" element={adminOnly(<Navigate to="/exports/google-sheets" replace />)} />
               <Route path="/admin/users" element={adminOnly(<AdminUsersPage />)} />
+              <Route path="/dashboard/admin" element={adminOnly(<Navigate to="/admin/users" replace />)} />
+              <Route path="/dashboard/admin/users" element={adminOnly(<Navigate to="/admin/users" replace />)} />
               <Route path="/operativas/estadisticas-vendedor" element={adminOnly(<EstadisticasVendedorPage />)} />
+              <Route path="/dashboard/operativas" element={adminOnly(<Navigate to="/operativas/estadisticas-vendedor" replace />)} />
+              <Route path="/dashboard/operativas/estadisticas-vendedor" element={adminOnly(<Navigate to="/operativas/estadisticas-vendedor" replace />)} />
               <Route path="*" element={<NotFoundPage inPanel />} />
             </Routes>
           </div>
@@ -347,6 +380,18 @@ function SheetRouteWrapper() {
 
 function LegacySheetRedirect() {
   const { sheetName } = useParams<{ sheetName: string }>();
-  if (!sheetName) return <Navigate to="/" replace />;
+  if (!sheetName) return <Navigate to="/dashboard" replace />;
   return <Navigate to={`/tabla/${encodeURIComponent(sheetName)}`} replace />;
+}
+
+function DashboardPrefixedSheetRedirect() {
+  const { sheetName } = useParams<{ sheetName: string }>();
+  if (!sheetName) return <Navigate to="/dashboard" replace />;
+  return <Navigate to={`/tabla/${encodeURIComponent(sheetName)}`} replace />;
+}
+
+function DashboardPrefixedKommoRedirect() {
+  const { resource } = useParams<{ resource: string }>();
+  if (!resource) return <Navigate to="/kommo" replace />;
+  return <Navigate to={`/kommo/${encodeURIComponent(resource)}`} replace />;
 }
