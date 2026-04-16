@@ -205,6 +205,8 @@ body.landing-mode-night::-webkit-scrollbar-button {
 	mix-blend-mode: screen;
 	transition: opacity 90ms ease;
 	z-index: 8;
+	will-change: transform, opacity;
+	contain: layout style paint;
 }
 
 .landing-cursor-glow.is-active {
@@ -227,6 +229,8 @@ body.landing-mode-night::-webkit-scrollbar-button {
 	box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.42), 0 0 14px rgba(230, 0, 0, 0.45);
 	transition: opacity 90ms ease, box-shadow 90ms ease, background-color 90ms ease, border-color 90ms ease, border-width 90ms ease;
 	z-index: 3600;
+	will-change: transform, opacity;
+	contain: layout style paint;
 }
 
 .landing-cursor-ring.is-active {
