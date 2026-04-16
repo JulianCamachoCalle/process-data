@@ -678,14 +678,11 @@ export default async function kommoLeadsInsightsHandler(req: VercelRequest, res:
         let envFrom = 0;
         while (true) {
           const envTo = envFrom + pageSize - 1;
-          let enviosQuery = supabase
+          const enviosQuery = supabase
             .from('envios' as never)
             .select('id_lead_ganado,id_resultado,ingreso_total_fila,costo_total_fila' as never)
             .in('id_lead_ganado' as never, chunk as never)
             .range(envFrom, envTo);
-
-          if (startDate) enviosQuery = enviosQuery.gte('fecha_envio' as never, startDate as never);
-          if (endDate) enviosQuery = enviosQuery.lte('fecha_envio' as never, endDate as never);
 
           const { data, error } = await enviosQuery;
 
@@ -707,14 +704,11 @@ export default async function kommoLeadsInsightsHandler(req: VercelRequest, res:
         let recFrom = 0;
         while (true) {
           const recTo = recFrom + pageSize - 1;
-          let recojosQuery = supabase
+          const recojosQuery = supabase
             .from('recojos' as never)
             .select('id_lead_ganado,tipo_cobro,veces,ingreso_recojo_total,costo_recojo_total' as never)
             .in('id_lead_ganado' as never, chunk as never)
             .range(recFrom, recTo);
-
-          if (startDate) recojosQuery = recojosQuery.gte('fecha' as never, startDate as never);
-          if (endDate) recojosQuery = recojosQuery.lte('fecha' as never, endDate as never);
 
           const { data, error } = await recojosQuery;
 

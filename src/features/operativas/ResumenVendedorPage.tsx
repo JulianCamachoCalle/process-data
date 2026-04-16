@@ -60,37 +60,14 @@ function formatNumber(value: number) {
   return new Intl.NumberFormat('es-PE').format(value);
 }
 
-function formatDateRange(values: Array<string | null>) {
-  const valid = values.filter((value): value is string => Boolean(value)).sort((a, b) => a.localeCompare(b));
-  if (valid.length === 0) return '—';
-  if (valid.length === 1) return formatDate(valid[0]);
-  return `${formatDate(valid[0])} → ${formatDate(valid[valid.length - 1])}`;
-}
-
-function getMostFrequentLabel(values: string[]) {
-  const counter = new Map<string, { label: string; count: number }>();
-
-  for (const value of values) {
-    const label = String(value ?? '').trim();
-    if (!label) continue;
-    const key = normalizeText(label);
-    if (!key) continue;
-    const current = counter.get(key);
-    if (current) {
-      current.count += 1;
-    } else {
-      counter.set(key, { label, count: 1 });
-    }
-  }
-
-  let winner: { label: string; count: number } | null = null;
-  for (const entry of counter.values()) {
-    if (!winner || entry.count > winner.count) {
-      winner = entry;
-    }
-  }
-
-  return winner?.label ?? '—';
+function calculateDaysBetween(from: string | null, to: string | null) {
+  if (!from || !to) return 0;
+  const fromDate = new Date(`${from}T00:00:00`);
+  const toDate = new Date(`${to}T00:00:00`);
+  if (Number.isNaN(fromDate.getTime()) || Number.isNaN(toDate.getTime())) return 0;
+  const diffMs = toDate.getTime() - fromDate.getTime();
+  const diffDays = Math.round(diffMs / (1000 * 60 * 60 * 24));
+  return Number.isFinite(diffDays) ? diffDays : 0;
 }
 
 async function fetchSellerOptions() {
@@ -163,10 +140,11 @@ export function ResumenTiendaPage() {
 
   const totals = useMemo(() => {
     const rows = summaryQuery.data ?? [];
-    const fechaIngresoValues = rows.map((row) => row.fecha_ingreso_lead);
-    const fechaGanadoValues = rows.map((row) => row.fecha_lead_ganado);
-    const vendedorValues = rows.map((row) => row.vendedor_nombre);
-    const diasTotal = rows.reduce((acc, row) => acc + row.dias_lead_a_ganado, 0);
+    const referenceRow = rows[0] ?? null;
+    const fechaIngresoLead = referenceRow?.fecha_ingreso_lead ?? null;
+    const fechaLeadGanado = referenceRow?.fecha_lead_ganado ?? null;
+    const vendedor = String(referenceRow?.vendedor_nombre ?? '').trim() || '—';
+    const diasLeadAGanado = calculateDaysBetween(fechaIngresoLead, fechaLeadGanado);
 
     return rows.reduce(
       (acc, row) => {
@@ -184,10 +162,10 @@ export function ResumenTiendaPage() {
         return acc;
       },
       {
-        fechaIngresoLead: formatDateRange(fechaIngresoValues),
-        fechaLeadGanado: formatDateRange(fechaGanadoValues),
-        vendedor: getMostFrequentLabel(vendedorValues),
-        diasLeadAGanado: rows.length > 0 ? diasTotal / rows.length : 0,
+        fechaIngresoLead: formatDate(fechaIngresoLead),
+        fechaLeadGanado: formatDate(fechaLeadGanado),
+        vendedor,
+        diasLeadAGanado,
         enviosEntregados: 0,
         enviosRechazados: 0,
         ingresoEnvios: 0,
@@ -263,7 +241,7 @@ export function ResumenTiendaPage() {
               <MetricCard title="Vendedor" value={totals.vendedor} />
               <MetricCard title="Fecha de ingreso lead" value={totals.fechaIngresoLead} />
               <MetricCard title="Fecha de lead ganado" value={totals.fechaLeadGanado} />
-              <MetricCard title="Días de lead a ganado" value={formatNumber(Number(totals.diasLeadAGanado.toFixed(2)))} />
+              <MetricCard title="Días de lead a ganado" value={formatNumber(totals.diasLeadAGanado)} />
               <MetricCard title="Envíos entregados" value={formatNumber(totals.enviosEntregados)} />
               <MetricCard title="Envíos rechazados" value={formatNumber(totals.enviosRechazados)} />
               <MetricCard title="Ingreso envíos" value={formatCurrency(totals.ingresoEnvios)} />
