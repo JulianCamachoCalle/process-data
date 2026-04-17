@@ -4,7 +4,7 @@ import {
   isSecretAuthorized,
   isVercelCronAuthorized,
   verifyAdminSession,
-} from '../../kommo/_shared.js';
+} from '../../../src/server/kommo/shared.js';
 
 const META_GRAPH_VERSION = 'v22.0';
 const META_GRAPH_BASE_URL = `https://graph.facebook.com/${META_GRAPH_VERSION}`;

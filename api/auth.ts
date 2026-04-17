@@ -1,6 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { z, ZodError } from 'zod';
-import { getSupabaseAdminClient } from './kommo/_shared.js';
+import { getSupabaseAdminClient } from '../src/server/kommo/shared.js';
 import {
   buildAuthCookie,
   buildLogoutCookie,
@@ -10,8 +10,8 @@ import {
   verifyAdminSession,
   verifyAuthToken,
   type AppRole,
-} from './_auth.js';
-import { generateScryptPasswordHash, verifyPasswordWithScrypt } from './_password.js';
+} from '../src/server/auth.js';
+import { generateScryptPasswordHash, verifyPasswordWithScrypt } from '../src/server/password.js';
 
 const authBodySchema = z.object({
   email: z.string().trim().email('El email es inválido'),

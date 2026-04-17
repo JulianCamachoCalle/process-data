@@ -1,5 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { getSupabaseAdminClient, isSecretAuthorized, isVercelCronAuthorized, verifyAdminSession } from './_shared.js';
+import { getSupabaseAdminClient, isSecretAuthorized, isVercelCronAuthorized, verifyAdminSession } from '../../src/server/kommo/shared.js';
 import { syncLeadsGanadosFromKommoLeadIds } from './leads-ganados-auto.js';
 
 const PROCESS_SECRET_HEADER = 'x-kommo-process-secret';

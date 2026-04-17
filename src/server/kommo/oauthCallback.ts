@@ -6,12 +6,35 @@ import {
   getSupabaseAdminClient,
   readKommoOauthState,
   verifyAdminSession,
-} from '../_shared.js';
+} from './shared.js';
 
 const OAUTH_NONCE_COOKIE = 'kommo_oauth_nonce';
 
 function asSingleQueryParam(value: string | string[] | undefined) {
   return Array.isArray(value) ? value[0] : value;
+}
+
+function asSingleBodyParam(value: unknown) {
+  if (Array.isArray(value)) return typeof value[0] === 'string' ? value[0] : undefined;
+  return typeof value === 'string' ? value : undefined;
+}
+
+function parseBodyObject(req: VercelRequest) {
+  if (!req.body) return {} as Record<string, unknown>;
+  if (typeof req.body === 'string') {
+    try {
+      const parsed = JSON.parse(req.body) as unknown;
+      return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+        ? parsed as Record<string, unknown>
+        : {};
+    } catch {
+      return {};
+    }
+  }
+
+  return typeof req.body === 'object' && !Array.isArray(req.body)
+    ? req.body as Record<string, unknown>
+    : {};
 }
 
 function parseCookies(cookieHeader: string | undefined) {
@@ -57,23 +80,21 @@ function renderHtmlResult(success: boolean, message: string) {
 }
 
 export default async function kommoOauthCallbackHandler(req: VercelRequest, res: VercelResponse) {
-  if (req.method !== 'GET') {
-    return res.status(405).json({ error: 'Método no permitido' });
-  }
-
   try {
     const auth = verifyAdminSession(req);
     if (!auth.ok) {
       return res.status(auth.status).send(renderHtmlResult(false, auth.error ?? 'No autorizado'));
     }
 
-    const errorParam = asSingleQueryParam(req.query.error);
+    const body = parseBodyObject(req);
+
+    const errorParam = asSingleBodyParam(body.error) ?? asSingleQueryParam(req.query.error);
     if (errorParam) {
       return res.status(400).send(renderHtmlResult(false, `Kommo devolvió error: ${errorParam}`));
     }
 
-    const code = asSingleQueryParam(req.query.code);
-    const state = asSingleQueryParam(req.query.state);
+    const code = asSingleBodyParam(body.code) ?? asSingleQueryParam(req.query.code);
+    const state = asSingleBodyParam(body.state) ?? asSingleQueryParam(req.query.state);
 
     if (!code || !state) {
       return res.status(400).send(renderHtmlResult(false, 'Faltan parámetros code/state en callback OAuth'));

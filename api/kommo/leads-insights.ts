@@ -4,7 +4,7 @@ import {
   isSecretAuthorized,
   isVercelCronAuthorized,
   verifySession,
-} from './_shared.js';
+} from '../../src/server/kommo/shared.js';
 
 const INSIGHTS_SECRET_HEADER = 'x-kommo-insights-secret';
 const INSIGHTS_SECRET_ENV = 'KOMMO_INSIGHTS_SECRET';
