@@ -561,8 +561,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       { type: 'deviceType', apiDimension: 'deviceType' },
       { type: 'subscribedStatus', apiDimension: 'subscribedStatus' },
       { type: 'trafficSourceType', apiDimension: 'insightTrafficSourceType' },
-      { type: 'playbackLocationType', apiDimension: 'playbackLocationType' },
+      { type: 'playbackLocationType', apiDimension: 'insightPlaybackLocationType' },
     ];
+
+    const skippedDimensions: Array<{ dimension: AudienceDimensionType; reason: string }> = [];
 
     for (const config of audienceDimensions) {
       if (isPastDeadline(deadlineMs)) {
@@ -570,15 +572,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         break;
       }
 
-        const result = await queryAnalyticsRows(
+      let result: AnalyticsQueryResult;
+      try {
+        result = await queryAnalyticsRows(
           accessToken,
           analyticsChannelTarget,
-        computedStartDate,
-        computedEndDate,
-        `day,${config.apiDimension}`,
-        'views,estimatedMinutesWatched,averageViewDuration',
-        deadlineMs,
-      );
+          computedStartDate,
+          computedEndDate,
+          `day,${config.apiDimension}`,
+          'views,estimatedMinutesWatched,averageViewDuration',
+          deadlineMs,
+        );
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Error desconocido';
+        skippedDimensions.push({ dimension: config.type, reason: message });
+        continue;
+      }
 
       audienceByDimension[config.type].pulled = result.pulled;
       audienceSummary.pulled += result.pulled;
@@ -686,6 +695,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         audience_breakdowns: {
           ...audienceSummary,
           by_dimension: audienceByDimension,
+          skipped: skippedDimensions,
         },
         video_daily_stats: videosSummary,
       },
