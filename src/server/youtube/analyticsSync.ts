@@ -4,7 +4,7 @@ import {
   isSecretAuthorized,
   isVercelCronAuthorized,
   verifyAdminSession,
-} from '../kommo/_shared.js';
+} from '../kommo/shared.js';
 
 const OAUTH_TOKEN_ENDPOINT = 'https://oauth2.googleapis.com/token';
 const YOUTUBE_ANALYTICS_REPORTS_ENDPOINT = 'https://youtubeanalytics.googleapis.com/v2/reports';

@@ -4,7 +4,7 @@ import {
   isSecretAuthorized,
   isVercelCronAuthorized,
   verifyAdminSession,
-} from '../kommo/_shared.js';
+} from '../kommo/shared.js';
 
 const YOUTUBE_API_BASE_URL = 'https://www.googleapis.com/youtube/v3';
 const SYNC_SECRET_HEADER = 'x-youtube-sync-secret';

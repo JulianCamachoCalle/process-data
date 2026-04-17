@@ -1,7 +1,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createClient } from '@supabase/supabase-js';
 import { z } from 'zod';
-import { verifyAdminSession } from './_auth.js';
+import { verifyAdminSession } from '../src/server/auth.js';
 import { getRawSheet, STABLE_ROW_ID_COLUMN } from '../src/lib/google-sheets.js';
 import { normalizeText } from '../src/lib/tableHelpers.js';
 import {

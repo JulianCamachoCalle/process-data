@@ -1,12 +1,12 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { verifyAdminSession } from '../../_auth.js';
+import { verifyAdminSession } from '../../../src/server/auth.js';
 import {
   createExportJob,
   listExportJobs,
   runExportJob,
   validateExportRequest,
   type ExportJobRequest,
-} from './_jobs.js';
+} from '../../../src/server/export/googleSheetsJobs.js';
 
 export default async function googleSheetsExportJobsHandler(req: VercelRequest, res: VercelResponse) {
   const auth = verifyAdminSession(req);
