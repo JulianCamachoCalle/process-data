@@ -29,7 +29,26 @@ type SyncJobDefinition = {
   method?: 'GET' | 'POST';
 };
 
+type SyncPreset = {
+  id: string;
+  label: string;
+  values: Record<string, string>;
+};
+
+type PanelView = 'deck' | 'kommo';
+
 const SYNC_JOBS: SyncJobDefinition[] = [
+  {
+    id: 'kommo-leads-sync',
+    label: 'Kommo Leads Pull',
+    description: 'Trae leads desde Kommo API v4 (pull/stage).',
+    path: '/api/kommo/sync',
+    fixedParams: { resource: 'leads' },
+    params: [
+      { key: 'max_pages', label: 'Max pages', defaultValue: '20' },
+      { key: 'limit', label: 'Limit por página', defaultValue: '250' },
+    ],
+  },
   {
     id: 'kommo-envios-cursor',
     label: 'Kommo → Envíos (cursor)',
@@ -113,6 +132,44 @@ const SYNC_JOBS: SyncJobDefinition[] = [
   },
 ];
 
+const SYNC_JOB_PRESETS: Record<string, SyncPreset[]> = {
+  'kommo-leads-sync': [
+    { id: 'small', label: 'Pequeño', values: { max_pages: '5', limit: '100' } },
+    { id: 'normal', label: 'Normal', values: { max_pages: '20', limit: '250' } },
+    { id: 'large', label: 'Grande', values: { max_pages: '40', limit: '250' } },
+  ],
+  'kommo-envios-cursor': [
+    { id: 'small', label: 'Pequeño', values: { batch_leads: '50', limit_rows: '500', cursor: '0', debug: 'false' } },
+    { id: 'normal', label: 'Normal', values: { batch_leads: '120', limit_rows: '2000', cursor: '0', debug: 'false' } },
+    { id: 'large', label: 'Grande', values: { batch_leads: '400', limit_rows: '6000', cursor: '0', debug: 'false' } },
+  ],
+  'kommo-recojos-cursor': [
+    { id: 'small', label: 'Pequeño', values: { batch_leads: '50', limit_rows: '500', cursor: '0', max_runtime_ms: '35000', debug: 'false' } },
+    { id: 'normal', label: 'Normal', values: { batch_leads: '120', limit_rows: '2000', cursor: '0', max_runtime_ms: '45000', debug: 'false' } },
+    { id: 'large', label: 'Grande', values: { batch_leads: '400', limit_rows: '6000', cursor: '0', max_runtime_ms: '60000', debug: 'false' } },
+  ],
+  'meta-ads-sync': [
+    { id: 'small', label: 'Pequeño', values: { date_preset: 'last_7d', time_increment: '1', limit: '50', max_pages: '2', max_runtime_ms: '30000' } },
+    { id: 'normal', label: 'Normal', values: { date_preset: 'last_30d', time_increment: '1', limit: '100', max_pages: '5', max_runtime_ms: '45000' } },
+    { id: 'large', label: 'Grande', values: { date_preset: 'last_90d', time_increment: '1', limit: '150', max_pages: '10', max_runtime_ms: '60000' } },
+  ],
+  'meta-pages-sync': [
+    { id: 'small', label: 'Pequeño', values: { latest_monthly: '1', post_limit: '40', post_max_pages: '5', max_runtime_ms: '30000' } },
+    { id: 'normal', label: 'Normal', values: { latest_monthly: '1', post_limit: '100', post_max_pages: '20', max_runtime_ms: '45000' } },
+    { id: 'large', label: 'Grande', values: { latest_monthly: '0', post_limit: '150', post_max_pages: '40', max_runtime_ms: '60000' } },
+  ],
+  'youtube-sync': [
+    { id: 'small', label: 'Pequeño', values: { max_pages: '4', max_runtime_ms: '25000' } },
+    { id: 'normal', label: 'Normal', values: { max_pages: '12', max_runtime_ms: '45000' } },
+    { id: 'large', label: 'Grande', values: { max_pages: '40', max_runtime_ms: '60000' } },
+  ],
+  'youtube-analytics-sync': [
+    { id: 'small', label: 'Pequeño', values: { use_mine: '1', max_runtime_ms: '25000' } },
+    { id: 'normal', label: 'Normal', values: { use_mine: '1', max_runtime_ms: '45000' } },
+    { id: 'large', label: 'Grande', values: { use_mine: '1', max_runtime_ms: '60000' } },
+  ],
+};
+
 const GROUP_SECTION_TITLES = {
   core: 'Recursos principales',
   relationships: 'Relaciones y vinculaciones',
@@ -123,6 +180,7 @@ const GROUP_SECTION_TITLES = {
 export function KommoSyncPanel({ onClose }: KommoSyncPanelProps) {
   const [resources, setResources] = useState<Record<string, SyncResource>>({});
   const [jobRuns, setJobRuns] = useState<Record<string, SyncResource>>({});
+  const [panelView, setPanelView] = useState<PanelView>('deck');
   const [isJobModalOpen, setIsJobModalOpen] = useState(false);
   const [selectedJobId, setSelectedJobId] = useState(SYNC_JOBS[0]?.id ?? '');
   const [jobParams, setJobParams] = useState<Record<string, string>>(() => {
@@ -145,6 +203,11 @@ export function KommoSyncPanel({ onClose }: KommoSyncPanelProps) {
   const syncJobOptions = useMemo(
     () => SYNC_JOBS.map((job) => ({ value: job.id, label: job.label })),
     [],
+  );
+
+  const selectedJobPresets = useMemo(
+    () => (selectedJob ? (SYNC_JOB_PRESETS[selectedJob.id] ?? []) : []),
+    [selectedJob],
   );
 
   const runSync = async (resource: string, opts?: { autoProcessEvents?: boolean }) => {
@@ -270,6 +333,17 @@ export function KommoSyncPanel({ onClose }: KommoSyncPanelProps) {
     }
   };
 
+  const openJobConfig = (jobId: string) => {
+    setSelectedJobId(jobId);
+    resetJobParams(jobId);
+    setIsJobModalOpen(true);
+  };
+
+  const applyPreset = (job: SyncJobDefinition, preset: SyncPreset) => {
+    const base = Object.fromEntries(job.params.map((param) => [param.key, param.defaultValue]));
+    setJobParams({ ...base, ...preset.values });
+  };
+
   const runAllSync = async () => {
     for (const resource of allResources) {
       await runSync(resource, { autoProcessEvents: false });
@@ -297,36 +371,33 @@ export function KommoSyncPanel({ onClose }: KommoSyncPanelProps) {
           </button>
         </div>
 
-        <div className="px-6 py-3 bg-gray-50 border-b border-gray-200 flex gap-3">
+        <div className="px-6 py-3 bg-gray-50 border-b border-gray-200 flex flex-wrap items-center gap-2">
           <button
-            onClick={runAllSync}
-            className="flex items-center gap-2 px-4 py-2 bg-orange-600 text-white rounded-lg text-sm font-medium hover:bg-orange-700 transition-colors"
+            onClick={() => setPanelView('deck')}
+            className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors ${panelView === 'deck' ? 'bg-indigo-600 text-white' : 'bg-white text-gray-700 border border-gray-300 hover:bg-gray-100'}`}
           >
-            <Play className="w-4 h-4" />
-            Sync All
+            Sync Center
           </button>
           <button
+            onClick={() => setPanelView('kommo')}
+            className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors ${panelView === 'kommo' ? 'bg-orange-600 text-white' : 'bg-white text-gray-700 border border-gray-300 hover:bg-gray-100'}`}
+          >
+            Kommo técnico
+          </button>
+          <div className="h-6 w-px bg-gray-300 mx-1" />
+          <button
             onClick={runProcessEvents}
-            className="flex items-center gap-2 px-4 py-2 bg-gray-600 text-white rounded-lg text-sm font-medium hover:bg-gray-700 transition-colors"
+            className="flex items-center gap-2 px-3 py-2 bg-gray-600 text-white rounded-lg text-sm font-medium hover:bg-gray-700 transition-colors"
           >
             <RefreshCw className="w-4 h-4" />
             Process Events
           </button>
           <button
-            onClick={() => {
-              setIsJobModalOpen(true);
-              if (!selectedJob) {
-                const first = SYNC_JOBS[0];
-                if (first) {
-                  setSelectedJobId(first.id);
-                  resetJobParams(first.id);
-                }
-              }
-            }}
-            className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700 transition-colors"
+            onClick={() => openJobConfig(selectedJobId || SYNC_JOBS[0]?.id || '')}
+            className="flex items-center gap-2 px-3 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700 transition-colors"
           >
             <Play className="w-4 h-4" />
-            Sync avanzado
+            Configurar sync
           </button>
         </div>
 
@@ -356,54 +427,98 @@ export function KommoSyncPanel({ onClose }: KommoSyncPanelProps) {
         )}
 
         <div className="flex-1 overflow-y-auto p-6 space-y-6">
-          {groupedResources.map((section) => (
-            <section key={section.group} className="space-y-3">
+          {panelView === 'deck' ? (
+            <section className="space-y-4">
               <header>
-                <h3 className="text-sm font-semibold text-gray-900">{GROUP_SECTION_TITLES[section.group]}</h3>
-                <p className="text-xs text-gray-500">{section.label}</p>
+                <h3 className="text-sm font-semibold text-gray-900">Sync Center</h3>
+                <p className="text-xs text-gray-500">Elegí una función como streamdeck, ajustá parámetros y ejecutá.</p>
               </header>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                {section.resources.map((resourceConfig) => {
-                  const resource = resourceConfig.key;
-                  const state = resources[resource] || { name: resource, status: 'idle' as const };
-
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                {SYNC_JOBS.map((job) => {
+                  const state = jobRuns[job.id];
                   return (
                     <button
-                     key={resource}
-                       onClick={() => runSync(resource)}
-                       disabled={state.status === 'running'}
-                       className={`
-                         relative flex items-start gap-3 px-4 py-3 rounded-lg border text-left transition-all
-                        ${state.status === 'idle' ? 'border-gray-200 hover:border-orange-400 hover:bg-orange-50' : ''}
-                        ${state.status === 'running' ? 'border-orange-300 bg-orange-50' : ''}
-                        ${state.status === 'success' ? 'border-green-300 bg-green-50' : ''}
-                        ${state.status === 'error' ? 'border-red-300 bg-red-50' : ''}
-                        disabled:cursor-not-allowed
-                      `}
-                      title={resourceConfig.label}
+                      key={job.id}
+                      onClick={() => openJobConfig(job.id)}
+                      className="text-left rounded-xl border border-gray-200 bg-white hover:bg-indigo-50 hover:border-indigo-300 transition-all px-4 py-4"
                     >
-                      {state.status === 'running' && (
-                        <Loader2 className="w-4 h-4 text-orange-600 animate-spin absolute top-2 right-2" />
-                      )}
-                      {state.status === 'success' && <CheckCircle className="w-4 h-4 text-green-600 absolute top-2 right-2" />}
-                      {state.status === 'error' && <AlertCircle className="w-4 h-4 text-red-600 absolute top-2 right-2" />}
-
-                      <div className="min-w-0">
-                        <span className="font-medium text-sm text-gray-700 block">{resourceConfig.label}</span>
-                        <span className="text-[11px] text-gray-500 block">{resource}</span>
-                        {state.message && <span className="text-xs text-gray-500 block truncate w-full mt-1">{state.message}</span>}
+                      <div className="flex items-start justify-between gap-2">
+                        <div>
+                          <p className="text-sm font-semibold text-gray-900">{job.label}</p>
+                          <p className="text-xs text-gray-500 mt-1 line-clamp-2">{job.description}</p>
+                        </div>
+                        {state?.status === 'running' && <Loader2 className="w-4 h-4 text-orange-600 animate-spin shrink-0" />}
+                        {state?.status === 'success' && <CheckCircle className="w-4 h-4 text-green-600 shrink-0" />}
+                        {state?.status === 'error' && <AlertCircle className="w-4 h-4 text-red-600 shrink-0" />}
                       </div>
+                      <p className="mt-3 text-[11px] text-gray-500">{job.path}</p>
                     </button>
                   );
                 })}
               </div>
             </section>
-          ))}
+          ) : (
+            <>
+              <div className="flex items-center justify-between gap-3">
+                <p className="text-xs text-gray-500">Vista técnica Kommo (recursos individuales).</p>
+                <button
+                  onClick={runAllSync}
+                  className="flex items-center gap-2 px-3 py-2 bg-orange-600 text-white rounded-lg text-sm font-medium hover:bg-orange-700 transition-colors"
+                >
+                  <Play className="w-4 h-4" />
+                  Sync All Kommo
+                </button>
+              </div>
+              {groupedResources.map((section) => (
+                <section key={section.group} className="space-y-3">
+                  <header>
+                    <h3 className="text-sm font-semibold text-gray-900">{GROUP_SECTION_TITLES[section.group]}</h3>
+                    <p className="text-xs text-gray-500">{section.label}</p>
+                  </header>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    {section.resources.map((resourceConfig) => {
+                      const resource = resourceConfig.key;
+                      const state = resources[resource] || { name: resource, status: 'idle' as const };
+
+                      return (
+                        <button
+                          key={resource}
+                          onClick={() => runSync(resource)}
+                          disabled={state.status === 'running'}
+                          className={`
+                            relative flex items-start gap-3 px-4 py-3 rounded-lg border text-left transition-all
+                            ${state.status === 'idle' ? 'border-gray-200 hover:border-orange-400 hover:bg-orange-50' : ''}
+                            ${state.status === 'running' ? 'border-orange-300 bg-orange-50' : ''}
+                            ${state.status === 'success' ? 'border-green-300 bg-green-50' : ''}
+                            ${state.status === 'error' ? 'border-red-300 bg-red-50' : ''}
+                            disabled:cursor-not-allowed
+                          `}
+                          title={resourceConfig.label}
+                        >
+                          {state.status === 'running' && (
+                            <Loader2 className="w-4 h-4 text-orange-600 animate-spin absolute top-2 right-2" />
+                          )}
+                          {state.status === 'success' && <CheckCircle className="w-4 h-4 text-green-600 absolute top-2 right-2" />}
+                          {state.status === 'error' && <AlertCircle className="w-4 h-4 text-red-600 absolute top-2 right-2" />}
+
+                          <div className="min-w-0">
+                            <span className="font-medium text-sm text-gray-700 block">{resourceConfig.label}</span>
+                            <span className="text-[11px] text-gray-500 block">{resource}</span>
+                            {state.message && <span className="text-xs text-gray-500 block truncate w-full mt-1">{state.message}</span>}
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </section>
+              ))}
+            </>
+          )}
         </div>
 
         <div className="px-6 py-3 border-t border-gray-200 bg-gray-50 text-xs text-gray-500">
-          Panel de administración • Endpoints: /api/kommo/sync
+          Panel de administración • Sync Center (Kommo, Meta, YouTube)
         </div>
       </div>
 
@@ -441,6 +556,31 @@ export function KommoSyncPanel({ onClose }: KommoSyncPanelProps) {
               <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-600">
                 {selectedJob.description}
               </div>
+
+              {selectedJobPresets.length > 0 && (
+                <div className="space-y-1">
+                  <p className="text-[11px] font-semibold text-gray-600 uppercase tracking-wide">Presets</p>
+                  <div className="flex flex-wrap gap-2">
+                    {selectedJobPresets.map((preset) => (
+                      <button
+                        key={preset.id}
+                        type="button"
+                        onClick={() => applyPreset(selectedJob, preset)}
+                        className="px-2.5 py-1.5 text-xs rounded-md border border-indigo-200 text-indigo-700 bg-indigo-50 hover:bg-indigo-100"
+                      >
+                        {preset.label}
+                      </button>
+                    ))}
+                    <button
+                      type="button"
+                      onClick={() => resetJobParams(selectedJob.id)}
+                      className="px-2.5 py-1.5 text-xs rounded-md border border-gray-300 text-gray-700 bg-white hover:bg-gray-100"
+                    >
+                      Default
+                    </button>
+                  </div>
+                </div>
+              )}
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                 {selectedJob.params.map((param) => (
