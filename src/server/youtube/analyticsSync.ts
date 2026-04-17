@@ -8,6 +8,7 @@ import {
 
 const OAUTH_TOKEN_ENDPOINT = 'https://oauth2.googleapis.com/token';
 const YOUTUBE_ANALYTICS_REPORTS_ENDPOINT = 'https://youtubeanalytics.googleapis.com/v2/reports';
+const YOUTUBE_DATA_CHANNELS_ENDPOINT = 'https://www.googleapis.com/youtube/v3/channels';
 
 const SYNC_SECRET_HEADER = 'x-youtube-sync-secret';
 const SYNC_SECRET_ENV = 'YOUTUBE_SYNC_SECRET';
@@ -122,6 +123,14 @@ function parsePositiveInt(raw: string | undefined, fallback: number, min = 1, ma
   return Math.min(max, Math.max(min, value));
 }
 
+function parseBoolean(raw: string | undefined, fallback: boolean) {
+  if (!raw) return fallback;
+  const value = raw.trim().toLowerCase();
+  if (['1', 'true', 'yes', 'y', 'si', 'sí'].includes(value)) return true;
+  if (['0', 'false', 'no', 'n'].includes(value)) return false;
+  return fallback;
+}
+
 function formatDateUTC(input: Date) {
   const year = input.getUTCFullYear();
   const month = String(input.getUTCMonth() + 1).padStart(2, '0');
@@ -231,6 +240,57 @@ async function fetchYoutubeAccessToken() {
   return accessToken;
 }
 
+async function fetchOauthChannelId(accessToken: string) {
+  const params = new URLSearchParams({
+    part: 'id',
+    mine: 'true',
+    maxResults: '1',
+  });
+
+  const response = await fetch(`${YOUTUBE_DATA_CHANNELS_ENDPOINT}?${params.toString()}`, {
+    method: 'GET',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      Accept: 'application/json',
+    },
+  });
+
+  const raw = await response.text();
+  let payload: unknown = {};
+  if (raw) {
+    try {
+      payload = JSON.parse(raw) as unknown;
+    } catch {
+      payload = { raw };
+    }
+  }
+
+  if (!response.ok) {
+    const message =
+      typeof payload === 'object' && payload && 'error' in payload
+        ? JSON.stringify((payload as JsonRecord).error)
+        : raw || 'No se pudo resolver el canal OAuth (mine=true).';
+    throw new Error(`YouTube Data API error (${response.status}): ${message}`);
+  }
+
+  const items =
+    typeof payload === 'object' && payload && 'items' in payload && Array.isArray((payload as JsonRecord).items)
+      ? ((payload as JsonRecord).items as unknown[])
+      : [];
+  const firstItem = items[0];
+
+  const channelId =
+    firstItem && typeof firstItem === 'object' && 'id' in firstItem
+      ? String((firstItem as JsonRecord).id ?? '').trim()
+      : '';
+
+  if (!channelId) {
+    throw new Error('No se encontró canal asociado al token OAuth (mine=true).');
+  }
+
+  return channelId;
+}
+
 async function fetchAnalyticsReport(
   accessToken: string,
   channelId: string,
@@ -293,7 +353,7 @@ function mapAnalyticsRow(headers: AnalyticsColumnHeader[], row: unknown[]) {
 
 async function queryAnalyticsRows(
   accessToken: string,
-  channelId: string,
+  channelTarget: string,
   startDate: string,
   endDate: string,
   dimensions: string,
@@ -313,7 +373,7 @@ async function queryAnalyticsRows(
 
     const report = await fetchAnalyticsReport(
       accessToken,
-      channelId,
+      channelTarget,
       startDate,
       endDate,
       dimensions,
@@ -384,15 +444,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const body = parseBodyObject(req);
 
-    const channelId = (
+    const requestedChannelId = (
       getRequestParam(req, body, 'channel_id')
       ?? process.env[CHANNEL_ID_ENV]
       ?? DEFAULT_CHANNEL_ID
     ).trim();
 
-    if (!channelId) {
+    if (!requestedChannelId) {
       return res.status(400).json({ error: 'Falta channel_id.' });
     }
+
+    const useMine = parseBoolean(getRequestParam(req, body, 'use_mine'), true);
 
     const startDateInput = parseIsoDate(getRequestParam(req, body, 'start_date'));
     const endDateInput = parseIsoDate(getRequestParam(req, body, 'end_date'));
@@ -417,6 +479,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const deadlineMs = startedAt + (maxRuntimeMs - RUNTIME_BUFFER_MS);
 
     const accessToken = await fetchYoutubeAccessToken();
+    const oauthChannelId = await fetchOauthChannelId(accessToken);
+    const analyticsChannelTarget = useMine ? 'MINE' : requestedChannelId;
+
+    if (!useMine && requestedChannelId !== oauthChannelId) {
+      return res.status(403).json({
+        error: 'El channel_id no coincide con el canal autorizado por OAuth.',
+        requested_channel_id: requestedChannelId,
+        oauth_channel_id: oauthChannelId,
+        suggestion: 'Use use_mine=1 o regenera token OAuth con el canal objetivo.',
+      });
+    }
+
+    const channelBusinessId = useMine ? oauthChannelId : requestedChannelId;
 
     let runtimeExceeded = false;
 
@@ -435,7 +510,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (!isPastDeadline(deadlineMs)) {
       const demographicsResult = await queryAnalyticsRows(
         accessToken,
-        channelId,
+        analyticsChannelTarget,
         computedStartDate,
         computedEndDate,
         'day,ageGroup,gender',
@@ -456,7 +531,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           }
 
           return {
-            channel_business_id: channelId,
+            channel_business_id: channelBusinessId,
             stat_date: statDate,
             age_group: ageGroup,
             gender,
@@ -495,9 +570,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         break;
       }
 
-      const result = await queryAnalyticsRows(
-        accessToken,
-        channelId,
+        const result = await queryAnalyticsRows(
+          accessToken,
+          analyticsChannelTarget,
         computedStartDate,
         computedEndDate,
         `day,${config.apiDimension}`,
@@ -518,7 +593,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           }
 
           return {
-            channel_business_id: channelId,
+            channel_business_id: channelBusinessId,
             stat_date: statDate,
             dimension_type: config.type,
             dimension_value: dimensionValue,
@@ -549,7 +624,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (!runtimeExceeded && !isPastDeadline(deadlineMs)) {
       const videosResult = await queryAnalyticsRows(
         accessToken,
-        channelId,
+        analyticsChannelTarget,
         computedStartDate,
         computedEndDate,
         'day,video',
@@ -570,7 +645,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
           return {
             video_business_id: videoBusinessId,
-            channel_business_id: channelId,
+            channel_business_id: channelBusinessId,
             stat_date: statDate,
             views: toInteger(rawRow.views, 0),
             likes: toInteger(rawRow.likes, 0),
@@ -597,7 +672,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     return res.status(200).json({
       success: true,
-      channel_id: channelId,
+      channel_id: channelBusinessId,
+      requested_channel_id: requestedChannelId,
+      analytics_channel_target: analyticsChannelTarget,
       start_date: computedStartDate,
       end_date: computedEndDate,
       max_runtime_ms: maxRuntimeMs,

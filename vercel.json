@@ -116,7 +116,7 @@
       "schedule": "30 6 * * *"
     },
     {
-      "path": "/api/youtube?mode=analytics&channel_id=UCS9a3juMIrRfeXrRjd9DDlw&max_runtime_ms=45000",
+      "path": "/api/youtube?mode=analytics&use_mine=1&max_runtime_ms=45000",
       "schedule": "40 6 * * *"
     }
   ]
