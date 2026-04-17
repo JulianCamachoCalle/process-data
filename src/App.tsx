@@ -13,6 +13,7 @@ import { MetaAdsDashboard } from './features/meta/ads/MetaAdsDashboard';
 import { MetaAdsDataPage } from './features/meta/ads/MetaAdsDataPage';
 import { MetaPagesDashboard } from './features/meta/pages/MetaPagesHub';
 import { MetaAdsOrganicDashboard } from './features/meta/compare/MetaAdsOrganicDashboard';
+import { YouTubeDashboard } from './features/youtube/YouTubeDashboard';
 import { LandingPage } from './features/landing/LandingPage';
 import { NotFoundPage } from './features/error/NotFoundPage';
 import { GoogleSheetsExportPage } from './features/exports/GoogleSheetsExportTester';
@@ -53,6 +54,9 @@ const USER_ALLOWED_PATHS = new Set([
   '/dashboard/meta/compare/dashboard',
   '/dashboard/meta/pages',
   '/dashboard/meta/pages/dashboard',
+  '/youtube/dashboard',
+  '/dashboard/youtube',
+  '/dashboard/youtube/dashboard',
   '/dashboard/kommo/leads-insights',
 ]);
 
@@ -301,6 +305,10 @@ function Layout() {
               <Route path="/dashboard/meta/pages" element={<Navigate to="/meta/pages/dashboard" replace />} />
               <Route path="/meta/pages/dashboard" element={<MetaPagesDashboard />} />
               <Route path="/dashboard/meta/pages/dashboard" element={<Navigate to="/meta/pages/dashboard" replace />} />
+              <Route path="/youtube" element={<Navigate to="/youtube/dashboard" replace />} />
+              <Route path="/dashboard/youtube" element={<Navigate to="/youtube/dashboard" replace />} />
+              <Route path="/youtube/dashboard" element={<YouTubeDashboard />} />
+              <Route path="/dashboard/youtube/dashboard" element={<Navigate to="/youtube/dashboard" replace />} />
               <Route path="/exports/google-sheets" element={adminOnly(<GoogleSheetsExportPage />)} />
               <Route path="/dashboard/exports" element={adminOnly(<Navigate to="/exports/google-sheets" replace />)} />
               <Route path="/dashboard/exports/google-sheets" element={adminOnly(<Navigate to="/exports/google-sheets" replace />)} />

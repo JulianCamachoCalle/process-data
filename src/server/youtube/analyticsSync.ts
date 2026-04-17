@@ -487,16 +487,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const oauthChannelId = await fetchOauthChannelId(accessToken);
     const analyticsChannelTarget = useMine ? 'MINE' : requestedChannelId;
 
-    if (!useMine && requestedChannelId !== oauthChannelId) {
-      return res.status(403).json({
-        error: 'El channel_id no coincide con el canal autorizado por OAuth.',
-        requested_channel_id: requestedChannelId,
-        oauth_channel_id: oauthChannelId,
-        suggestion: 'Use use_mine=1 o regenera token OAuth con el canal objetivo.',
-      });
-    }
-
     const channelBusinessId = useMine ? oauthChannelId : requestedChannelId;
+    const oauthChannelMismatch = !useMine && requestedChannelId !== oauthChannelId;
 
     let runtimeExceeded = false;
 
@@ -749,6 +741,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       success: true,
       channel_id: channelBusinessId,
       requested_channel_id: requestedChannelId,
+      oauth_channel_id: oauthChannelId,
+      oauth_channel_mismatch: oauthChannelMismatch,
       analytics_channel_target: analyticsChannelTarget,
       start_date: computedStartDate,
       end_date: computedEndDate,
