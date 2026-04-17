@@ -8,7 +8,7 @@ import {
   isVercelCronAuthorized,
   normalizeKommoBaseUrl,
   verifyAdminSession,
-} from './_shared.js';
+} from '../../src/server/kommo/shared.js';
 import { hydrateLeadGanadoDistritoByBusinessId, recalculateLeadGanadoCountersByBusinessId } from './leads-ganados-auto.js';
 
 const SYNC_SECRET_HEADER = 'x-kommo-sync-secret';
