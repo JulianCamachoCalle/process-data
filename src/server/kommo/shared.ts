@@ -7,7 +7,7 @@ import {
   verifyAdminSession as verifyAdminSessionBase,
   type AppRole,
   type AuthResult,
-} from '../_auth.js';
+} from '../auth.js';
 
 const require = createRequire(import.meta.url);
 const jwt = require('jsonwebtoken') as typeof import('jsonwebtoken');

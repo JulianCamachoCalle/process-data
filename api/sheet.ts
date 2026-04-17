@@ -1,7 +1,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { z, ZodError } from 'zod';
-import { getSupabaseAdminClient } from './kommo/_shared.js';
-import { verifyAdminSession } from './_auth.js';
+import { getSupabaseAdminClient } from '../src/server/kommo/shared.js';
+import { verifyAdminSession } from '../src/server/auth.js';
 import { KOMMO_RESOURCE_CONFIG, type KommoResourceKey } from '../src/features/kommo/config/kommoResourceConfig.js';
 import {
   createStableRowId,

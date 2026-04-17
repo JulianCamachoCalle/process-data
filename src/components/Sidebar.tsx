@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { LayoutDashboard, Database, Layers3, Workflow, Settings, PanelLeftClose, X, Megaphone, BarChart3, BookMarked, Send, BookImage, SplitSquareHorizontal, UserCog, ChartColumnIncreasing, ChevronDown } from 'lucide-react';
+import { LayoutDashboard, Database, Layers3, Workflow, Settings, PanelLeftClose, X, Megaphone, BarChart3, BookMarked, Send, BookImage, SplitSquareHorizontal, UserCog, ChartColumnIncreasing, ChevronDown, PlaySquare } from 'lucide-react';
 import { getSheetLabel, groupSheetsByDomain } from '../lib/sheetLabels';
 
 interface SidebarPrefetchHandlers {
@@ -38,6 +38,7 @@ export function Sidebar({
   const [isOperativasOpen, setIsOperativasOpen] = useState(false);
   const [isMetaAdsOpen, setIsMetaAdsOpen] = useState(false);
   const [isMetaPagesOpen, setIsMetaPagesOpen] = useState(false);
+  const [isYoutubeOpen, setIsYoutubeOpen] = useState(false);
   const [isKommoOpen, setIsKommoOpen] = useState(false);
   const [isExportOpen, setIsExportOpen] = useState(false);
   const [isAccessOpen, setIsAccessOpen] = useState(false);
@@ -60,6 +61,11 @@ export function Sidebar({
     location.pathname === '/meta/pages' ||
     location.pathname === '/dashboard/meta/pages/dashboard' ||
     location.pathname === '/dashboard/meta/pages';
+  const isYoutubeActive =
+    location.pathname === '/youtube/dashboard' ||
+    location.pathname === '/youtube' ||
+    location.pathname === '/dashboard/youtube/dashboard' ||
+    location.pathname === '/dashboard/youtube';
   const isGoogleSheetsExportActive = location.pathname === '/exports/google-sheets';
   const isAdminUsersActive = location.pathname === '/admin/users';
   const isEstadisticasVendedorActive = location.pathname === '/operativas/estadisticas-vendedor' || location.pathname === '/dashboard/operativas/estadisticas-vendedor';
@@ -300,6 +306,28 @@ export function Sidebar({
             >
               <BookImage size={16} className={isMetaPagesActive ? 'text-red-500' : 'text-gray-500 group-hover:text-red-400'} />
               <span className={`text-[12px] text-gray-400 font-semibold uppercase tracking-[0.05em] ${collapsed ? 'md:hidden' : ''}`}>Pages Dashboard</span>
+            </Link>
+          ),
+        })}
+
+        {renderDropdownSection({
+          title: 'YouTube',
+          icon: <PlaySquare size={12} className="text-red-500" />,
+          isOpen: isYoutubeOpen,
+          onToggle: () => setIsYoutubeOpen((prev) => !prev),
+          withTopPadding: true,
+          children: (
+            <Link
+              to="/youtube/dashboard"
+              onClick={() => onNavigate?.()}
+              title={collapsed ? 'YouTube Dashboard' : undefined}
+              className={`group flex items-center w-full text-left px-4 py-2.5 rounded-xl border transition-all duration-200 ${isYoutubeActive
+                  ? 'bg-white/10 text-white font-semibold border-red-500/70 shadow-[0_8px_24px_-18px_rgba(255,255,255,0.8)]'
+                  : 'text-gray-400 border-transparent hover:bg-white/5 hover:text-gray-100 hover:border-white/10'
+                } ${collapsed ? 'md:justify-center md:px-2' : 'gap-3'}`}
+            >
+              <PlaySquare size={16} className={isYoutubeActive ? 'text-red-500' : 'text-gray-500 group-hover:text-red-400'} />
+              <span className={`text-[12px] text-gray-400 font-semibold uppercase tracking-[0.05em] ${collapsed ? 'md:hidden' : ''}`}>YouTube Dashboard</span>
             </Link>
           ),
         })}

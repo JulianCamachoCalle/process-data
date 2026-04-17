@@ -44,10 +44,28 @@ const navItems = [
 
 const stats = [
   { value: 'Lima', label: 'Y Callao' },
-  { value: '+1000', label: 'Clientes activos' },
+  { value: '+500', label: 'Clientes activos' },
   { value: '6', label: 'Certificaciones ISO' },
   { value: '24h', label: 'Tiempo de entrega' },
 ];
+
+type AnimatedStat = {
+  prefix: string;
+  target: number;
+  suffix: string;
+};
+
+function parseAnimatedStat(value: string): AnimatedStat | null {
+  const trimmed = value.trim();
+  const match = trimmed.match(/^([^\d]*)(\d+)([^\d]*)$/);
+  if (!match) return null;
+
+  const [, prefix, digits, suffix] = match;
+  const target = Number.parseInt(digits, 10);
+  if (!Number.isFinite(target)) return null;
+
+  return { prefix, target, suffix };
+}
 
 const services = [
   {
@@ -534,13 +552,39 @@ export function LandingPage() {
     return window.matchMedia('(min-width: 1024px)').matches;
   });
   const [showScrollTop, setShowScrollTop] = useState(false);
+  const [statsInView, setStatsInView] = useState(false);
+  const [statsProgress, setStatsProgress] = useState(0);
+  const [isLowPerfMode, setIsLowPerfMode] = useState(() => {
+    if (typeof window === 'undefined') return false;
+    return window.matchMedia('(prefers-reduced-motion: reduce), (max-width: 1024px)').matches;
+  });
   const [coverageGeoJson, setCoverageGeoJson] = useState<AnyProps | null>(null);
   const landingRootRef = useRef<HTMLDivElement>(null);
   const heroBgRef = useRef<HTMLDivElement>(null);
+  const cursorGlowRef = useRef<HTMLDivElement>(null);
+  const cursorRingRef = useRef<HTMLDivElement>(null);
+  const statsBarRef = useRef<HTMLDListElement>(null);
   const mapIconCache = useRef(new Map<string, L.Icon>());
   const cursorInteractiveRef = useRef(false);
+  const showScrollTopRef = useRef(false);
 
   useScrollReveal(isNight);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const mediaQuery = window.matchMedia('(prefers-reduced-motion: reduce), (max-width: 1024px)');
+    const sync = () => setIsLowPerfMode(mediaQuery.matches);
+    sync();
+
+    if (typeof mediaQuery.addEventListener === 'function') {
+      mediaQuery.addEventListener('change', sync);
+      return () => mediaQuery.removeEventListener('change', sync);
+    }
+
+    mediaQuery.addListener(sync);
+    return () => mediaQuery.removeListener(sync);
+  }, [isLowPerfMode]);
 
   const tariffLookup = useRef(
     new Map(
@@ -665,7 +709,7 @@ export function LandingPage() {
 
     const mediaQuery = window.matchMedia('(hover: hover) and (pointer: fine)');
     const sync = () => {
-      setCursorEnabled(mediaQuery.matches);
+      setCursorEnabled(mediaQuery.matches && !isLowPerfMode);
     };
 
     sync();
@@ -677,56 +721,145 @@ export function LandingPage() {
 
     mediaQuery.addListener(sync);
     return () => mediaQuery.removeListener(sync);
-  }, []);
+  }, [isLowPerfMode]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
 
     const root = landingRootRef.current;
     if (!root) return;
+    const glowEl = cursorGlowRef.current;
+    const ringEl = cursorRingRef.current;
+
+    const applyCursorTransform = (x: number, y: number) => {
+      if (glowEl) {
+        glowEl.style.transform = `translate3d(${x - 160}px, ${y - 160}px, 0)`;
+      }
+      if (ringEl) {
+        ringEl.style.transform = `translate3d(${x - 10}px, ${y - 10}px, 0)`;
+      }
+    };
 
     if (!cursorEnabled) {
       cursorInteractiveRef.current = false;
-      root.style.setProperty('--landing-cursor-x', '-9999px');
-      root.style.setProperty('--landing-cursor-y', '-9999px');
+      applyCursorTransform(-9999, -9999);
       root.dataset.cursorHover = '0';
       return;
     }
 
     cursorInteractiveRef.current = false;
     root.dataset.cursorHover = '0';
+    let frame: number | null = null;
+    let nextX = -9999;
+    let nextY = -9999;
+    let nextHover: '0' | '1' = '0';
+
+    const flushCursorFrame = () => {
+      frame = null;
+      applyCursorTransform(nextX, nextY);
+      if (root.dataset.cursorHover !== nextHover) {
+        root.dataset.cursorHover = nextHover;
+      }
+    };
+
+    const scheduleCursorFrame = () => {
+      if (frame !== null) return;
+      frame = window.requestAnimationFrame(flushCursorFrame);
+    };
+
+    const handlePointerMove = (event: PointerEvent) => {
+      nextX = event.clientX;
+      nextY = event.clientY;
+
+      scheduleCursorFrame();
+    };
+
     const interactiveSelector = 'a,button,[role="button"],input,select,textarea,summary,.leaflet-interactive,.leaflet-control-zoom a,[data-cursor="circle"]';
-
-    const handleMouseMove = (event: MouseEvent) => {
-      root.style.setProperty('--landing-cursor-x', `${event.clientX}px`);
-      root.style.setProperty('--landing-cursor-y', `${event.clientY}px`);
-
+    const handlePointerOver = (event: Event) => {
       const target = event.target instanceof Element ? event.target : null;
       const interactive = Boolean(target?.closest(interactiveSelector));
       if (interactive !== cursorInteractiveRef.current) {
         cursorInteractiveRef.current = interactive;
-        root.dataset.cursorHover = interactive ? '1' : '0';
+        nextHover = interactive ? '1' : '0';
+        scheduleCursorFrame();
       }
     };
 
-    const handleMouseLeave = () => {
-      root.style.setProperty('--landing-cursor-x', '-9999px');
-      root.style.setProperty('--landing-cursor-y', '-9999px');
+    const handlePointerLeave = () => {
+      nextX = -9999;
+      nextY = -9999;
       cursorInteractiveRef.current = false;
-      root.dataset.cursorHover = '0';
+      nextHover = '0';
+      scheduleCursorFrame();
     };
 
-    window.addEventListener('mousemove', handleMouseMove, { passive: true });
-    window.addEventListener('mouseleave', handleMouseLeave);
+    window.addEventListener('pointermove', handlePointerMove, { passive: true });
+    window.addEventListener('pointerleave', handlePointerLeave);
+    root.addEventListener('pointerover', handlePointerOver, true);
 
     return () => {
-      window.removeEventListener('mousemove', handleMouseMove);
-      window.removeEventListener('mouseleave', handleMouseLeave);
-      root.style.setProperty('--landing-cursor-x', '-9999px');
-      root.style.setProperty('--landing-cursor-y', '-9999px');
+      window.removeEventListener('pointermove', handlePointerMove);
+      window.removeEventListener('pointerleave', handlePointerLeave);
+      root.removeEventListener('pointerover', handlePointerOver, true);
+      if (frame !== null) {
+        window.cancelAnimationFrame(frame);
+      }
+      applyCursorTransform(-9999, -9999);
       root.dataset.cursorHover = '0';
     };
   }, [cursorEnabled]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (statsInView) return;
+
+    const target = statsBarRef.current;
+    if (!target) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          if (entry.isIntersecting) {
+            setStatsInView(true);
+            observer.disconnect();
+            break;
+          }
+        }
+      },
+      { threshold: 0.35 },
+    );
+
+    observer.observe(target);
+
+    return () => {
+      observer.disconnect();
+    };
+  }, [statsInView]);
+
+  useEffect(() => {
+    if (!statsInView) return;
+
+    const DURATION_MS = 3500;
+    const startedAt = performance.now();
+    let frame = 0;
+
+    const tick = (now: number) => {
+      const elapsed = now - startedAt;
+      const raw = Math.min(1, elapsed / DURATION_MS);
+      const eased = 1 - (1 - raw) ** 3;
+      setStatsProgress(eased);
+
+      if (raw < 1) {
+        frame = window.requestAnimationFrame(tick);
+      }
+    };
+
+    frame = window.requestAnimationFrame(tick);
+
+    return () => {
+      window.cancelAnimationFrame(frame);
+    };
+  }, [statsInView]);
 
   useEffect(() => {
     if (typeof document === 'undefined') return;
@@ -743,18 +876,38 @@ export function LandingPage() {
   }, [isNight]);
 
   useEffect(() => {
-    const handleScroll = () => {
-      if (heroBgRef.current) {
-        heroBgRef.current.style.transform = `translateY(${window.scrollY * 0.32}px)`;
+    let frame: number | null = null;
+
+    const updateScrollEffects = () => {
+      frame = null;
+      const scrollY = window.scrollY;
+
+      if (!isLowPerfMode && heroBgRef.current) {
+        heroBgRef.current.style.transform = `translate3d(0, ${scrollY * 0.32}px, 0)`;
       }
 
-      setShowScrollTop(window.scrollY > 220);
+      const nextShowScrollTop = scrollY > 220;
+      if (nextShowScrollTop !== showScrollTopRef.current) {
+        showScrollTopRef.current = nextShowScrollTop;
+        setShowScrollTop(nextShowScrollTop);
+      }
     };
 
-    handleScroll();
+    const handleScroll = () => {
+      if (frame !== null) return;
+      frame = window.requestAnimationFrame(updateScrollEffects);
+    };
+
+    updateScrollEffects();
     window.addEventListener('scroll', handleScroll, { passive: true });
-    return () => window.removeEventListener('scroll', handleScroll);
-  }, []);
+
+    return () => {
+      window.removeEventListener('scroll', handleScroll);
+      if (frame !== null) {
+        window.cancelAnimationFrame(frame);
+      }
+    };
+  }, [isLowPerfMode]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -774,7 +927,7 @@ export function LandingPage() {
 
     mediaQuery.addListener(sync);
     return () => mediaQuery.removeListener(sync);
-  }, []);
+  }, [isLowPerfMode]);
 
   const testimonialSlides = useMemo(() => {
     const chunkSize = isDesktopTestimonials ? 3 : 1;
@@ -788,6 +941,7 @@ export function LandingPage() {
   }, [isDesktopTestimonials]);
 
   useEffect(() => {
+    if (isLowPerfMode) return;
     const totalSlides = testimonialSlides.length;
     if (!totalSlides) return;
 
@@ -796,7 +950,7 @@ export function LandingPage() {
     }, 6000);
 
     return () => window.clearInterval(timer);
-  }, [testimonialSlides.length]);
+  }, [isLowPerfMode, testimonialSlides.length]);
 
   const handleToggleTheme = () => {
     setIsThemeAnimating(true);
@@ -839,15 +993,13 @@ export function LandingPage() {
       className={cx(
         'relative min-h-screen overflow-x-hidden selection:bg-red-600 selection:text-white landing-root',
         cursorEnabled && 'landing-cursor-enabled',
+        isLowPerfMode && 'landing-lowperf',
         n ? 'text-white' : 'text-gray-900',
       )}
       style={{ backgroundColor: bg }}
     >
       <div
-        aria-hidden="true"
-        className={cx('landing-cursor-glow', cursorEnabled && 'is-active')}
-      />
-      <div
+        ref={cursorRingRef}
         aria-hidden="true"
         className={cx('landing-cursor-ring', cursorEnabled && 'is-active')}
       />
@@ -974,24 +1126,32 @@ export function LandingPage() {
         {/* ── STATS BAR ───────────────────────────────────────── */}
         <div className={cx('border-y', border)}>
           <dl
+            ref={statsBarRef}
             className={cx(
               'mx-auto max-w-7xl grid grid-cols-2 md:grid-cols-4 divide-x',
               divideColor,
             )}
           >
-            {stats.map(({ value, label }, i) => (
-              <div
-                key={label}
-                className={cx('reveal px-6 py-8 text-center', i > 0 && `reveal-delay-${i}`)}
-              >
-                <dt className={cx('text-2xl font-black md:text-3xl', n ? 'text-white' : 'text-black')}>
-                  {value}
-                </dt>
-                <dd className={cx('mt-1.5 text-[10px] uppercase tracking-[0.22em]', muted)}>
-                  {label}
-                </dd>
-              </div>
-            ))}
+            {stats.map(({ value, label }, i) => {
+              const animated = parseAnimatedStat(value);
+              const visibleValue = !animated
+                ? value
+                : `${animated.prefix}${Math.round(animated.target * statsProgress)}${animated.suffix}`;
+
+              return (
+                <div
+                  key={label}
+                  className={cx('reveal px-6 py-8 text-center', i > 0 && `reveal-delay-${i}`)}
+                >
+                  <dt className={cx('text-2xl font-black md:text-3xl', n ? 'text-white' : 'text-black')}>
+                    {visibleValue}
+                  </dt>
+                  <dd className={cx('mt-1.5 text-[10px] uppercase tracking-[0.22em]', muted)}>
+                    {label}
+                  </dd>
+                </div>
+              );
+            })}
           </dl>
         </div>
 
@@ -1006,7 +1166,7 @@ export function LandingPage() {
             {/* Mission — large card spanning 2 cols */}
             <article
               className={cx(
-                'reveal rounded-[1.8rem] border p-7 lg:col-span-2 md:p-9 glass-card', n ? 'glass-card-night' : 'glass-card-day',
+                'reveal rounded-[1.8rem] border p-7 lg:col-span-2 md:p-9 glass-card nosotros-card-hover', n ? 'glass-card-night' : 'glass-card-day',
                 cardBase,
               )}
             >
@@ -1031,7 +1191,7 @@ export function LandingPage() {
 
             <div className="flex flex-col gap-3">
               {/* Vision */}
-              <article className={cx('reveal reveal-delay-1 rounded-[1.8rem] border p-6 glass-card max-h-[11rem]', n ? 'glass-card-night' : 'glass-card-day', cardBase)}>
+              <article className={cx('reveal reveal-delay-1 rounded-[1.8rem] border p-6 glass-card nosotros-card-hover max-h-[11rem]', n ? 'glass-card-night' : 'glass-card-day', cardBase)}>
                 <p className={cx('text-[10px] uppercase tracking-[0.26em] mb-3', muted)}>Visión</p>
                 <p className={cx('text-sm leading-7', n ? 'text-white/75' : 'text-gray-600')}>
                   Ser el referente de experiencias logísticas seguras y confiables del Perú.
@@ -1040,7 +1200,7 @@ export function LandingPage() {
 
               {/* Values */}
               <article
-                className={cx('reveal reveal-delay-2 rounded-[1.8rem] border p-6 flex-1 glass-card max-h-[11rem]', n ? 'glass-card-night' : 'glass-card-day', cardBase)}
+                className={cx('reveal reveal-delay-2 rounded-[1.8rem] border p-6 flex-1 glass-card nosotros-card-hover max-h-[11rem]', n ? 'glass-card-night' : 'glass-card-day', cardBase)}
               >
                 <p className={cx('text-[10px] uppercase tracking-[0.26em] mb-4', muted)}>Valores</p>
                 <ul className="grid grid-cols-2 gap-y-2.5 gap-x-2">
@@ -1099,7 +1259,7 @@ export function LandingPage() {
                 <article
                   key={id}
                   className={cx(
-                    'reveal rounded-[1.8rem] border p-6 transition-colors glass-card max-h-[15rem]', n ? 'glass-card-night' : 'glass-card-day',
+                    'reveal rounded-[1.8rem] border p-6 transition-colors glass-card service-card-lift service-card-hoverfx max-h-[15rem]', n ? 'glass-card-night' : 'glass-card-day',
                     i > 0 && `reveal-delay-${i % 3}`,
                     featured
                       ? cx(
@@ -1113,7 +1273,7 @@ export function LandingPage() {
                 >
                   <div
                     className={cx(
-                      'inline-flex h-10 w-10 items-center justify-center rounded-2xl mb-5',
+                      'inline-flex h-10 w-10 items-center justify-center rounded-2xl mb-5 service-card-icon',
                       n ? 'bg-white/[0.07]' : 'bg-black/[0.05]',
                     )}
                   >
@@ -1153,7 +1313,7 @@ export function LandingPage() {
             </p>
           </div>
 
-          <article className={cx('reveal relative mt-8 overflow-hidden glass-card p-1.5 min-h-[570px]', n ? 'glass-card-night' : 'glass-card-day', cardBase)}>
+          <article className={cx('reveal relative mt-8 overflow-hidden glass-card p-2 min-h-[570px] rounded-[2rem]', n ? 'glass-card-night' : 'glass-card-day', cardBase)}>
             <a
               href={whatsappSalesUrl}
               target="_blank"
@@ -1176,7 +1336,7 @@ export function LandingPage() {
                   url={
                     n
                       ? 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png'
-                      : 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png'
+                      : 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png'
                   }
                 />
 
@@ -1186,12 +1346,12 @@ export function LandingPage() {
                     style={(feature: { properties?: Record<string, unknown>; geometry?: { type?: string } }) => {
                       const geometryType = String(feature.geometry?.type ?? '');
                       const strokeColor = n ? '#ffffff' : '#111111';
-                      const fillColor = '#0f9d58';
+                      const fillColor = n ? '#dc2626' : '#b91c1c';
 
                       if (geometryType === 'Polygon') {
                         return {
                           fillColor,
-                          fillOpacity: n ? 0.42 : 0.34,
+                          fillOpacity: n ? 0.36 : 0.44,
                           color: strokeColor,
                           opacity: 0.95,
                           weight: 2,
@@ -1241,18 +1401,18 @@ export function LandingPage() {
                           e.target.setStyle({
                             weight: 4,
                             color: n ? '#ffffff' : '#111111',
-                            fillColor: '#0b7a45',
-                            fillOpacity: n ? 0.64 : 0.56,
+                            fillColor: n ? '#ef4444' : '#7f1d1d',
+                            fillOpacity: n ? 0.58 : 0.62,
                           });
                         },
                         mouseout: (e) => {
                           const strokeColor = n ? '#ffffff' : '#111111';
-                          const fillColor = '#0f9d58';
+                          const fillColor = n ? '#dc2626' : '#b91c1c';
                           const baseWeight = geometryType === 'LineString' ? 3 : 2;
 
                           e.target.setStyle({
                             fillColor,
-                            fillOpacity: n ? 0.42 : 0.34,
+                            fillOpacity: n ? 0.36 : 0.44,
                             color: strokeColor,
                             opacity: 0.95,
                             weight: baseWeight,
@@ -1344,7 +1504,7 @@ export function LandingPage() {
                         <article
                           key={author}
                           className={cx(
-                            'glass-card reveal p-5 sm:p-6',
+                            'glass-card reveal p-5 sm:p-6 testimonial-card',
                             n ? 'glass-card-night' : 'glass-card-day',
                             i > 0 && `reveal-delay-${i}`,
                           )}
@@ -1365,9 +1525,9 @@ export function LandingPage() {
                               </div>
                             </div>
 
-                            <div className="mb-4 flex justify-center gap-1">
+                            <div className="mb-4 flex justify-center gap-1 testimonial-stars">
                               {Array.from({ length: 5 }).map((_, idx) => (
-                                <Star key={idx} size={14} className="text-red-500 fill-red-500" />
+                                <Star key={idx} size={14} className="text-red-600 fill-red-600 testimonial-star" />
                               ))}
                             </div>
 
@@ -1463,8 +1623,22 @@ export function LandingPage() {
                   </span>
                   <div>
                     <p className={cx('text-[10px] uppercase tracking-[0.22em] mb-1', muted)}>Sedes</p>
-                    <p className={cx('text-sm leading-6', n ? 'text-white/75' : 'text-gray-700')}>Av. Arica 1702, Cercado de Lima</p>
-                    <p className={cx('text-sm leading-6', n ? 'text-white/75' : 'text-gray-700')}>Jr. Antonio Bazo 1220, La Victoria</p>
+                    <a
+                      href="https://maps.app.goo.gl/Mr7DaeVF86bHRpmG9"
+                      target="_blank"
+                      rel="noreferrer"
+                      className={cx('contact-link-subtle text-sm leading-6', n ? 'text-white/75' : 'text-gray-700')}
+                    >
+                      Av. Arica 1702, Cercado de Lima
+                    </a>
+                    <a
+                      href="https://maps.app.goo.gl/aWTZmqvXQPGcjs4bA"
+                      target="_blank"
+                      rel="noreferrer"
+                      className={cx('contact-link-subtle text-sm leading-6', n ? 'text-white/75' : 'text-gray-700')}
+                    >
+                      Jr. Antonio Bazo 1220, La Victoria
+                    </a>
                   </div>
                 </div>
 
@@ -1474,8 +1648,18 @@ export function LandingPage() {
                   </span>
                   <div>
                     <p className={cx('text-[10px] uppercase tracking-[0.22em] mb-1', muted)}>Teléfonos</p>
-                    <p className={cx('text-sm leading-6', n ? 'text-white/75' : 'text-gray-700')}>+51 922 509 459</p>
-                    <p className={cx('text-sm leading-6', n ? 'text-white/75' : 'text-gray-700')}>+51 992 565 076</p>
+                    <a
+                      href="tel:+51922509459"
+                      className={cx('contact-link-subtle text-sm leading-6', n ? 'text-white/75' : 'text-gray-700')}
+                    >
+                      +51 922 509 459
+                    </a>
+                    <a
+                      href="tel:+51992565076"
+                      className={cx('contact-link-subtle text-sm leading-6', n ? 'text-white/75' : 'text-gray-700')}
+                    >
+                      +51 992 565 076
+                    </a>
                   </div>
                 </div>
 
@@ -1485,7 +1669,12 @@ export function LandingPage() {
                   </span>
                   <div>
                     <p className={cx('text-[10px] uppercase tracking-[0.22em] mb-1', muted)}>Email</p>
-                    <p className={cx('text-sm leading-6', n ? 'text-white/75' : 'text-gray-700')}>contacto@dinsidescourier.com</p>
+                    <a
+                      href="mailto:contacto@dinsidescourier.com"
+                      className={cx('contact-link-subtle text-sm leading-6', n ? 'text-white/75' : 'text-gray-700')}
+                    >
+                      contacto@dinsidescourier.com
+                    </a>
                   </div>
                 </div>
               </div>

@@ -1,7 +1,7 @@
 import { JWT } from 'google-auth-library';
 import { GoogleSpreadsheet } from 'google-spreadsheet';
 import { randomUUID } from 'node:crypto';
-import { getSupabaseAdminClient } from '../../kommo/_shared.js';
+import { getSupabaseAdminClient } from '../kommo/shared.js';
 
 export type ExportResource = 'ENVIOS' | 'LEADS GANADOS' | 'RECOJOS';
 
