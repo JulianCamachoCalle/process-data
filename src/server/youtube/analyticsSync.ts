@@ -8,6 +8,7 @@ import {
 
 const OAUTH_TOKEN_ENDPOINT = 'https://oauth2.googleapis.com/token';
 const YOUTUBE_ANALYTICS_REPORTS_ENDPOINT = 'https://youtubeanalytics.googleapis.com/v2/reports';
+const YOUTUBE_DATA_CHANNELS_ENDPOINT = 'https://www.googleapis.com/youtube/v3/channels';
 
 const SYNC_SECRET_HEADER = 'x-youtube-sync-secret';
 const SYNC_SECRET_ENV = 'YOUTUBE_SYNC_SECRET';
@@ -81,6 +82,11 @@ type SectionSummary = {
   upserted: number;
 };
 
+type SkippedSection = {
+  section: 'baseline_daily_channel_stats' | 'demographics' | 'audience_breakdowns' | 'video_daily_stats';
+  reason: string;
+};
+
 function parseBodyObject(req: VercelRequest): JsonRecord {
   if (!req.body) return {};
 
@@ -120,6 +126,14 @@ function parsePositiveInt(raw: string | undefined, fallback: number, min = 1, ma
   const value = Number.parseInt(raw, 10);
   if (!Number.isInteger(value)) return fallback;
   return Math.min(max, Math.max(min, value));
+}
+
+function parseBoolean(raw: string | undefined, fallback: boolean) {
+  if (!raw) return fallback;
+  const value = raw.trim().toLowerCase();
+  if (['1', 'true', 'yes', 'y', 'si', 'sí'].includes(value)) return true;
+  if (['0', 'false', 'no', 'n'].includes(value)) return false;
+  return fallback;
 }
 
 function formatDateUTC(input: Date) {
@@ -231,6 +245,57 @@ async function fetchYoutubeAccessToken() {
   return accessToken;
 }
 
+async function fetchOauthChannelId(accessToken: string) {
+  const params = new URLSearchParams({
+    part: 'id',
+    mine: 'true',
+    maxResults: '1',
+  });
+
+  const response = await fetch(`${YOUTUBE_DATA_CHANNELS_ENDPOINT}?${params.toString()}`, {
+    method: 'GET',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      Accept: 'application/json',
+    },
+  });
+
+  const raw = await response.text();
+  let payload: unknown = {};
+  if (raw) {
+    try {
+      payload = JSON.parse(raw) as unknown;
+    } catch {
+      payload = { raw };
+    }
+  }
+
+  if (!response.ok) {
+    const message =
+      typeof payload === 'object' && payload && 'error' in payload
+        ? JSON.stringify((payload as JsonRecord).error)
+        : raw || 'No se pudo resolver el canal OAuth (mine=true).';
+    throw new Error(`YouTube Data API error (${response.status}): ${message}`);
+  }
+
+  const items =
+    typeof payload === 'object' && payload && 'items' in payload && Array.isArray((payload as JsonRecord).items)
+      ? ((payload as JsonRecord).items as unknown[])
+      : [];
+  const firstItem = items[0];
+
+  const channelId =
+    firstItem && typeof firstItem === 'object' && 'id' in firstItem
+      ? String((firstItem as JsonRecord).id ?? '').trim()
+      : '';
+
+  if (!channelId) {
+    throw new Error('No se encontró canal asociado al token OAuth (mine=true).');
+  }
+
+  return channelId;
+}
+
 async function fetchAnalyticsReport(
   accessToken: string,
   channelId: string,
@@ -293,7 +358,7 @@ function mapAnalyticsRow(headers: AnalyticsColumnHeader[], row: unknown[]) {
 
 async function queryAnalyticsRows(
   accessToken: string,
-  channelId: string,
+  channelTarget: string,
   startDate: string,
   endDate: string,
   dimensions: string,
@@ -313,7 +378,7 @@ async function queryAnalyticsRows(
 
     const report = await fetchAnalyticsReport(
       accessToken,
-      channelId,
+      channelTarget,
       startDate,
       endDate,
       dimensions,
@@ -384,15 +449,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const body = parseBodyObject(req);
 
-    const channelId = (
+    const requestedChannelId = (
       getRequestParam(req, body, 'channel_id')
       ?? process.env[CHANNEL_ID_ENV]
       ?? DEFAULT_CHANNEL_ID
     ).trim();
 
-    if (!channelId) {
+    if (!requestedChannelId) {
       return res.status(400).json({ error: 'Falta channel_id.' });
     }
+
+    const useMine = parseBoolean(getRequestParam(req, body, 'use_mine'), true);
 
     const startDateInput = parseIsoDate(getRequestParam(req, body, 'start_date'));
     const endDateInput = parseIsoDate(getRequestParam(req, body, 'end_date'));
@@ -417,12 +484,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const deadlineMs = startedAt + (maxRuntimeMs - RUNTIME_BUFFER_MS);
 
     const accessToken = await fetchYoutubeAccessToken();
+    const oauthChannelId = await fetchOauthChannelId(accessToken);
+    const analyticsChannelTarget = useMine ? 'MINE' : requestedChannelId;
+
+    const channelBusinessId = useMine ? oauthChannelId : requestedChannelId;
+    const oauthChannelMismatch = !useMine && requestedChannelId !== oauthChannelId;
 
     let runtimeExceeded = false;
 
     const demographicsSummary: SectionSummary = { pulled: 0, upserted: 0 };
     const audienceSummary: SectionSummary = { pulled: 0, upserted: 0 };
     const videosSummary: SectionSummary = { pulled: 0, upserted: 0 };
+    const baselineDailyChannelStats: SectionSummary = { pulled: 0, upserted: 0 };
+    const skippedSections: SkippedSection[] = [];
 
     const audienceByDimension: Record<AudienceDimensionType, SectionSummary> = {
       country: { pulled: 0, upserted: 0 },
@@ -433,50 +507,104 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     };
 
     if (!isPastDeadline(deadlineMs)) {
-      const demographicsResult = await queryAnalyticsRows(
-        accessToken,
-        channelId,
-        computedStartDate,
-        computedEndDate,
-        'day,ageGroup,gender',
-        'views,viewerPercentage,estimatedMinutesWatched',
-        deadlineMs,
-      );
-
-      demographicsSummary.pulled = demographicsResult.pulled;
-
-      const demographicsRows: ChannelDemographicDailyRow[] = demographicsResult.rows
-        .map((rawRow) => {
-          const statDate = toText(rawRow.day);
-          const ageGroup = toText(rawRow.ageGroup);
-          const gender = toText(rawRow.gender);
-
-          if (!statDate || !ageGroup || !gender) {
-            return null;
-          }
-
-          return {
-            channel_business_id: channelId,
-            stat_date: statDate,
-            age_group: ageGroup,
-            gender,
-            views: toInteger(rawRow.views, 0),
-            viewer_percentage: toNumber(rawRow.viewerPercentage, 0),
-            estimated_minutes_watched: toNumber(rawRow.estimatedMinutesWatched, 0),
-            raw_payload: rawRow,
-          };
-        })
-        .filter((row): row is ChannelDemographicDailyRow => row !== null);
-
-      if (demographicsRows.length && !isPastDeadline(deadlineMs)) {
-        demographicsSummary.upserted = await upsertInChunks(
-          'youtube_channel_demographics_daily',
-          demographicsRows,
-          'channel_business_id,stat_date,age_group,gender',
+      try {
+        const baselineResult = await queryAnalyticsRows(
+          accessToken,
+          analyticsChannelTarget,
+          computedStartDate,
+          computedEndDate,
+          'day',
+          'views,estimatedMinutesWatched,averageViewDuration',
+          deadlineMs,
         );
-      }
 
-      runtimeExceeded = runtimeExceeded || demographicsResult.runtimeExceeded || isPastDeadline(deadlineMs);
+        baselineDailyChannelStats.pulled = baselineResult.pulled;
+
+        const baselineRows: ChannelAudienceBreakdownDailyRow[] = baselineResult.rows
+          .map((rawRow) => {
+            const statDate = toText(rawRow.day);
+            if (!statDate) {
+              return null;
+            }
+
+            return {
+              channel_business_id: channelBusinessId,
+              stat_date: statDate,
+              dimension_type: 'playbackLocationType',
+              dimension_value: '__all__',
+              views: toInteger(rawRow.views, 0),
+              estimated_minutes_watched: toNumber(rawRow.estimatedMinutesWatched, 0),
+              average_view_duration: toNumber(rawRow.averageViewDuration, 0),
+              raw_payload: rawRow,
+            };
+          })
+          .filter((row): row is ChannelAudienceBreakdownDailyRow => row !== null);
+
+        if (baselineRows.length && !isPastDeadline(deadlineMs)) {
+          baselineDailyChannelStats.upserted = await upsertInChunks(
+            'youtube_channel_audience_breakdowns_daily',
+            baselineRows,
+            'channel_business_id,stat_date,dimension_type,dimension_value',
+          );
+        }
+
+        runtimeExceeded = runtimeExceeded || baselineResult.runtimeExceeded || isPastDeadline(deadlineMs);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Error desconocido';
+        skippedSections.push({ section: 'baseline_daily_channel_stats', reason: message });
+      }
+    }
+
+    if (!isPastDeadline(deadlineMs)) {
+      try {
+        const demographicsResult = await queryAnalyticsRows(
+          accessToken,
+          analyticsChannelTarget,
+          computedStartDate,
+          computedEndDate,
+          'day,ageGroup,gender',
+          'views,viewerPercentage,estimatedMinutesWatched',
+          deadlineMs,
+        );
+
+        demographicsSummary.pulled = demographicsResult.pulled;
+
+        const demographicsRows: ChannelDemographicDailyRow[] = demographicsResult.rows
+          .map((rawRow) => {
+            const statDate = toText(rawRow.day);
+            const ageGroup = toText(rawRow.ageGroup);
+            const gender = toText(rawRow.gender);
+
+            if (!statDate || !ageGroup || !gender) {
+              return null;
+            }
+
+            return {
+              channel_business_id: channelBusinessId,
+              stat_date: statDate,
+              age_group: ageGroup,
+              gender,
+              views: toInteger(rawRow.views, 0),
+              viewer_percentage: toNumber(rawRow.viewerPercentage, 0),
+              estimated_minutes_watched: toNumber(rawRow.estimatedMinutesWatched, 0),
+              raw_payload: rawRow,
+            };
+          })
+          .filter((row): row is ChannelDemographicDailyRow => row !== null);
+
+        if (demographicsRows.length && !isPastDeadline(deadlineMs)) {
+          demographicsSummary.upserted = await upsertInChunks(
+            'youtube_channel_demographics_daily',
+            demographicsRows,
+            'channel_business_id,stat_date,age_group,gender',
+          );
+        }
+
+        runtimeExceeded = runtimeExceeded || demographicsResult.runtimeExceeded || isPastDeadline(deadlineMs);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Error desconocido';
+        skippedSections.push({ section: 'demographics', reason: message });
+      }
     } else {
       runtimeExceeded = true;
     }
@@ -486,8 +614,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       { type: 'deviceType', apiDimension: 'deviceType' },
       { type: 'subscribedStatus', apiDimension: 'subscribedStatus' },
       { type: 'trafficSourceType', apiDimension: 'insightTrafficSourceType' },
-      { type: 'playbackLocationType', apiDimension: 'playbackLocationType' },
+      { type: 'playbackLocationType', apiDimension: 'insightPlaybackLocationType' },
     ];
+
+    const skippedDimensions: Array<{ dimension: AudienceDimensionType; reason: string }> = [];
 
     for (const config of audienceDimensions) {
       if (isPastDeadline(deadlineMs)) {
@@ -495,15 +625,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         break;
       }
 
-      const result = await queryAnalyticsRows(
-        accessToken,
-        channelId,
-        computedStartDate,
-        computedEndDate,
-        `day,${config.apiDimension}`,
-        'views,estimatedMinutesWatched,averageViewDuration',
-        deadlineMs,
-      );
+      let result: AnalyticsQueryResult;
+      try {
+        result = await queryAnalyticsRows(
+          accessToken,
+          analyticsChannelTarget,
+          computedStartDate,
+          computedEndDate,
+          `day,${config.apiDimension}`,
+          'views,estimatedMinutesWatched,averageViewDuration',
+          deadlineMs,
+        );
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Error desconocido';
+        skippedDimensions.push({ dimension: config.type, reason: message });
+        continue;
+      }
 
       audienceByDimension[config.type].pulled = result.pulled;
       audienceSummary.pulled += result.pulled;
@@ -518,7 +655,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           }
 
           return {
-            channel_business_id: channelId,
+            channel_business_id: channelBusinessId,
             stat_date: statDate,
             dimension_type: config.type,
             dimension_value: dimensionValue,
@@ -547,57 +684,66 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     if (!runtimeExceeded && !isPastDeadline(deadlineMs)) {
-      const videosResult = await queryAnalyticsRows(
-        accessToken,
-        channelId,
-        computedStartDate,
-        computedEndDate,
-        'day,video',
-        'views,likes,comments,estimatedMinutesWatched,averageViewDuration',
-        deadlineMs,
-      );
-
-      videosSummary.pulled = videosResult.pulled;
-
-      const videoRows: VideoDailyStatsRow[] = videosResult.rows
-        .map((rawRow) => {
-          const statDate = toText(rawRow.day);
-          const videoBusinessId = toText(rawRow.video);
-
-          if (!statDate || !videoBusinessId) {
-            return null;
-          }
-
-          return {
-            video_business_id: videoBusinessId,
-            channel_business_id: channelId,
-            stat_date: statDate,
-            views: toInteger(rawRow.views, 0),
-            likes: toInteger(rawRow.likes, 0),
-            comments: toInteger(rawRow.comments, 0),
-            estimated_minutes_watched: toNumber(rawRow.estimatedMinutesWatched, 0),
-            average_view_duration: toNumber(rawRow.averageViewDuration, 0),
-            raw_payload: rawRow,
-          };
-        })
-        .filter((row): row is VideoDailyStatsRow => row !== null);
-
-      if (videoRows.length && !isPastDeadline(deadlineMs)) {
-        videosSummary.upserted = await upsertInChunks(
-          'youtube_video_daily_stats',
-          videoRows,
-          'video_business_id,stat_date',
+      try {
+        const videosResult = await queryAnalyticsRows(
+          accessToken,
+          analyticsChannelTarget,
+          computedStartDate,
+          computedEndDate,
+          'day,video',
+          'views,likes,comments,estimatedMinutesWatched,averageViewDuration',
+          deadlineMs,
         );
-      }
 
-      runtimeExceeded = runtimeExceeded || videosResult.runtimeExceeded || isPastDeadline(deadlineMs);
+        videosSummary.pulled = videosResult.pulled;
+
+        const videoRows: VideoDailyStatsRow[] = videosResult.rows
+          .map((rawRow) => {
+            const statDate = toText(rawRow.day);
+            const videoBusinessId = toText(rawRow.video);
+
+            if (!statDate || !videoBusinessId) {
+              return null;
+            }
+
+            return {
+              video_business_id: videoBusinessId,
+              channel_business_id: channelBusinessId,
+              stat_date: statDate,
+              views: toInteger(rawRow.views, 0),
+              likes: toInteger(rawRow.likes, 0),
+              comments: toInteger(rawRow.comments, 0),
+              estimated_minutes_watched: toNumber(rawRow.estimatedMinutesWatched, 0),
+              average_view_duration: toNumber(rawRow.averageViewDuration, 0),
+              raw_payload: rawRow,
+            };
+          })
+          .filter((row): row is VideoDailyStatsRow => row !== null);
+
+        if (videoRows.length && !isPastDeadline(deadlineMs)) {
+          videosSummary.upserted = await upsertInChunks(
+            'youtube_video_daily_stats',
+            videoRows,
+            'video_business_id,stat_date',
+          );
+        }
+
+        runtimeExceeded = runtimeExceeded || videosResult.runtimeExceeded || isPastDeadline(deadlineMs);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Error desconocido';
+        skippedSections.push({ section: 'video_daily_stats', reason: message });
+      }
     } else if (isPastDeadline(deadlineMs)) {
       runtimeExceeded = true;
     }
 
     return res.status(200).json({
       success: true,
-      channel_id: channelId,
+      channel_id: channelBusinessId,
+      requested_channel_id: requestedChannelId,
+      oauth_channel_id: oauthChannelId,
+      oauth_channel_mismatch: oauthChannelMismatch,
+      analytics_channel_target: analyticsChannelTarget,
       start_date: computedStartDate,
       end_date: computedEndDate,
       max_runtime_ms: maxRuntimeMs,
@@ -605,12 +751,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       has_more: runtimeExceeded,
       runtime_exceeded: runtimeExceeded,
       sections: {
+        baseline_daily_channel_stats: baselineDailyChannelStats,
         demographics: demographicsSummary,
         audience_breakdowns: {
           ...audienceSummary,
           by_dimension: audienceByDimension,
+          skipped: skippedDimensions,
         },
         video_daily_stats: videosSummary,
+        skipped_sections: skippedSections,
       },
     });
   } catch (error) {
