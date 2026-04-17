@@ -2012,7 +2012,7 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
           }
 
           const pagoMoto = Number((tarifa.pagoMoto ?? 0).toFixed(2));
-          const cobroEntrega = Number((tarifa.cobroEntrega ?? 0).toFixed(2));
+          const cobroEntrega = Number(((tarifa.cobroEntrega ?? 0) / 1.18).toFixed(2));
           const fechaEnvio = parseDateOnlyFromUnknown(row.fecha_entrega) ?? parseDateOnlyFromUnknown(row.fecha_pedido);
           if (!fechaEnvio) {
             skippedInvalidDate += 1;
@@ -2397,7 +2397,7 @@ export default async function kommoSyncHandler(req: VercelRequest, res: VercelRe
           }
 
           const pagoMoto = Number((tarifa.pagoMoto ?? 0).toFixed(2));
-          const cobroEntrega = Number((tarifa.cobroEntrega ?? 0).toFixed(2));
+          const cobroEntrega = Number(((tarifa.cobroEntrega ?? 0) / 1.18).toFixed(2));
           const fechaEnvio = parseDateOnlyFromUnknown(row.fecha_entrega) ?? parseDateOnlyFromUnknown(row.fecha_pedido);
           if (!fechaEnvio) {
             skippedInvalidDate += 1;
