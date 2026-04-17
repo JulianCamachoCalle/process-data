@@ -61,7 +61,24 @@ const USER_ALLOWED_PATHS = new Set([
 ]);
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
+  const location = useLocation();
   const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
+
+  const isKnownAppPath = (
+    location.pathname.startsWith('/dashboard')
+    || location.pathname.startsWith('/tabla')
+    || location.pathname.startsWith('/sheet')
+    || location.pathname.startsWith('/kommo')
+    || location.pathname.startsWith('/meta')
+    || location.pathname.startsWith('/youtube')
+    || location.pathname.startsWith('/exports')
+    || location.pathname.startsWith('/admin')
+    || location.pathname.startsWith('/operativas')
+  );
+
+  if (!isKnownAppPath) {
+    return <NotFoundPage />;
+  }
 
   useEffect(() => {
     let isMounted = true;
